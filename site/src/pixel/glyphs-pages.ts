@@ -44,6 +44,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:oasf-coverage': ['..#####..', '.##...##.', '##.....##', '#..###..#', '#..###..#', '#..###..#', '##.....##', '.##...##.', '..#####..'],
   // Two overlapping squares: where two standards meet.
   'page:standard-agents': ['######...', '#....#...', '#....#...', '#..######', '#..#.#..#', '######..#', '...#....#', '...#....#', '...######'],
+  // A parcel: a box with its lid and a label, for a package to install.
+  'page:typescript-package': ['#########', '#...#...#', '#...#...#', '#########', '#.......#', '#..###..#', '#.......#', '#.......#', '#########'],
   // The electrical ground symbol: a lead into three shortening bars, for a grounded agent.
   'page:standard-agents-example': ['....#....', '....#....', '....#....', '....#....', '#########', '.........', '.#######.', '.........', '...###...'],
   // A fish hook: eye, shank and barbed bend.
@@ -178,6 +180,7 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/guides/hooks/': 'page:hooks',
   '/guides/examples/': 'page:examples',
   '/guides/examples/standard-agents/': 'page:standard-agents-example',
+  '/guides/typescript-package/': 'page:typescript-package',
   '/guides/skills/': 'skill:composed',
   '/guides/skills/capability-gap-analysis/': 'page:capability-gap-analysis',
   '/guides/skills/debug-workflow/': 'page:debug-workflow',

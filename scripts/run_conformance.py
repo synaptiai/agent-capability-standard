@@ -15,6 +15,7 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 VAL = ROOT / "tools" / "validate_workflows.py"
@@ -23,9 +24,22 @@ FIX = ROOT / "tests" / "fixtures"
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 
 
-def run_fixture(name: str, path: Path, suggestions: Path) -> dict:
+def run_fixture(
+    name: str, path: Path, suggestions: Path, meta: dict | None = None
+) -> dict:
     """Validate one fixture, writing its suggestions JSON to ``suggestions``
-    (one file per run, so concurrent runs and stale output cannot mix)."""
+    (one file per run, so concurrent runs and stale output cannot mix). The
+    expectation's ``profiles`` are repository-relative domain profiles to
+    validate it with (STANDARD v1.2 §5.21); its ``catalogs`` (further
+    catalogs of the catalog set) and ``agents`` (agent manifests) are paths
+    relative to ``tests/fixtures/`` (STANDARD v1.2 §10.3)."""
+    extra: list[str] = []
+    for p in (meta or {}).get("profiles", []):
+        extra += ["--profile", str(ROOT / p)]
+    for c in (meta or {}).get("catalogs", []):
+        extra += ["--with-catalog", str(FIX / c)]
+    for a in (meta or {}).get("agents", []):
+        extra += ["--agents", str(FIX / a)]
     proc = subprocess.run(
         [
             sys.executable,
@@ -34,6 +48,7 @@ def run_fixture(name: str, path: Path, suggestions: Path) -> dict:
             str(path),
             "--suggestions-out",
             str(suggestions),
+            *extra,
         ],
         cwd=str(ROOT),
         capture_output=True,
@@ -54,9 +69,37 @@ def _read_emitted_codes(suggestions: Path, key: str) -> set[str]:
     Empty if the file is missing or unreadable."""
     try:
         data = json.loads(suggestions.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return set()
     return {d["code"] for d in data.get(key, []) if d.get("code")}
+
+
+def _read_locations(suggestions: Path) -> list[tuple[str, dict[str, Any]]]:
+    """The ``(code, location)`` of every diagnostic of a run (STANDARD v1.2
+    §9.8)."""
+    try:
+        data = json.loads(suggestions.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return []
+    found = []
+    for key in ("structured_errors", "structured_warnings"):
+        for d in data.get(key, []):
+            if d.get("code"):
+                found.append((d["code"], d.get("location", {})))
+    return found
+
+
+def _located(
+    expected: dict[str, Any], located: list[tuple[str, dict[str, Any]]]
+) -> bool:
+    """Whether a diagnostic has the expected ``code`` and every other member
+    the expectation gives (its ``path``, or for a finding with no ``path``
+    its ``catalog``, ``workflow`` and ``field``) in its location."""
+    members = {k: v for k, v in expected.items() if k != "code"}
+    return any(
+        code == expected["code"] and all(loc.get(k) == v for k, v in members.items())
+        for code, loc in located
+    )
 
 
 def main() -> None:
@@ -83,7 +126,7 @@ def main() -> None:
                 failed += 1
                 continue
             suggestions = tmp_path / f"{name}.suggestions.json"
-            res = run_fixture(name, path, suggestions)
+            res = run_fixture(name, path, suggestions, meta)
             should_pass = meta.get("should_pass", False)
             if not suggestions.is_file():
                 # No report means the validator did not run to the end.
@@ -116,6 +159,11 @@ def main() -> None:
                             f"expected {kind} codes {sorted(expected)}, "
                             f"emitted {sorted(emitted)}"
                         )
+                # Each expected location must be among the diagnostics.
+                located = _read_locations(suggestions)
+                for loc in meta.get("expected_locations", []):
+                    if not _located(loc, located):
+                        missing_msgs.append(f"expected {loc!r}, located {located}")
                 if missing_msgs:
                     failed += 1
                     print(f"FAIL: {name} " + "; ".join(missing_msgs))

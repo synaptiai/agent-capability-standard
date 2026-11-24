@@ -454,7 +454,7 @@ Typed bindings shift debugging from runtime (production) to validation (developm
 
 ### 4.1 Parallel Execution
 
-Some steps can run concurrently:
+Steps in one `parallel_group` are not ordered relative to each other, so an executor may run them in any order or at the same time (the reference executor runs them one after another, in list order):
 
 ```yaml
 steps:
@@ -489,7 +489,7 @@ steps:
 title: The parallel group in the example
 ---
 flowchart LR
-  accDescr: The log search and the code search run together in the gather_context group, which joins when both are complete, and integrate combines the two results.
+  accDescr: The log search and the code search form the gather_context group, in no fixed order; the group joins when both are complete, and integrate combines the two results.
   subgraph gather_context [parallel_group gather_context]
     logs["search: logs"]
     code["search: src"]
@@ -653,8 +653,8 @@ Every step should have:
 | Understand all 36 capabilities | [Capability Ontology](../schemas/capability_ontology.yaml) |
 | See production workflows | [Workflow Catalog](../schemas/workflow_catalog.yaml) |
 | Work with images, audio, and video | [Modality Handling Guide](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
-| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.1.0.md#9-diagnostic-model) |
+| Read the full spec | [STANDARD-v1.2.0.md](../spec/STANDARD-v1.2.0.md) |
+| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.2.0.md#9-diagnostic-model) |
 
 ---
 
@@ -664,7 +664,7 @@ Every step should have:
 Modify `analyze_file` to include a failure mode that requests more context if no anomalies are found.
 
 ### Exercise 2: Add Parallel Steps
-Create a workflow that searches three different sources in parallel, then integrates the results.
+Create a workflow that searches three different sources in one parallel group, then integrates the results.
 
 ### Exercise 3: Create a Safe Update Workflow
 Build a workflow that:

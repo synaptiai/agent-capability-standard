@@ -180,6 +180,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "rag_pipeline",
   "inputs": {
     "user_query": "q"

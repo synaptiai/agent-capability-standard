@@ -1,9 +1,9 @@
 """
 Capability-Aware MCP Server Factory
 
-Creates MCP servers where tools are automatically mapped to Grounded
-Agency capabilities, enabling safety enforcement (checkpoint requirements,
-approval, risk levels, rate limits) for MCP-provided tools.
+Creates MCP servers where tools are bound to Grounded Agency capabilities,
+enabling safety enforcement (checkpoint requirements, approval, risk levels,
+rate limits) for MCP-provided tools (STANDARD 1.2.0 section 5.18).
 
 Example::
 
@@ -25,8 +25,83 @@ import logging
 from typing import Any
 
 from .adapter import GroundedAgentAdapter
+from .capabilities.bindings import _MEMBERS
+from .errors import Severity, text_form
 
 logger = logging.getLogger("grounded_agency.mcp")
+
+# The legacy flat keys, still accepted.
+_LEGACY_FLAGS: tuple[str, ...] = (
+    "risk",
+    "mutation",
+    "requires_checkpoint",
+    "requires_approval",
+)
+
+
+def _record(
+    full_name: str, server: str, ontology: str, metadata: dict[str, Any]
+) -> dict[str, Any] | None:
+    """The tool binding record a tool's metadata carries, or None for
+    metadata that carries no record (unbound).
+
+    The metadata is a carrier read as the record (STANDARD 1.2.0 section
+    5.18.1): every member is the record's but ``tool`` (the factory names
+    the tool), the legacy ``capability_id`` and flat flags (read into
+    ``capability`` and ``flags``), and ``ontology`` defaults to the
+    adapter's. An unknown member reaches the record, so the loader reports
+    it (S303) and the record is not loaded: a record a layer cannot read in
+    full is not read in part.
+
+    Raises:
+        ValueError: S303 when ``capability`` and ``capability_id`` disagree,
+            or a flag is given both flat and in ``flags`` with different
+            values.
+    """
+    record: dict[str, Any] = {"tool": full_name, "ontology": ontology}
+    for key, value in metadata.items():
+        if key == "tool" or key == "capability_id" or key in _LEGACY_FLAGS:
+            continue
+        record[key] = value
+    if "capability_id" in metadata:
+        legacy = metadata["capability_id"]
+        if "capability" in record and record["capability"] != legacy:
+            raise ValueError(
+                f"S303 SCHEMA_VALIDATION_FAILED: tool '{full_name}' of server "
+                f"'{server}' gives capability {record['capability']!r} and "
+                f"capability_id {legacy!r}; give one"
+            )
+        record["capability"] = legacy
+    flat = {k: metadata[k] for k in _LEGACY_FLAGS if k in metadata}
+    if flat:
+        flags = dict(record.get("flags") or {})
+        if not isinstance(record.get("flags", {}), dict):
+            return record  # the loader reports the malformed member
+        for key, value in flat.items():
+            if key in flags and flags[key] != value:
+                raise ValueError(
+                    f"S303 SCHEMA_VALIDATION_FAILED: tool '{full_name}' of "
+                    f"server '{server}' declares {key} both as {value!r} and in "
+                    f"flags as {flags[key]!r}"
+                )
+            flags[key] = value
+        # A declared high risk implies a mutation that needs a checkpoint,
+        # unless the metadata says otherwise (the earlier factory's rule).
+        if flags.get("risk") == "high":
+            flags.setdefault("mutation", True)
+            flags.setdefault("requires_checkpoint", True)
+        record["flags"] = flags
+    # A tool with no capability that is not control-only is unbound, as
+    # before, unless its metadata holds a member no record has (a misspelt
+    # ``capabilty``): that record goes to the loader, which reports it (S303)
+    # and stops the server rather than leave the tool unbound unnoticed.
+    if "capability" not in record and record.get("control") is not True:
+        if all(
+            key in _MEMBERS or (isinstance(key, str) and key.startswith("x-"))
+            for key in record
+        ):
+            return None
+    return record
 
 
 def create_grounded_mcp_server(
@@ -35,61 +110,101 @@ def create_grounded_mcp_server(
     version: str,
     tools: list[Any],
     adapter: GroundedAgentAdapter,
+    require_layer: bool = True,
 ) -> Any:
     """Create an MCP server with capability-aware tool mappings.
 
-    Wraps ``claude_agent_sdk.create_sdk_mcp_server()`` and auto-registers
-    each tool in the adapter's :class:`ToolCapabilityMapper` so that
-    safety enforcement (checkpoints, approval, rate limits) applies to MCP
-    tools.
+    Wraps ``claude_agent_sdk.create_sdk_mcp_server()`` and loads each tool's
+    binding into the adapter's :class:`ToolCapabilityMapper`, as one set, so
+    that safety enforcement (checkpoints, approval, rate limits) applies to
+    MCP tools and ``invokes`` among them resolve.
 
-    Each tool may optionally carry ``metadata`` with:
+    A tool's ``metadata`` is a carrier of the tool binding record (STANDARD
+    1.2.0 section 5.18.1, ``schemas/interop/tool_binding.schema.json``): it
+    holds the record's members except ``tool`` and ``ontology``, which the
+    factory supplies (``mcp__<server>__<tool>`` and the adapter's ontology
+    version):
 
-    - ``capability_id`` (str): The ontology capability this tool exercises
-      (defaults to ``"execute"``).
-    - ``risk`` (str): Risk level — ``"low"``, ``"medium"``, or ``"high"``
-      (defaults to the capability's).
-    - ``mutation`` (bool): Whether the tool mutates state
-      (defaults to the capability's, or ``True`` for a declared high risk).
-    - ``requires_checkpoint`` (bool): Whether a checkpoint is needed
-      (defaults to the capability's, or ``True`` for a declared high risk).
-    - ``requires_approval`` (bool): Whether a call needs approval
-      (defaults to the capability's).
-    - ``domain`` (str): The capability's domain parameter.
+    - ``capability`` (or the legacy ``capability_id``): the capability the
+      tool performs;
+    - ``domain``, ``flags`` (``risk``, ``mutation``, ``requires_checkpoint``,
+      ``requires_approval``; the legacy flat keys are still accepted),
+      ``additional_capabilities``, ``classifier``, ``invokes``,
+      ``approval`` (``min_approvers``, ``role``, ``expires``), ``control``,
+      ``destination``, ``standard``, and vendor data (``x-...``).
+
+    Any other member, a misspelt one included, is the record's as well, so
+    the record does not load (S303) and no server is created: a record read
+    in part could drop something stricter that it declares.
 
     The registered flags are the stricter of the metadata's and the
-    ontology's (STANDARD v1.1 section 5.2.1); a weaker one has no effect
-    and is reported as W602 in ``adapter.mapper.warnings``. A tool with no
-    metadata is an ``execute`` tool, which requires approval.
+    ontology's (section 5.2.1); a weaker one has no effect and is reported
+    as W602 in ``adapter.mapper.warnings``. A tool with no capability and
+    not ``control: true`` is unbound (section 5.18.2): the strictest case,
+    reported as W617 in ``adapter.mapper.warnings``.
+
+    With ``require_layer`` (the default) each tool refuses to run, with
+    ``R407 SAFETY_CHECK_FAILED``, unless the adapter's safety layer allowed
+    this exact call (tool name and arguments), so a session whose options
+    were not wrapped with :meth:`GroundedAgentAdapter.wrap_options` cannot
+    run it (section 5.18.8). The decision is granted when the call is
+    allowed (the PreToolUse hook's pass, or the permission callback's allow
+    of a call the hook asked about), never at the ask, and any refusal the
+    adapter makes withdraws it; the SDK passes the handler no call id, so
+    it is matched by tool name and arguments. With a permission prompt
+    tool, whose allow the adapter never sees, a call of such a tool that
+    requires approval is refused with R407. A control-only tool
+    (``control: true``) is served as it is: it is never refused (section
+    5.18.3).
+    ``require_layer=False`` restores the earlier behaviour and is outside
+    class SL.
+
+    A tool with a capability returns that capability's output (sections
+    5.18.9, 5.18.10) as the I-JSON text of the output object, its one text
+    content item: the SDK's server delivers a result's ``content`` and
+    ``is_error`` to the session, not its ``structuredContent``, so the text
+    is what the session reads and what is checked. A result that carries
+    none, or one that lacks a field the capability's output contract
+    requires, fails the call that ran with ``R402 EXECUTION_FAILED``
+    (unless the adapter's ``check_outputs`` is off, outside class SL); then
+    the adapter's grounding policies (F505) and the profiles' minimum
+    confidence (F504) apply to the output. With ``require_layer`` the tool
+    checks its own result; without it, the PostToolUse hook of options
+    wrapped by :meth:`GroundedAgentAdapter.wrap_options` checks it, as it
+    checks the result of a bound tool of any other MCP server. A result
+    whose ``is_error`` is ``True`` is an error and is passed on; any other
+    value is checked.
 
     Args:
         name: MCP server name.
         version: MCP server version string.
         tools: List of MCP tool objects (decorated with ``@tool``).
         adapter: The :class:`GroundedAgentAdapter` to register mappings in.
+        require_layer: Refuse a call the adapter's layer did not allow.
 
     Returns:
         The MCP server instance from the SDK.
 
     Raises:
         ImportError: If ``claude_agent_sdk`` is not installed.
-        ValueError: If a tool's metadata names a capability the ontology
-            does not define (V101 UNKNOWN_CAPABILITY), or holds a risk or
-            flag of the wrong type. No server is created.
+        ValueError: If a binding does not load: a capability the ontology
+            does not define (V101 UNKNOWN_CAPABILITY), a member of the wrong
+            type (S303), an ``invokes`` name that does not resolve (V107) or
+            forms a cycle (V105). The message lists every error; no server is
+            created. Also, with ``require_layer``, R407 for a tool that is
+            not control-only and has no callable ``handler``, which cannot be
+            guarded; nothing is registered.
 
     Example::
 
         from claude_agent_sdk import tool
 
-        @tool
-        def search_docs(query: str) -> str:
-            '''Search documentation.'''
-            return "results..."
+        @tool("search_docs", "Search documentation.", {"query": str})
+        async def search_docs(args):
+            output = {"results": [...], "evidence_anchors": [...], "confidence": 0.9}
+            return {"content": [{"type": "text", "text": json.dumps(output)}]}
 
-        search_docs.metadata = {
-            "capability_id": "search",
-            "risk": "low",
-        }
+        search_docs.metadata = {"capability": "search"}
 
         server = create_grounded_mcp_server(
             name="doc-tools",
@@ -99,32 +214,129 @@ def create_grounded_mcp_server(
         )
     """
     try:
-        from claude_agent_sdk import create_sdk_mcp_server
+        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
     except ImportError as exc:
         raise ImportError(
             "claude_agent_sdk is required for create_grounded_mcp_server(). "
             "Install with: pip install claude-agent-sdk"
         ) from exc
 
-    # Register each tool's capability mapping in the adapter, before the
-    # server exists: a declaration the mapper refuses raises here.
+    # Read every tool's binding before the server exists: a binding that
+    # does not load raises here and nothing is registered.
+    ontology = adapter.mapper.ontology_version
+    records: list[dict[str, Any]] = []
+    unbound: list[str] = []
     for t in tools:
-        tool_name_for_mapping = f"mcp__{name}__{_get_tool_name(t)}"
+        full_name = f"mcp__{name}__{_get_tool_name(t)}"
         metadata = getattr(t, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                f"S303 SCHEMA_VALIDATION_FAILED: tool '{full_name}' has metadata "
+                f"that is not a dict"
+            )
+        record = _record(full_name, name, ontology, metadata)
+        if record is None:
+            unbound.append(full_name)
+        else:
+            records.append(record)
+        control = record is not None and record.get("control") is True
+        if require_layer and not control and not callable(getattr(t, "handler", None)):
+            raise ValueError(
+                f"R407 SAFETY_CHECK_FAILED: MCP tool '{full_name}' has no "
+                f"callable handler, so it cannot be guarded: a call that "
+                f"reached it would run without the safety layer's decision "
+                f"and its output unchecked (STANDARD 1.2.0 sections 5.18.8, "
+                f"5.18.10); pass tools made with @tool"
+            )
 
-        mapping = adapter.mapper.register_mcp_tool(
-            tool_name=tool_name_for_mapping,
-            capability_id=metadata.get("capability_id", "execute"),
-            risk=metadata.get("risk"),
-            mutation=metadata.get("mutation"),
-            requires_checkpoint=metadata.get("requires_checkpoint"),
-            requires_approval=metadata.get("requires_approval"),
-            domain=metadata.get("domain"),
+    from .capabilities.bindings import load_bindings
+
+    _, diagnostics = load_bindings(
+        records,
+        {node.id: node for node in adapter.registry.all_capabilities()},
+        [
+            (e.from_cap, e.to_cap)
+            for e in adapter.registry.all_edges()
+            if e.edge_type == "requires"
+        ],
+        ontology,
+        known=adapter.mapper._dynamic_mappings,
+    )
+    errors = [d for d in diagnostics if d.severity is Severity.ERROR]
+    if errors:
+        raise ValueError("; ".join(text_form(e) for e in errors))
+
+    adapter.mapper.load_bindings(records)
+    for full_name in unbound:
+        adapter.mapper.register_mcp_tool(full_name)
+    for record in records:
+        logger.info(
+            "Registered MCP tool %s → %s",
+            record["tool"],
+            adapter.mapper.map_tool(record["tool"], {}),
         )
 
-        logger.info("Registered MCP tool %s → %s", tool_name_for_mapping, mapping)
+    served = tools
+    if require_layer:
+        served = []
+        for t in tools:
+            full_name = f"mcp__{name}__{_get_tool_name(t)}"
+            if adapter.mapper.map_tool(full_name, {}).control:
+                # A control-only tool is never refused (section 5.18.3): no
+                # check applies, so there is no decision to wait for.
+                served.append(t)
+            else:
+                # Any tool the SDK's server can run (an SdkMcpTool, or an
+                # object with its members) is served guarded.
+                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
+    return create_sdk_mcp_server(name=name, version=version, tools=served)
 
-    return create_sdk_mcp_server(name=name, version=version, tools=tools)
+
+def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any) -> Any:
+    """``tool`` with a handler that refuses (R407) a call the adapter's
+    layer did not allow, and checks the result of a call that ran
+    (:meth:`GroundedAgentAdapter.check_call_result`: the output contract,
+    R402; grounding, F505; a minimum confidence, F504)."""
+    handler = tool.handler
+    adapter._register_grounded_tool(full_name)
+
+    async def guarded(args: Any) -> dict[str, Any]:
+        allowed, call = adapter._take_allowed(full_name, args)
+        if not allowed:
+            logger.warning("%s ran without a safety layer decision; refused", full_name)
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"R407 SAFETY_CHECK_FAILED: {full_name} ran without "
+                            f"a safety layer decision; wrap the session's "
+                            f"options with GroundedAgentAdapter.wrap_options()"
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+        result: dict[str, Any] = await handler(args)
+        refusal = adapter.check_call_result(full_name, args, result, call)
+        if refusal is not None:
+            return {"content": [{"type": "text", "text": refusal}], "is_error": True}
+        return result
+
+    wrapped = cls(
+        name=tool.name,
+        description=tool.description,
+        input_schema=tool.input_schema,
+        handler=guarded,
+        annotations=getattr(tool, "annotations", None),
+    )
+    metadata = getattr(tool, "metadata", None)
+    if metadata is not None:
+        try:
+            wrapped.metadata = metadata
+        except AttributeError:
+            pass
+    return wrapped
 
 
 def _get_tool_name(tool: Any) -> str:

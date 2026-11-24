@@ -1,0 +1,79 @@
+{
+  "description": "The attendance of a run a trigger starts (STANDARD 1.2.0 sections 5.10 and 5.10.2), normative under section 10.3: the trigger's declared attendance, else the default of its kind; an invoke trigger's run has its invoker's ('invoker'), whatever the trigger declares.",
+  "standard": "1.2.0",
+  "status": "normative",
+  "cases": {
+    "manual_default": {
+      "trigger": {
+        "kind": "manual"
+      },
+      "expect": "attended"
+    },
+    "schedule_default": {
+      "trigger": {
+        "kind": "schedule",
+        "schedule": {
+          "every": "1h"
+        }
+      },
+      "expect": "unattended"
+    },
+    "event_default": {
+      "trigger": {
+        "kind": "event",
+        "event": {
+          "event_type": "e",
+          "delivers_to": "ev"
+        }
+      },
+      "expect": "unattended"
+    },
+    "invoke_follows_invoker_attended": {
+      "trigger": {
+        "kind": "invoke"
+      },
+      "invoker": "attended",
+      "expect": "attended"
+    },
+    "invoke_follows_invoker_unattended": {
+      "trigger": {
+        "kind": "invoke"
+      },
+      "invoker": "unattended",
+      "expect": "unattended"
+    },
+    "declared_overrides": {
+      "trigger": {
+        "kind": "schedule",
+        "schedule": {
+          "every": "1h"
+        },
+        "attendance": "attended"
+      },
+      "expect": "attended"
+    },
+    "declared_overrides_manual": {
+      "trigger": {
+        "kind": "manual",
+        "attendance": "unattended"
+      },
+      "expect": "unattended"
+    },
+    "invoke_declared_ignored": {
+      "trigger": {
+        "kind": "invoke",
+        "attendance": "unattended"
+      },
+      "invoker": "attended",
+      "expect": "attended"
+    },
+    "invoke_declared_ignored_unattended": {
+      "trigger": {
+        "kind": "invoke",
+        "attendance": "attended"
+      },
+      "invoker": "unattended",
+      "expect": "unattended"
+    }
+  }
+}

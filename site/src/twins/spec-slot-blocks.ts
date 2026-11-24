@@ -10,20 +10,21 @@ import { annotationCaption, annotationGrammar, annotationGroups, bindingExamples
 import type { SpecSlot } from '../lib/spec-slots';
 import * as D from '../lib/spec-dsl-figures';
 import * as T from '../lib/spec-tail-figures';
+import * as H from '../lib/spec-host-figures';
 import { loadCatalogSchema } from '../data/catalog-schema';
 import { readRepoFile } from '../lib/repo';
 import { cell, code, figure, table } from './md';
 
 /** The figure's title as the page prints it: "{name}, from §{n}". */
 export function slotTitle(slot: SpecSlot, text: string, where: string): string {
-  const name = SLOT_NAMES[slot.key] ?? T.TABLE_FIGURES[slot.key]?.name ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
+  const name = SLOT_NAMES[slot.key] ?? T.TABLE_FIGURES[slot.key]?.name ?? T.CODE_TABLE_FIGURES[slot.key]?.name ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))];
     if (!p) throw new Error(`${where}: §12.5 has no pattern fence for ${slot.key}`);
     return `Pattern: ${p.name}, from §${slot.section.trim()}`;
   }
   if (name === null) throw new Error(`spec twin: no title for the figure slot ${slot.key}`);
-  return `${name}, from §${slot.section.trim()}`;
+  return `${name}, from §${slot.section.trim().replace(/\.$/, '')}`;
 }
 
 /** Names of the slots whose title does not come from the text (as in SpecFigure.astro). */
@@ -35,6 +36,7 @@ const SLOT_NAMES: Record<string, string> = {
   safety: 'Safety-critical capabilities',
   step: 'Step anatomy',
   'safety-defaults': 'Safety defaults by capability',
+  'group-replay': 'A group member that fails',
   reference: 'Anatomy of a reference',
   annotations: 'Annotation types',
   gates: 'Gate outcomes',
@@ -49,12 +51,44 @@ const SLOT_NAMES: Record<string, string> = {
   'silent-source': 'Recovering a silent source',
   'wait-replay': 'A wait that loses its source',
   approval: 'Who decides, and what then',
+  'approval-unattended-replay': 'An approval no one is asked for',
+  'recheck-replay': 'A changed source, asked again',
   'deferral-replay': 'What a deferral reaches',
+  'resume-replay': 'What a resumption runs again',
+  'resume-skip-replay': 'A queued step that no longer runs',
   delegate: 'What a delegate binds',
   quorum: 'A quorum tally',
   'quorum-fields': 'Quorum fields and the codes they raise',
   'trust-classes': 'Trust classes',
   'sender-filter': 'The sender filter',
+  'approver-count': 'Who counts as an approver',
+  'protocol-replay': "A run's actions and the host's answers",
+  'wake-replay': "A retry's wait, ended by a tick",
+  'cancel-replay': 'A run cancelled while its mutation is pending',
+  'reason-replay': 'An error that says why, retried',
+  'host-loop': 'A run, between an executor and its host',
+  overlap: 'Overlap, fire time by fire time',
+  'protocol-actions': 'Actions, and the responses that answer them',
+  'response-replay': 'Responses with members this version does not define',
+  'run-records': 'The run record each end leaves',
+  'grounding-replay': 'An ungrounded output, sent back for evidence',
+  'citation-replay': 'A citation of a value the step does not bind',
+  'audit-replay': 'An audit step whose record was not written',
+  'secret-replay': 'A persist refused for a secret in its data',
+  'rollback-replay': 'A rollback that did not restore everything, stopped',
+  'not-covered-replay': 'A rollback after a send, the send not covered',
+  'send-key-replay': 'One approval, one key, across a retry',
+  'destination-replay': 'A send to a destination no policy allows',
+  'scope-replay': 'A memory step whose scope the host did not use',
+  'stored-replay': 'A persist that stored nothing, completed',
+  'delegate-rollback-replay': "A rollback after a delegation, the delegate's change not covered",
+  'export-replay': "A target another catalog does not export",
+  'family-replay': "Families compared exactly",
+  'manifest-replay': "A delegation whose target has no manifest",
+  'agents-replay': "A delegation that takes its target's flags",
+  'read-only-replay': "A read-only delegation its host does not attest",
+  'continue-replay': "A continuation matched by its own task_id",
+  'fixture-entries': 'Runtime fixtures by script entry',
   'schema-shelf': 'Schema shelf',
   'merge-thresholds': 'Merge thresholds',
   decay: 'Decay with a floor: reference configuration',
@@ -62,6 +96,10 @@ const SLOT_NAMES: Record<string, string> = {
   'code-heat': 'Where codes are raised',
   levels: 'What each level checks',
   suite: 'The conformance suite',
+  'digest-vectors': 'The approval digest vectors',
+  'effect-vectors': 'The destination and memory vectors',
+  'sl-fixtures': 'The safety-layer fixtures',
+  principles: 'The design principles',
   bumps: 'Which change bumps which number',
   'checkpoint-tree': 'Checkpoint decision tree',
   categories: 'Error categories',
@@ -81,7 +119,7 @@ export function slotBlock(slot: SpecSlot, source: string): string {
   const text = readRepoFile(source);
   const where = source;
   const title = slotTitle(slot, text, where);
-  const at = `§${slot.section.trim()}`;
+  const at = `§${slot.section.trim().replace(/\.$/, '')}`;
   const drawn = (what: string) => `The figure draws the ${what} of ${at} above.`;
   switch (slot.key) {
     case 'reference':
@@ -128,6 +166,36 @@ export function slotBlock(slot: SpecSlot, source: string): string {
     }
     case 'quorum-fields':
       return figure(title, D.quorumFieldsCaption(D.quorumFieldCodes(text, where)), drawn('table'));
+    case 'host-loop': {
+      const l = H.hostLoop(text, where);
+      return figure(
+        title,
+        H.hostLoopCaption(l),
+        table(['Part of a run', 'Kinds'], [['An action that asks the host', l.requests.map(code).join(', ')], ['An action that lets time pass', l.waits.map(code).join(', ')], ['A response', l.responses.map(code).join(', ')], ['A terminal action', l.terminal.map(code).join(', ')]]),
+      );
+    }
+    case 'overlap': {
+      const rows = H.overlapRows(text, where);
+      return figure(
+        title,
+        H.overlapCaption(rows),
+        table(['Overlap', 'Vector', 'Events, each with its decision'], rows.map((r) => [`${code(r.policy)}${r.isDefault ? ' (default)' : ''}`, code(r.name), r.events.map((e) => `${e.event === 'fire' ? 'fire time' : 'a run ends'}: ${H.overlapWords(e)}`).join('; ')])),
+      );
+    }
+    case 'protocol-actions':
+      return figure(title, H.protocolActionsCaption(H.hostLoop(text, where)), drawn('table'));
+    case 'run-records': {
+      const rows = H.runRecordRows(text, where);
+      return figure(
+        title,
+        H.runRecordCaption(rows),
+        table(['Terminal action', 'Run record status', 'Records', 'Fixture'], rows.map((r) => [H.endWords(r), code(r.status), r.records === null ? '' : String(r.records), code(r.fixture)])),
+      );
+    }
+    case 'fixture-entries': {
+      const f = H.fixtureEntries(text, where);
+      return figure(title, H.fixtureEntriesCaption(f), table(['Entry', 'Fixtures'], f.entries.map((e) => [code(e.key), String(e.count)])));
+    }
     case 'sender-filter': {
       const rows = D.senderFilter(text, where);
       return figure(title, D.senderCaption(rows), table(['Input', 'Drops an item'], rows.map((r) => [code(r.input), r.drops ? 'Yes' : 'No'])));
@@ -146,12 +214,21 @@ export function slotBlock(slot: SpecSlot, source: string): string {
       const t = T.decisionTree(text, where);
       return figure(title, T.treeCaption(t), [`${t.text}`, '', ...treeList(t)].join('\n'));
     }
+    case 'sl-fixtures': {
+      const g = T.safetyLayerFixtures(text, where);
+      return figure(title, T.safetyLayerFixturesCaption(g), table(['Fixtures', 'Count'], g.map((x) => [x.label, String(x.count)])));
+    }
+    case 'principles': {
+      const p = D.designPrinciples(text, where);
+      return figure(title, D.principlesCaption(p), table(['Section', 'Principle'], p.map((x) => [`§${x.section}`, x.name])));
+    }
     case 'categories': {
       const c = T.categoryCounts(text, where);
       return figure(title, T.categoryCaption(c), table(['Category', 'Range', 'Codes'], c.map((x) => [x.name, code(x.range), String(x.count)])));
     }
   }
   if (slot.key.startsWith('codes-')) return figure(title, T.sectionCodesCaption(T.sectionCodes(text, slot.key.slice(6), where)), drawn('table'));
+  if (slot.key in T.CODE_TABLE_FIGURES) return figure(title, T.codeTableCaption(slot.key, text, where), drawn('table'));
   if (slot.key in T.TABLE_FIGURES) return figure(title, T.tableFigureCaption(slot.key, text, where), drawn('field table'));
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))]!;

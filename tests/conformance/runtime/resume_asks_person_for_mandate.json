@@ -1,0 +1,184 @@
+{
+  "description": "Resumed attended, a queued step whose approver is a standing mandate is asked of a person: the request's approver is human and names no mandate_ref (\u00a75.14.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "m/nightly"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "m/nightly"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d0",
+        "decision": "unavailable",
+        "approvers": [],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 2,
+            "action_id": "run-1/w/2/0"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "queued_action_id": "run-1/w/2/0",
+        "approver": {
+          "kind": "human"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "action_id": "run-1/w/2/0",
+        "status": "executed",
+        "approval": {
+          "mandate_ref": null,
+          "approvers": [
+            "alice"
+          ]
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed"
+  ]
+}

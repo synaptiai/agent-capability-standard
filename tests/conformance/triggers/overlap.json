@@ -1,0 +1,123 @@
+{
+  "description": "Overlap decisions of one schedule trigger (STANDARD 1.2.0 section 5.10.2), normative under section 10.3. 'events' is a sequence: 'fire' (a fire time), 'end' (a run this trigger started ends, including one that ends deferred), 'resume' (a run this trigger started that ended deferred is resumed, section 5.14.1, and is in progress again), 'missed' (fire times passed while the host was stopped, counted together as one). 'expect' gives, per event: for 'fire' and 'missed', 'start', 'buffered' or 'skipped'; for 'end', 'start' (a buffered run starts) or 'none'; for 'resume', 'none'. 'overlap' null is the default, skip.",
+  "standard": "1.2.0",
+  "status": "normative",
+  "cases": {
+    "skip_while_running": {
+      "overlap": "skip",
+      "events": [
+        "fire",
+        "fire",
+        "end",
+        "fire"
+      ],
+      "expect": [
+        "start",
+        "skipped",
+        "none",
+        "start"
+      ]
+    },
+    "buffer_one_holds_one": {
+      "overlap": "buffer_one",
+      "events": [
+        "fire",
+        "fire",
+        "fire",
+        "end",
+        "end"
+      ],
+      "expect": [
+        "start",
+        "buffered",
+        "skipped",
+        "start",
+        "none"
+      ]
+    },
+    "allow_all_starts_each": {
+      "overlap": "allow_all",
+      "events": [
+        "fire",
+        "fire",
+        "end",
+        "end"
+      ],
+      "expect": [
+        "start",
+        "start",
+        "none",
+        "none"
+      ]
+    },
+    "missed_counts_once": {
+      "overlap": "skip",
+      "events": [
+        "missed"
+      ],
+      "expect": [
+        "start"
+      ]
+    },
+    "missed_while_running_buffers": {
+      "overlap": "buffer_one",
+      "events": [
+        "fire",
+        "missed",
+        "end"
+      ],
+      "expect": [
+        "start",
+        "buffered",
+        "start"
+      ]
+    },
+    "default_is_skip": {
+      "overlap": null,
+      "events": [
+        "fire",
+        "fire"
+      ],
+      "expect": [
+        "start",
+        "skipped"
+      ]
+    },
+    "resumed_run_is_in_progress": {
+      "overlap": "skip",
+      "events": [
+        "fire",
+        "end",
+        "resume",
+        "fire",
+        "end",
+        "fire"
+      ],
+      "expect": [
+        "start",
+        "none",
+        "none",
+        "skipped",
+        "none",
+        "start"
+      ]
+    },
+    "resumed_run_holds_buffer": {
+      "overlap": "buffer_one",
+      "events": [
+        "fire",
+        "end",
+        "resume",
+        "fire",
+        "end"
+      ],
+      "expect": [
+        "start",
+        "none",
+        "none",
+        "buffered",
+        "start"
+      ]
+    }
+  }
+}

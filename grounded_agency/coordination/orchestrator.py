@@ -130,7 +130,10 @@ class OrchestrationRuntime:
     ) -> None:
         self._config = config or OrchestrationConfig()
         self._capability_registry = capability_registry
-        self._evidence_store = evidence_store or EvidenceStore()
+        # ``is None``: an empty store is falsy and is still the caller's.
+        self._evidence_store = (
+            evidence_store if evidence_store is not None else EvidenceStore()
+        )
 
         # Create coordination components
         self._audit_log = CoordinationAuditLog(
@@ -218,6 +221,75 @@ class OrchestrationRuntime:
     @property
     def audit_log(self) -> CoordinationAuditLog:
         return self._audit_log
+
+    def _audit_step(
+        self, step: WorkflowStep, ctx: dict[str, Any]
+    ) -> WorkflowStepResult:
+        """Perform an ``audit`` step (STANDARD v1.2 §6.4): the step's
+        ``event``, whatever its shape, is recorded under ``details.event`` of
+        a record of the log's own, never spread into it, so an event cannot
+        claim another writer, an actor, an approval or a place in a chain.
+        The output is the contract's: ``recorded``, the ``record`` written
+        and its ``audit_id``. A record that could not be written gives
+        ``recorded: false``; with ``require_record: true`` the step fails
+        (R402, reason ``not_recorded``)."""
+        event = ctx.get("event")
+        details: dict[str, Any] = {
+            k: ctx[k] for k in ("event", "context", "retention") if k in ctx
+        }
+        intent = "audit"
+        if isinstance(event, dict):
+            for key in ("intent", "event_type"):
+                if isinstance(event.get(key), str):
+                    intent = event[key]
+                    break
+        try:
+            recorded = self._audit_log.record(
+                event_type="workflow_step_audit",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
+                target_agent_ids=[],
+                capability_id="audit",
+                details=details,
+                intent=intent,
+            )
+        except Exception as e:
+            logger.warning("audit step: the record was not written: %s", e)
+            if ctx.get("require_record") is True:
+                return WorkflowStepResult(
+                    step=step,
+                    status=StepStatus.FAILED,
+                    output={"recorded": False, "evidence_anchors": []},
+                    error=(
+                        "R402 EXECUTION_FAILED: the audit step did not write its "
+                        f"record (not_recorded): {e}"
+                    ),
+                )
+            return WorkflowStepResult(
+                step=step,
+                status=StepStatus.COMPLETED,
+                output={"recorded": False, "evidence_anchors": []},
+            )
+        # The record it wrote grounds the output (STANDARD v1.2 §6.5,
+        # "Anchors of actions"); it is kept in the evidence store too.
+        anchor = EvidenceAnchor(
+            ref=f"audit:{recorded.event_id}",
+            kind="record",
+            timestamp=recorded.timestamp,
+            metadata={"intent": intent},
+        )
+        self._evidence_store.add_anchor(anchor, capability_id="audit")
+        return WorkflowStepResult(
+            step=step,
+            status=StepStatus.COMPLETED,
+            output={
+                "recorded": True,
+                "audit_id": recorded.event_id,
+                "record": recorded.to_action_record(),
+                "store": dict(self._audit_log.STORE_INFO),
+                "timestamp": recorded.timestamp,
+                "evidence_anchors": [anchor.to_dict()],
+            },
+        )
 
     # ------------------------------------------------------------------
     # Agent management (convenience wrappers)
@@ -486,7 +558,9 @@ class OrchestrationRuntime:
             target_agent_ids=delegated_agents,
             capability_id="audit",
             metadata={
-                "task_goal": task_goal[:100],
+                # Whole, as in the audit details: the store redacts it, and a
+                # cut could keep part of a secret (STANDARD v1.2 §6.7).
+                "task_goal": task_goal,
                 "subtask_count": total_count,
                 "accepted_count": accepted_count,
             },
@@ -556,10 +630,16 @@ class OrchestrationRuntime:
                         status=StepStatus.FAILED,
                         error="No agents registered for delegation",
                     )
+            # The delegation's record (``delegation:<task_id>``, kind
+            # ``record``) grounds the output (§6.5, "Anchors of actions").
             return WorkflowStepResult(
                 step=step,
                 status=StepStatus.COMPLETED if dr.accepted else StepStatus.FAILED,
-                output={"task_id": dr.task_id, "accepted": dr.accepted},
+                output={
+                    "task_id": dr.task_id,
+                    "accepted": dr.accepted,
+                    "evidence_anchors": [a.to_dict() for a in dr.evidence_anchors],
+                },
                 error=dr.rejection_reason if not dr.accepted else None,
             )
 
@@ -584,26 +664,22 @@ class OrchestrationRuntime:
                 barrier.barrier_id,
                 strategy=self._config.sync_strategy,
             )
+            # The synchronize contract's output, grounded in the barrier's
+            # record (``sync:<barrier_id>``, kind ``record``; §6.5).
             return WorkflowStepResult(
                 step=step,
                 status=(StepStatus.COMPLETED if sr.synchronized else StepStatus.FAILED),
-                output=sr.agreed_state,
+                output={
+                    "synchronized": sr.synchronized,
+                    "agreed_state": sr.agreed_state,
+                    "participants": list(sr.participants),
+                    "evidence_anchors": [a.to_dict() for a in sr.evidence_anchors],
+                },
                 error=sr.conflict_details if not sr.synchronized else None,
             )
 
         if step.capability == "audit":
-            self._audit_log.record(
-                event_type="workflow_step_audit",
-                source_agent_id=ORCHESTRATOR_AGENT_ID,
-                target_agent_ids=[],
-                capability_id="audit",
-                details=ctx,
-            )
-            return WorkflowStepResult(
-                step=step,
-                status=StepStatus.COMPLETED,
-                output={"audited": True},
-            )
+            return self._audit_step(step, ctx)
 
         if step.capability == "invoke":
             workflow = ctx.get("workflow", "")
@@ -630,16 +706,26 @@ class OrchestrationRuntime:
                     "workflow": workflow,
                     "result": {},
                     "steps_executed": [],
-                    "evidence_anchors": [anchor.ref],
+                    "evidence_anchors": [anchor.to_dict()],
                 },
             )
 
         if step.capability == "inquire":
             ambiguous_input = ctx.get("ambiguous_input", "")
             max_questions = ctx.get("max_questions", 3)
-            questions = []
+            # Each question has an id and an answer_type, and the output an
+            # inquiry_id, so its answers can be keyed and correlated
+            # (STANDARD v1.2 §5.13.1).
+            questions: list[dict[str, Any]] = []
             if ambiguous_input:
-                questions.append(f"Could you clarify: {ambiguous_input!r}?")
+                questions.append(
+                    {
+                        "id": "q1",
+                        "question": f"Could you clarify: {ambiguous_input!r}?",
+                        "parameter": "ambiguous_input",
+                        "answer_type": "text",
+                    }
+                )
             inquire_id = os.urandom(16).hex()
             anchor = self._record_coordination_evidence(
                 ref_prefix="inquire",
@@ -648,19 +734,34 @@ class OrchestrationRuntime:
                 source_agent_id=ORCHESTRATOR_AGENT_ID,
                 target_agent_ids=[],
                 capability_id="inquire",
+                # Whole, as task_goal is: the store and the audit log redact
+                # it, and a cut could keep part of a secret their patterns
+                # no longer match (a token's tail, a key's body without its
+                # end line; STANDARD v1.2 §6.7).
                 metadata={
-                    "ambiguous_input": str(ambiguous_input)[:200],
+                    "ambiguous_input": str(ambiguous_input),
                     "max_questions": max_questions,
                 },
-                audit_details={"ambiguous_input": str(ambiguous_input)[:200]},
+                audit_details={"ambiguous_input": str(ambiguous_input)},
             )
             return WorkflowStepResult(
                 step=step,
                 status=StepStatus.COMPLETED,
                 output={
-                    "questions": questions,
-                    "ambiguity_analysis": ambiguous_input,
-                    "evidence_anchors": [anchor.ref],
+                    "inquiry_id": inquire_id,
+                    "questions": questions[: max(int(max_questions), 0)]
+                    if isinstance(max_questions, int)
+                    else questions,
+                    "ambiguity_analysis": {
+                        "missing_parameters": (
+                            ["ambiguous_input"] if ambiguous_input else []
+                        ),
+                        "conflicting_interpretations": [],
+                        "confidence_without_clarification": (
+                            0.5 if ambiguous_input else 1.0
+                        ),
+                    },
+                    "evidence_anchors": [anchor.to_dict()],
                     "confidence": 0.5 if ambiguous_input else 1.0,
                 },
             )

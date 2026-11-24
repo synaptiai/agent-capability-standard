@@ -27,7 +27,7 @@ export interface Glance {
   key: string;
   ladder: Ladder | null;
   triggers: number;
-  /** "4 always, 1 high risk", or null with no triggers. */
+  /** "4 always, 1 high risk", or null with no checkpoint rules. */
   triggerLevels: string | null;
   defined: number;
   proposed: number;
@@ -51,7 +51,7 @@ export function glanceTitle(g: Glance): string {
 
 export function glanceCaption(g: Glance): string {
   const ladder = g.ladder ? ladderCaption(g.ladder) : 'The profile sets no risk thresholds.';
-  return `${ladder} It names ${plural(g.triggers, 'checkpoint trigger')} and ${plural(g.defined + g.proposed, 'workflow')}.`;
+  return `${ladder} It names ${plural(g.triggers, 'checkpoint rule')} and ${plural(g.defined + g.proposed, 'workflow')}.`;
 }
 
 export interface ParameterRow {

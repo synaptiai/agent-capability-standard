@@ -1,0 +1,66 @@
+{
+  "description": "The grounding check comes before the minimum confidence: an output with no anchors and a confidence below the minimum fails with F505, not F504.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "classify",
+          "purpose": "classify step",
+          "store_as": "c",
+          "input_bindings": {
+            "item": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [
+            "a"
+          ],
+          "confidence": 0.5,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F505",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "profiles": [
+    {
+      "domain": "grounded-confident",
+      "version": "1.0.0",
+      "evidence_policy": {
+        "require_grounding": [
+          "classify"
+        ],
+        "required_anchor_types": [
+          "file"
+        ],
+        "minimum_confidence": 0.9
+      }
+    }
+  ]
+}

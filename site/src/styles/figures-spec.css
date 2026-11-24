@@ -519,6 +519,12 @@
     font-weight: 700;
   }
 
+  .principle-tile {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    column-gap: var(--space-2);
+  }
+
   .ext-tile__secs {
     margin: 0;
     padding: 0;
@@ -2345,5 +2351,144 @@
   .fig[data-fig-kind='field-table'] td:first-child code {
     white-space: nowrap;
     overflow-wrap: normal;
+  }
+}
+
+@layer components {
+  /* ---------- §2 a run between an executor and its host ---------- */
+
+  .host-loop {
+    display: grid;
+    justify-items: start;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .host-loop__party {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .host-loop__note {
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .host-loop__msg {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: var(--space-3);
+    font-size: 14px;
+  }
+
+  .host-loop .flow-arrow,
+  .run-ends .flow-arrow {
+    flex: none;
+  }
+
+  .host-loop__msg > span {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ---------- §5.10.2 overlap, fire time by fire time ---------- */
+
+  .overlap {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .overlap__row {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .overlap__policy {
+    font-weight: 700;
+  }
+
+  .overlap__events {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .overlap__event {
+    display: grid;
+    gap: 2px;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+    font-size: 14px;
+  }
+
+  .overlap__what {
+    color: var(--ink-2);
+  }
+
+  /* A run starts: a 4px border; skipped: dashed; waiting: the sub tone. */
+  .overlap__event[data-outcome='start'] {
+    border-width: 4px;
+  }
+
+  .overlap__event[data-outcome='skipped'] {
+    border-style: dashed;
+  }
+
+  .overlap__event[data-outcome='buffered'] {
+    background: var(--bg-sub);
+  }
+
+  /* ---------- §5.19.8 the run record each end leaves ---------- */
+
+  .run-ends {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .run-ends__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .run-ends__end {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  .run-ends__to {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .run-ends__n {
+    font-size: 14px;
+    color: var(--ink-2);
   }
 }

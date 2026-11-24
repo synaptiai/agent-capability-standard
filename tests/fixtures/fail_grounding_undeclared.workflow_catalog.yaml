@@ -1,0 +1,18 @@
+# Standard version: 1.2.0
+# Negative fixture (STANDARD v1.2 §5.20): in a workflow that targets 1.2,
+# 'grounding' belongs to grounding@1, which the workflow does not declare.
+# V106.
+grounding_undeclared:
+  goal: State a grounding policy without declaring grounding@1.
+  risk: low
+  spec_version: "1.2"
+  grounding:
+    require: [retrieve]
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  success:
+  - Never valid

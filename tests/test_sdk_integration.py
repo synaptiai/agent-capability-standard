@@ -12,7 +12,11 @@ Tests the grounded_agency package components:
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -438,8 +442,11 @@ class TestEvidenceStore:
         evidence_store.add_anchor(EvidenceAnchor.from_file("test.py"))
         evidence_store.add_anchor(EvidenceAnchor.from_mutation("config.yaml", "write"))
 
-        tool_outputs = evidence_store.get_by_kind("tool_output")
+        # A legacy kind returns what it returned in 1.1, by ref prefix.
+        with pytest.warns(DeprecationWarning):
+            tool_outputs = evidence_store.get_by_kind("tool_output")
         assert len(tool_outputs) == 1
+        assert len(evidence_store.get_by_kind("tool")) == 1
 
         files = evidence_store.get_by_kind("file")
         assert len(files) == 1
@@ -463,7 +470,8 @@ class TestEvidenceStore:
             tool_use_id="cmd_123",
         )
         assert anchor.ref.startswith("command:")
-        assert anchor.kind == "command"
+        # A command's result is a tool's result (STANDARD v1.2 §6.5).
+        assert anchor.kind == "tool"
         assert anchor.metadata["exit_code"] == 0
 
 
@@ -502,6 +510,41 @@ class TestGroundedAgentAdapter:
         assert "Write" in wrapped.allowed_tools
         assert "Bash" in wrapped.allowed_tools
         assert "Skill" not in wrapped.allowed_tools
+
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            None,
+            [],
+            ["user"],
+            ["local"],
+            ["user", "local"],
+            ["user", "project", "local"],
+        ],
+    )
+    def test_wrap_options_keeps_the_hosts_setting_sources(
+        self, adapter: GroundedAgentAdapter, sources: list[str] | None
+    ) -> None:
+        """Which settings files the CLI loads is the host's choice: ``[]``
+        (the SDK's isolation mode, for a cwd that may be untrusted, whose
+        project settings can run hooks) stays ``[]``, and ``None`` (every
+        source) stays ``None``; nothing adds ``"project"``."""
+        given = None if sources is None else list(sources)
+        wrapped = adapter.wrap_options(ClaudeAgentOptions(setting_sources=given))
+        assert wrapped.setting_sources == sources
+        try:
+            from claude_agent_sdk._internal.transport.subprocess_cli import (
+                SubprocessCLITransport,
+            )
+
+            build = SubprocessCLITransport(
+                prompt="x", options=replace(wrapped, cli_path="/bin/false")
+            )._build_command
+        except ImportError, AttributeError, TypeError:
+            return  # an SDK whose transport this test cannot read
+        flags = [a for a in build() if a.startswith("--setting-sources")]
+        expected = [] if sources is None else [f"--setting-sources={','.join(sources)}"]
+        assert flags == expected
 
     def test_create_checkpoint_convenience(self, adapter: GroundedAgentAdapter):
         """Test adapter's create_checkpoint convenience method."""
@@ -583,9 +626,11 @@ def _denied(result: Any) -> bool:
 
 
 class TestCheckpointReservation:
-    """One checkpoint covers one mutation: a tool call reserves it under its
-    tool_use_id, and another call is denied until the holder consumes it
-    (success) or releases it (failure, interrupt) (SEC-007)."""
+    """One checkpoint covers one gated call (STANDARD 1.2.0 §5.18.6): a call
+    holds it under its tool_use_id, another call is denied while it is
+    held, and the call uses it up when it is allowed to start, or, having
+    run without passing the callback, when it reports back, whatever its
+    outcome. Only a refusal the layer learns of releases it (SEC-007)."""
 
     @staticmethod
     def _ctx(tool_use_id: str) -> Any:
@@ -604,16 +649,27 @@ class TestCheckpointReservation:
         self, adapter: GroundedAgentAdapter
     ) -> None:
         checkpoint_id = adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
-        first = await callback("Write", {"file_path": "a.txt"}, self._ctx("t1"))
-        again = await callback("Write", {"file_path": "a.txt"}, self._ctx("t1"))
-        second = await callback("Write", {"file_path": "b.txt"}, self._ctx("t2"))
+        first = await pre(
+            {"tool_name": "Write", "tool_input": {"file_path": "a.txt"}}, "t1", None
+        )
+        second = await pre(
+            {"tool_name": "Write", "tool_input": {"file_path": "b.txt"}}, "t2", None
+        )
+        # The same call reaches the callback: its hold is the same
+        # (idempotent), and it is used up at the allow.
+        same_call = await callback("Write", {"file_path": "a.txt"}, self._ctx("t1"))
 
-        assert not _denied(first)
-        assert not _denied(again)  # same call: idempotent
-        assert _denied(second)
-        assert f"checkpoint {checkpoint_id} is reserved" in second.message
+        assert first == {}
+        assert second["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert (
+            f"checkpoint {checkpoint_id} is held by another call"
+            in second["hookSpecificOutput"]["permissionDecisionReason"]
+        )
+        assert not _denied(same_call)
+        assert not adapter.has_valid_checkpoint()
 
     @pytest.mark.asyncio
     async def test_pretooluse_reserves_for_pre_approved_tools(
@@ -634,49 +690,66 @@ class TestCheckpointReservation:
         assert not _denied(same_call)
 
     @pytest.mark.asyncio
-    async def test_failed_mutation_releases_the_checkpoint(
+    async def test_failed_mutation_uses_the_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
         """Claude Code reports failures and interrupts through
-        PostToolUseFailure, not PostToolUse."""
+        PostToolUseFailure, not PostToolUse. A call that started uses its
+        checkpoint whatever its outcome (STANDARD 1.2.0 §5.18.6): it may
+        have changed something before it failed."""
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
-        release = adapter._make_failure_releaser()
+        failed = adapter._make_failure_recorder()
 
-        assert not _denied(await callback("Write", {}, self._ctx("t1")))
-        await release(
+        # A pre-approved tool: PreToolUse holds the checkpoint, the call runs
+        # without reaching the callback, and fails.
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
+        await failed(
             {"tool_name": "Write", "tool_use_id": "t1", "error": "boom"}, "t1", None
         )
-        assert adapter.has_valid_checkpoint()
-        assert not _denied(await callback("Write", {}, self._ctx("t2")))
+        assert not adapter.has_valid_checkpoint()
+        assert _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
-    async def test_error_response_releases_the_checkpoint(
+    async def test_error_response_uses_the_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
+        """A call that ran and reported an error uses its checkpoint all the
+        same (STANDARD 1.2.0 §5.18.6)."""
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
         consumer = adapter._make_mutation_consumer()
 
-        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
         await consumer(self._post("Write", is_error=True), "t1", None)
-        assert adapter.has_valid_checkpoint()
-        assert not _denied(await callback("Write", {}, self._ctx("t2")))
+        assert not adapter.has_valid_checkpoint()
+        denied = await pre({"tool_name": "Write", "tool_input": {}}, "t2", None)
+        assert denied["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+            "F501 CHECKPOINT_REQUIRED:"
+        )
+        assert _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
     async def test_successful_mutation_consumes_the_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
         consumer = adapter._make_mutation_consumer()
 
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
         assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        # Used up at the callback's allow, before the call runs.
+        assert not adapter.has_valid_checkpoint()
         await consumer(self._post("Write"), "t1", None)
         assert not adapter.has_valid_checkpoint()
-        denied = await callback("Write", {}, self._ctx("t2"))
-        assert _denied(denied)
-        assert "reserved" not in denied.message
+        denied = await pre({"tool_name": "Write", "tool_input": {}}, "t2", None)
+        reason = denied["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F501 CHECKPOINT_REQUIRED:")
+        assert "reserved" not in reason
 
     @pytest.mark.asyncio
     async def test_other_calls_cannot_end_a_reservation(
@@ -685,18 +758,20 @@ class TestCheckpointReservation:
         """Neither a call without a reservation (here TodoWrite, a mutation
         that needs no checkpoint) nor another call's failure touches the
         holder's checkpoint."""
-        adapter.create_checkpoint(["*"], "Test")
-        callback = adapter._make_permission_callback()
+        checkpoint_id = adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         consumer = adapter._make_mutation_consumer()
-        release = adapter._make_failure_releaser()
+        failed = adapter._make_failure_recorder()
 
-        assert not _denied(await callback("Write", {}, self._ctx("t1")))
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
         await consumer(self._post("TodoWrite"), "t9", None)
         await consumer(self._post("Edit"), "t2", None)
-        await release({"tool_name": "Edit", "tool_use_id": "t2"}, "t2", None)
+        await failed({"tool_name": "Edit", "tool_use_id": "t2"}, "t2", None)
 
         assert adapter.has_valid_checkpoint()
-        assert _denied(await callback("Edit", {}, self._ctx("t3")))
+        assert adapter.checkpoint_tracker.held_by("t1") == checkpoint_id
+        blocked = await pre({"tool_name": "Edit", "tool_input": {}}, "t3", None)
+        assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.asyncio
     async def test_non_strict_unreserved_call_cannot_release(
@@ -722,20 +797,22 @@ class TestCheckpointReservation:
         assert reserved is False
 
     @pytest.mark.asyncio
-    async def test_context_without_tool_use_id_does_not_reserve(
+    async def test_context_without_tool_use_id_is_r407(
         self, adapter: GroundedAgentAdapter
     ) -> None:
-        """SDKs before 0.1.52 pass a ToolPermissionContext with no
-        tool_use_id. The callback cannot name the PreToolUse reservation, so
-        it must not treat it as foreign: it checks the checkpoint and leaves
-        the reservation to PreToolUse."""
+        """A gated call whose context has no tool_use_id cannot hold a
+        checkpoint, so the layer cannot complete its check: R407 (STANDARD
+        1.2.0 §5.18.8). The package's minimum SDK, 0.1.52, always sends
+        one."""
         adapter.create_checkpoint(["*"], "Test")
         pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
         assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
-        assert not _denied(await callback("Write", {}, SimpleNamespace()))
-        assert not _denied(await callback("Write", {}, None))
+        for context in (SimpleNamespace(), None):
+            denied = await callback("Write", {}, context)
+            assert _denied(denied)
+            assert denied.message.startswith("R407 SAFETY_CHECK_FAILED:")
         # t1 still holds the checkpoint; nothing anonymous took it over.
         assert not adapter.checkpoint_tracker.validate_and_reserve("t2")[0]
         assert adapter.checkpoint_tracker.validate_and_reserve("t1")[0]
@@ -744,8 +821,17 @@ class TestCheckpointReservation:
     async def test_context_without_tool_use_id_still_needs_a_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
+        """With no valid checkpoint the refusal is F501, as for a call with
+        an id: the missing checkpoint is what to fix first."""
         callback = adapter._make_permission_callback()
-        assert _denied(await callback("Write", {}, SimpleNamespace()))
+        pre = adapter._make_pretooluse_safety_hook()
+        for context in (SimpleNamespace(), None):
+            denied = await callback("Write", {}, context)
+            assert _denied(denied)
+            assert denied.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        result = await pre({"tool_name": "Write", "tool_input": {}}, None, None)
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_denied_call_releases_its_reservation(
@@ -769,6 +855,7 @@ class TestCheckpointReservation:
         monkeypatch.undo()
 
         assert adapter.has_valid_checkpoint()
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t2", None) == {}
         assert not _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
@@ -776,11 +863,16 @@ class TestCheckpointReservation:
         self, adapter: GroundedAgentAdapter
     ) -> None:
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
+        for other in ("t2", "t3"):
+            refused = await pre({"tool_name": "Write", "tool_input": {}}, other, None)
+            assert refused["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert _denied(await callback("Write", {}, self._ctx(other)))
+        assert adapter.checkpoint_tracker.held_by("t1")
         assert not _denied(await callback("Write", {}, self._ctx("t1")))
-        assert _denied(await callback("Write", {}, self._ctx("t2")))
-        assert _denied(await callback("Write", {}, self._ctx("t3")))
 
     def test_wrap_options_registers_the_failure_hook(
         self, adapter: GroundedAgentAdapter
@@ -789,19 +881,26 @@ class TestCheckpointReservation:
         assert options.hooks["PostToolUseFailure"]
 
     def test_reservation_timeout_is_configurable(
-        self, ontology_path: str, tmp_path: Path
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
     ) -> None:
+        with pytest.raises(ValueError, match="more than 0"):
+            GroundedAgentConfig(
+                ontology_path=ontology_path, checkpoint_reservation_seconds=0
+            )
         quick = GroundedAgentAdapter(
             GroundedAgentConfig(
                 ontology_path=ontology_path,
                 checkpoint_dir=str(tmp_path / ".checkpoints"),
-                checkpoint_reservation_seconds=0,
-            )
+                checkpoint_reservation_seconds=1,
+            ),
+            clock=fake_clock,
         )
         quick.create_checkpoint(["*"], "Test")
         tracker = quick.checkpoint_tracker
         assert tracker.validate_and_reserve("t1")[0]
-        assert tracker.validate_and_reserve("t2")[0]  # t1's lapsed at once
+        fake_clock.advance(seconds=2)
+        # t1's hold lapsed, so the checkpoint counts as used (§5.18.6).
+        assert tracker.validate_and_reserve("t2") == (False, None)
 
 
 # =============================================================================
@@ -837,17 +936,18 @@ class TestHooks:
         assert len(evidence_store) > 0
 
     @pytest.mark.asyncio
-    async def test_skill_tracker_hook(
+    async def test_checkpoint_recorder_hook(
         self,
         checkpoint_tracker: CheckpointTracker,
+        tmp_path: Path,
     ):
-        """Test skill tracker hook."""
-        from grounded_agency.hooks.skill_tracker import create_skill_tracker
+        """The call that saves the state takes the checkpoint, not the call
+        that loads the skill (STANDARD 1.2.0 §5.18.6)."""
+        from grounded_agency.hooks.skill_tracker import create_checkpoint_recorder
 
-        hook = create_skill_tracker(checkpoint_tracker)
+        hook = create_checkpoint_recorder(checkpoint_tracker)
 
-        # Simulate checkpoint skill invocation
-        input_data = {
+        skill = {
             "tool_name": "Skill",
             "tool_input": {
                 "skill": "checkpoint",
@@ -856,13 +956,82 @@ class TestHooks:
             },
             "tool_response": {},
         }
-
+        await hook(skill, "skill_123", None)
         assert not checkpoint_tracker.has_valid_checkpoint()
 
-        await hook(input_data, "skill_123", None)
+        def stash(
+            command: str, response: dict[str, Any], **call: Any
+        ) -> dict[str, Any]:
+            return {
+                "tool_name": "Bash",
+                "tool_input": {"command": command, **call},
+                "tool_response": response,
+                "cwd": str(tmp_path),
+            }
 
-        # Checkpoint should now exist
-        assert checkpoint_tracker.has_valid_checkpoint()
+        # A failed git stash create and a git stash store take none.
+        await hook(stash("git stash create", {"is_error": True}), "b0", None)
+        await hook(stash("git stash store -m m " + "a" * 40, {}), "b1", None)
+        assert not checkpoint_tracker.has_valid_checkpoint()
+
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        await hook(
+            stash('git stash create "checkpoint:x"', {"stdout": sha + "\n"}), "b2", None
+        )
+        active = checkpoint_tracker.get_active_checkpoint()
+        assert active is not None
+        assert active.metadata["commit"] == sha
+        assert active.metadata["untracked_not_captured"] is True
+
+        # A clean tree: nothing printed, HEAD is the restore point.
+        _clean_repo(tmp_path)
+        await hook(stash("git stash create", {"stdout": ""}), "b3", None)
+        active = checkpoint_tracker.get_active_checkpoint()
+        assert active is not None and active.metadata["commit"] == "HEAD"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("change", "call", "stdout"),
+        [
+            ("worktree", {}, ""),
+            ("index", {}, ""),
+            (None, {"run_in_background": True}, ""),
+            (None, {"run_in_background": True}, "0123456789abcdef" * 2 + "01234567"),
+            (None, {}, "warning: not a commit"),
+            (None, {}, "0123456789abcdef" * 2 + "01234567\nmore"),
+        ],
+    )
+    async def test_checkpoint_recorder_takes_no_unverified_checkpoint(
+        self,
+        checkpoint_tracker: CheckpointTracker,
+        tmp_path: Path,
+        change: str | None,
+        call: dict[str, Any],
+        stdout: str,
+    ):
+        """Empty output means nothing was saved: HEAD restores the state only
+        when the tracked files and the index are HEAD's. A background call's
+        output is not yet the command's, and output that is not one commit
+        id names nothing to restore. None of these takes a checkpoint."""
+        from grounded_agency.hooks.skill_tracker import create_checkpoint_recorder
+
+        _clean_repo(tmp_path)
+        if change is not None:
+            (tmp_path / "a.txt").write_text("uncommitted\n")
+        if change == "index":
+            _git(tmp_path, "add", "a.txt")
+        hook = create_checkpoint_recorder(checkpoint_tracker)
+        await hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git stash create", **call},
+                "tool_response": {"stdout": stdout},
+                "cwd": str(tmp_path),
+            },
+            "b1",
+            None,
+        )
+        assert not checkpoint_tracker.has_valid_checkpoint()
 
     @pytest.mark.asyncio
     async def test_skill_tracker_ignores_non_skill(
@@ -883,6 +1052,31 @@ class TestHooks:
 
         # No checkpoint should be created
         assert not checkpoint_tracker.has_valid_checkpoint()
+
+
+def _git(path: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(path), *args],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        },
+        check=True,
+        capture_output=True,
+    )
+
+
+def _clean_repo(path: Path) -> None:
+    """A repository with one commit whose tree is HEAD's."""
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+    _git(path, "init", "-q")
+    (path / "a.txt").write_text("a\n")
+    _git(path, "add", "a.txt")
+    _git(path, "commit", "-q", "-m", "init")
 
 
 # =============================================================================

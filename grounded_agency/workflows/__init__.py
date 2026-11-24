@@ -19,30 +19,50 @@ from .engine import (
     WorkflowStep,
     WorkflowStepResult,
 )
+from .idempotency import IdempotencyLog
 from .runner import (
     Host,
+    HostCannotServe,
     HostResponseError,
+    RunArchiveError,
     RunIncomplete,
     RunResult,
     RunStartError,
+    Turn,
     WorkflowRunner,
 )
 from .tracer import ConformanceReport, StepTrace, WorkflowTracer
+from .triggers import (
+    EventGate,
+    OverlapGate,
+    matches_event,
+    next_fire,
+    trigger_attendance,
+)
 
 __all__ = [
     "BindingError",
     "ConformanceReport",
+    "EventGate",
     "Host",
+    "HostCannotServe",
     "HostResponseError",
+    "IdempotencyLog",
+    "OverlapGate",
+    "RunArchiveError",
     "RunIncomplete",
     "RunResult",
     "RunStartError",
     "StepStatus",
     "StepTrace",
+    "Turn",
     "WorkflowDefinition",
     "WorkflowEngine",
     "WorkflowRunner",
     "WorkflowStep",
     "WorkflowStepResult",
     "WorkflowTracer",
+    "matches_event",
+    "next_fire",
+    "trigger_attendance",
 ]

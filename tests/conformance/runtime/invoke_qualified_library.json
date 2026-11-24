@@ -1,0 +1,113 @@
+{
+  "description": "An invoke of another catalog's exported workflow by qualified id runs it as a nested run; inside it a bare name means the library's own workflow, not the primary catalog's workflow of that name (\u00a75.1.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "checked",
+          "workflow_id": "acs.fixtures.lib/shared_check",
+          "input_bindings": {
+            "workflow": "acs.fixtures.lib/shared_check"
+          }
+        }
+      ]
+    },
+    "inner": {
+      "goal": "g",
+      "risk": "low",
+      "steps": [
+        {
+          "capability": "detect",
+          "purpose": "detect step",
+          "store_as": "primary_inner",
+          "input_bindings": {
+            "data": "d",
+            "pattern": "p"
+          }
+        }
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0,
+        "frame": [
+          "w",
+          "acs.fixtures.lib/shared_check",
+          "acs.fixtures.lib/inner"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "invoke_started"
+  ],
+  "catalogs": [
+    {
+      "catalog": {
+        "catalog": {
+          "id": "acs.fixtures.lib",
+          "version": "1.0.0",
+          "exports": [
+            "shared_check"
+          ]
+        },
+        "shared_check": {
+          "goal": "g",
+          "risk": "low",
+          "steps": [
+            {
+              "capability": "invoke",
+              "purpose": "invoke step",
+              "store_as": "inner_out",
+              "workflow_id": "inner",
+              "input_bindings": {
+                "workflow": "inner"
+              }
+            }
+          ]
+        },
+        "inner": {
+          "goal": "g",
+          "risk": "low",
+          "steps": [
+            {
+              "capability": "retrieve",
+              "purpose": "retrieve step",
+              "store_as": "lib_record",
+              "input_bindings": {
+                "target": "library"
+              }
+            }
+          ]
+        }
+      },
+      "header": "1.2.0"
+    }
+  ]
+}

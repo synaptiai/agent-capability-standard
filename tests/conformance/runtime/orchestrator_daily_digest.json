@@ -279,6 +279,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "daily_digest",
   "inputs": {
     "report": {

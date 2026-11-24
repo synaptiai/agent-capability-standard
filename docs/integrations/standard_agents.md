@@ -9,10 +9,14 @@ have to change for the combination to be complete.
 
 | Standard | Compared here |
 |---|---|
-| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0 |
+| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0, for the mapping. The binding implements [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md), ontology 2.2.0 |
 | Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types |
 
-Statements about Standard Agents cite the page and section they come from.
+Standard 1.2.0 added the rules for tool calls that the mapping found missing
+([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)). Where the
+binding follows one of them, the section cited is 1.2.0's; the mapping's own
+citations are 1.1.0's. Statements about Standard Agents cite the page and
+section they come from.
 Where the specification text and the published types differ, the difference
 is noted. [How this analysis was done](#how-this-analysis-was-done) says what
 was checked and what was not.
@@ -26,7 +30,9 @@ was checked and what was not.
   specifies. [`examples/standard_agents/`](../../examples/standard_agents/README.md)
   is a working reference: a tool is classified by an ontology capability, and
   the capability's rules are enforced inside the tool. The example compiles
-  against the published SA types and its rules are tested.
+  against the published SA types and its rules are tested. The binding is a
+  safety layer under Standard 1.2.0 §5.18 and claims its conformance class,
+  SL ([Conformance](#conformance-class-sl)).
 - **Enforcement is cooperative, not imposed.** SA has no hook that can refuse
   a tool call before it runs, so a safety rule holds only for tools written
   with the binding. A tool written without it is not covered, and no hook
@@ -38,12 +44,14 @@ was checked and what was not.
   The digest is the same one the ACS reference executor computes. SA
   authenticates a caller; that the caller is a person is for the deployment
   to ensure.
-- **ACS workflows cannot yet run inside an SA runtime.** The reference
-  executor is Rust with Python bindings and SA definitions are TypeScript. The
-  core compiles to WebAssembly unchanged; it lacks a JavaScript interface, and
-  SA does not say that definition code can load WebAssembly.
-- **Changes are proposed to both standards**, listed at the end. The most
-  important is a hook in SA that can decline a tool call before it runs.
+- **ACS workflows can run in process from TypeScript, but not yet inside an
+  SA runtime.** The reference executor is Rust; the TypeScript package
+  [`@synaptiai/acs-core`](../../packages/acs-core/README.md) loads it through
+  a WebAssembly JSON interface (`@synaptiai/acs-core/wasm`). SA does not say
+  that definition code can load WebAssembly.
+- **Changes to both standards are listed at the end.** Those to ACS are
+  made: they are Standard 1.2.0. Those to SA are proposals, the most
+  important a hook that can decline a tool call before it runs.
 
 ## What each standard covers
 
@@ -141,7 +149,7 @@ requirement of the other.
 | `rollback`: restore a checkpoint | No restore or undo. The one statement on the subject concerns a handler that throws: "Nothing is rolled back." ([Handlers §5](https://standardagentspec.org/0.2.0/specification/handlers#5-error-semantics)) | ACS only | A grounded `rollback` tool restores what the checkpoint tool saved |
 | A checkpoint record that authorises one later step | A durable, per-thread key-value store ([Runtime, Durable Key-Value Store](https://standardagentspec.org/0.2.0/infrastructure/runtime#14-durable-key-value-store)) | Fits | The record lives in the store; a later call reads it |
 | A wait invalidates earlier checkpoints (W608) | `execution.flowId`, the "Unique execution ID" | Fits | A checkpoint counts only in the execution that took it |
-| `persist`, `recall` | `setValue`, `getValue`; user-scope values in the Draft Users page | Partial | Thread scope maps directly. The ontology gives `persist` and `recall` no scope; the `recall` skill names `session`, `project` and `global` |
+| `persist`, `recall` | `setValue`, `getValue`; user-scope values in the Draft Users page | Partial | The thread is the `session` memory scope ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)); the binding's `memoryTools` store `{v, data, stored_at, expires_at}` envelopes there and refuse any other scope (`unsupported_scope`) and data holding a credential (`secret_in_data`) |
 | World state: `state`, `transition`, the world state schema ([§6.3](../../spec/STANDARD-v1.1.0.md#63-world-state-requirements)) | Nothing comparable: a thread holds messages, files and values | ACS only | A world model is data a grounded agent keeps in the thread |
 | Run snapshot and restore (canonical JSON, SHA-256, optional HMAC) | Messages and tool results persisted before the runtime advances | Fits | Different things: SA persists the conversation, ACS the position in a workflow |
 
@@ -183,7 +191,7 @@ requirement of the other.
 | `synchronize`, quorum ([§5.16](../../spec/STANDARD-v1.1.0.md#516-quorum)) | No agreement or voting construct | ACS only | Built from several children and code that counts |
 | `inquire` | A human-backed side: the session parks until input arrives | Fits | A tool returns the questions and the model puts them to the person in a reply that hands over the turn |
 | Nothing comparable | `parentHooks`: hooks a child requires of its parent, failing closed ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)) | SA only | A grounded child can require its audit hook on whoever composes it |
-| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's |
+| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's: the host cancels the source agent's ACS run if it has not ended (§5.17, §5.19.5 of 1.2); a run that ended `deferred` may instead be resumed under the agent that took over (§5.14.1). A saved run is never restored under it |
 | Safety flags of what a delegate may do | No machine-readable statement of a child's effects | ACS only | A parent cannot know that a child mutates. Each agent grounds its own tools |
 
 ### Workflows
@@ -224,9 +232,33 @@ model family for a child. Two of them touch evidence:
   `prefilter_llm_history` change what one model request sees, and must leave
   the stored history untouched. Evidence stays on record, but a model can be
   shown less than the record holds.
-- **Secrets.** A tool declares which of its variables are `secret`. ACS has no
-  normative rule keeping secret values out of evidence anchors (some skills
-  say so in prose), so the author of a grounded tool has to.
+- **Secrets.** A tool declares which of its variables are `secret`. Standard
+  1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
+  and stored memory
+  ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
+  redacts every trace entry it writes, and the id of each checkpoint it
+  records (what the `checkpoint` call returned), with default patterns, and
+  `configureLayer({ secrets })` registers the deployment's own values for
+  every entry, the audit hook's for plain tools included, and for the data a
+  `persist` or `audit` call would store (a grounded tool's `secrets` option,
+  and `recordToolCall`'s, add more: a grounded tool's join the layer's, an
+  array when the tool is defined and a function's values at each call, so
+  the audit hook's entry for a plain tool is redacted with them too). An
+  entry's tool name is redacted as well: the model chooses the name it
+  calls, and a composite's code may invoke one its arguments chose, so the
+  audit records exported from the trace name the redacted tool, and so do
+  the refusals a composite's state returns. Every result a grounded call or
+  a composite's state returns that is not a success (a refusal, an R407
+  quoting a store's or a secrets function's error, an R402 naming an
+  output member, the tool's own error, a nested plain tool's error, a
+  control tool's own error result) is
+  redacted the same way before it reaches the runtime, the thread's
+  messages and the model; an F502's `shown` arguments have their secrets
+  replaced, and its `digest` stays that of the values the approver decides
+  on. An evidence anchor that held a
+  secret keeps no `digest` of what it cites (its metadata says
+  `digest_omitted: secret`): the redacted excerpt would show the text to
+  check a guess against.
 
 ## A grounded Standard Agent today
 
@@ -251,16 +283,21 @@ restore point.
 
 ### Classify: the `acs` annotation
 
-A tool is classified by one ontology capability, optionally with a domain:
+A tool's `acs` annotation carries its **tool binding record**
+([Standard 1.2.0 §5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)), the record a safety
+layer reads to know what a call of the tool does. `groundedTool` writes it
+from the tool's definition. For the example's `write_config`:
 
 ```typescript
 annotations: {
   acs: {
-    standard: '1.1.0',
-    ontology: '2.1.0',
+    standard: '1.2.0',
+    ontology: '2.2.0',
+    tool: 'write_config',
     capability: 'mutate',
     layer: 'EXECUTE',
     domain: 'config',
+    approval: { expires: '15m' },
     risk: 'high',
     mutation: true,
     requires_checkpoint: true,
@@ -269,12 +306,32 @@ annotations: {
 }
 ```
 
-The flags are the capability's **effective** flags
-([Standard §5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)): a tool
-may declare stricter flags than the ontology's, never weaker ones. The schema
-is
+| Member | What it holds |
+|---|---|
+| `tool` | The name the tool states for itself: what an approver is shown and the trace records. It must be the name the prompt offers the tool under (V111) |
+| `ontology`, `capability`, `domain` | The ontology version, the capability the tool performs, and the capability's domain parameter |
+| `flags` | Flags the tool declares stricter than its capability's ([§5.2.1](../../spec/STANDARD-v1.2.0.md#521-safety-flags)). A weaker one has no effect (W602); `groundedTool` refuses it when the tool is defined |
+| `additional_capabilities` | Other capabilities each call performs. A call takes the strictest flags and every prerequisite of all of them ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)) |
+| `invokes` | The tools it calls while it runs ([Composite tools](#composite-tools)) |
+| `approval` | Who may approve the tool's calls, how many, and for how long |
+| `standard` | The Standard the annotation follows |
+| `layer`, `risk`, `mutation`, `requires_checkpoint`, `requires_approval` | Informative copies of the capability's layer and the tool's **effective** flags. A layer ignores them and computes the flags from the record |
+
+The schema is
 [`standard_agents_annotation.schema.json`](../../schemas/interop/standard_agents_annotation.schema.json),
-generated from the ontology.
+generated from the ontology. It refuses a copy that names another layer than
+the capability's or a flag weaker than the ontology's, so a reader that does
+use the copies is not misled. Every other member of an `acs` annotation is
+read as the record's, so one the record does not have (a misspelt `aproval`
+or `flag`) is S303 and the annotation does not load: the tool is unbound
+rather than read in part ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)),
+`groundedTool` refuses a composite that lists it (V107), the lint reports it
+(W617) and `deriveAgentManifest` names it malformed. Vendor data goes under a
+key that starts with `x-`. A tool with no `acs` annotation is **unbound**:
+[§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools) treats each of its calls as the strictest
+case, high risk with a checkpoint and an approval. A tool that only signals
+the host carries `{ standard, ontology, tool, control: true }` instead
+([Control tools](#control-tools)).
 
 SA says annotations are "implementation-specific hints, keyed by the runtime
 or tool that reads them", that the specification "defines no annotation
@@ -359,15 +416,15 @@ tool's own `execute`. `groundedTool` wraps it:
 title: What a grounded tool checks before it runs
 ---
 flowchart TB
-  accDescr: A call to a grounded tool is refused with F502 until a person has approved exactly that call, then refused with F501 or F503 until a checkpoint exists; only when every check passes are the approval and the checkpoint used up and the tool run, and every outcome is written to the thread's trace.
-  call[The model calls a grounded tool] --> appr{"Approved, if the capability needs approval?"}
+  accDescr: A call to a grounded tool is refused with F502 until a person has approved exactly that call, then refused with F501, F503 or V102 until each capability it requires has run and, if it needs one, an unused checkpoint of this execution exists; only when every check passes are the approval and the checkpoint used up and the tool run, its output is returned as I-JSON text or refused with R402, and every outcome is written to the thread's trace.
+  call[The model calls a grounded tool] --> appr{"Approved, if the call needs approval?"}
   appr -->|no| f502["Refused: F502, with the digest to approve"]
-  appr -->|yes| cp{"Checkpoint present, if the capability needs one?"}
-  cp -->|no| f501["Refused: F501 or F503"]
+  appr -->|yes| cp{"Prerequisites ran, and a checkpoint is unused, if needed?"}
+  cp -->|no| f501["Refused: F501, F503 or V102"]
   cp -->|yes| run["Approval and checkpoint used up; the tool runs"]
-  run --> out{"Output has the fields the ontology requires?"}
-  out -->|no| failed["Error result"]
-  out -->|yes| ok["Success result with evidence anchors"]
+  run --> out{"Output has the fields the ontology requires, as I-JSON?"}
+  out -->|no| failed["Error result: R402"]
+  out -->|yes| ok["Success result: the output's JSON text"]
   f502 --> trace[(Thread trace)]
   f501 --> trace
   failed --> trace
@@ -376,9 +433,10 @@ flowchart TB
 
 A refusal is an ordinary SA error result, so the runtime stores it and the
 model reads it like any other tool error ("persist tool errors as tool result
-messages rather than halting execution"). It carries the ACS code and a
-diagnostic in the format of
-[Standard §9.8](../../spec/STANDARD-v1.1.0.md#98-diagnostic-format):
+messages rather than halting execution"). It carries the ACS code, the text
+form `CODE NAME: message` of
+[§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure), and a diagnostic in the
+format of [§9.8](../../spec/STANDARD-v1.2.0.md#98-diagnostic-format):
 
 ```json
 {
@@ -404,19 +462,55 @@ The rules, and where each comes from:
 
 | ACS rule | In the binding |
 |---|---|
-| A `checkpoint` must have run before `mutate`, `send` and `rollback` (`requires` edges, [§4.3](../../spec/STANDARD-v1.1.0.md#43-edge-types-and-dependency-semantics)) | A call is refused until a `checkpoint` tool has executed in the thread |
-| One checkpoint authorises one step that requires one ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) | The newest valid checkpoint is marked used when the call runs; the next call needs its own |
-| A checkpoint taken before a wait "no longer authorises the step" ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events), W608) | A checkpoint counts only in the execution it was taken in (`state.execution.flowId`), and for ten minutes at most. A thread that went idle, for instance to wait for a person, needs a new one |
-| An action that requires approval runs only on a valid decision ([§5.14](../../spec/STANDARD-v1.1.0.md#514-approval)) | See [Approval](#approval) |
-| A refused or skipped step leaves the checkpoint valid | Nothing is used up until every check has passed |
-| A capability's output has the fields its contract requires | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array and that a required `confidence` is a number from 0 to 1 |
-| A step cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
+| Each capability a call's capabilities `requires` has run earlier in the scope ([§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency)) | A call is refused until a tool of each prerequisite has completed in the thread: F501 for a missing checkpoint, F503 for a rollback with none, V102 for any other |
+| One checkpoint authorises one call that requires one ([§5.2.2](../../spec/STANDARD-v1.2.0.md#522-checkpoint-use), [§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)) | The newest valid checkpoint is marked used when the call is allowed; the next call needs its own |
+| A checkpoint stops authorising at a boundary of the scope, and after 30 minutes at most ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)) | A checkpoint counts only in the execution it was taken in (`state.execution.flowId`), and for ten minutes at most, less where a tool sets `checkpoint_max_age_ms`. A thread that went idle, for instance to wait for a person, needs a new one |
+| A call that requires approval runs only on a valid decision for exactly that call ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | See [Approval](#approval) |
+| A refused call uses nothing ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)) | Nothing is used up until every check has passed |
+| A capability output carried as a string is the I-JSON text of the output object, with every required field ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)) | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array, that a required `confidence` is a number from 0 to 1, and that the output is I-JSON; it returns the text, or R402 |
+| A binding cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
+| The arguments of a call that requires approval are I-JSON ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | A call that needs approval whose arguments are not I-JSON (a lone surrogate, a number written as an integer beyond ±2^53) is refused with F502 before anything is asked or used: no decision can bind to them. The runtime parses a call's arguments before the tool sees them, so an integer literal beyond 2^53 arrives rounded and is checked, digested and run as rounded (a host gap the statement names) |
+| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, the arguments of a call that needs no approval with no canonical JSON, or a tool's `secrets` function that throws, refuse the call with R407 (recorded too: a `refused` entry, redacted with the secrets the layer holds). So does a nested call a composite makes whose checks the layer cannot complete (a read of its records that fails; arguments with no canonical JSON, a cycle among them), recorded with the call that covered it. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation and checkpoint maximum age); only the audit hook's entry for a call no grounded tool recorded has none |
 
-`precedes` and `conflicts_with` edges are not enforced at run time.
-`precedes` orders the steps of one workflow, and a thread has no fixed list of
-steps to order. `conflicts_with` forbids two capabilities in one
-`parallel_group`, and SA runs a thread's tool calls one at a time, so within a
-thread the conflict cannot arise.
+As [§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency) states, `precedes` and
+`conflicts_with` edges are not enforced over calls. `precedes` orders the
+steps of one workflow, and a thread has no fixed list of steps to order.
+`conflicts_with` forbids two capabilities in one `parallel_group`, and SA
+runs a thread's tool calls one at a time, so within a thread the conflict
+cannot arise.
+
+### Sends and memory
+
+Every grounded `send` tool obeys the destination policies the layer puts in
+force ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)):
+`configureLayer({destinations, profiles})` in the module that defines
+the agent's tools, before them (`profiles` are domain profiles every grounded
+tool applies, as `bindingProfiles` checked them, their
+`allowed_destinations` joining the host's; `profilePolicy`, the core's
+`CoreContext.profilePolicy(profiles)`, adds the destinations alone, and is
+refused when it also sets a minimum confidence or grounding policies, which
+it would not put in force). A call whose destination no policy allows, or is not a string, is
+refused with F504 before any approval is asked for. The tool's `destination`
+option says where the destination is: an RFC 6901 pointer into the
+arguments (`destination: '/to'`, which the annotation states as the
+binding record's `destination`) or a function of them (`(args) =>
+args.to`). A `send` tool defined without it has a destination the layer
+cannot tell, so while any policy is in force every call of it is refused
+with F504 ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)):
+the layer does not guess an argument (`destination`, say) that the model can
+set to an allowed value while the tool's code sends elsewhere. A tool's own
+`profiles` add their
+policies, and a composite's reach the sends its code invokes, at any depth.
+`memoryTools()` gives a `persist` and a `recall` tool on the
+thread's store (scope `session`), which apply its `profiles` and
+`grounding` options and the layer's profiles as any grounded tool does, and pass the session cases of
+`tests/conformance/memory/store.json`. Its entries survive a restart of the
+host (the runtime MUST keep thread values across process restarts and
+redeploys), are retained while the thread lasts unless their `ttl` ends
+them, and are limited to `max_value_bytes` per value (1,000,000 by
+default), with no limit of the binding's on their number: the runtime's
+own caps on key length, value size and key count, which it MAY set, apply
+(§4.5, what a host states).
 
 ### Checkpoints
 
@@ -427,7 +521,8 @@ find it.
 
 Approval is checked before the checkpoint, as in the reference executor, and
 a checkpoint counts only in the execution it was taken in, and for ten minutes
-at most. The time limit is the rule the binding guarantees. The execution rule
+at most ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls) allows up to 30). The time
+limit is the rule the binding guarantees. The execution rule
 rests on each execution of a thread having its own `flowId`; the 0.2.0 text
 calls it the "Unique execution ID" and says no more, so that rule holds as far
 as a runtime issues a new id when an idle thread runs again. A call made
@@ -483,9 +578,11 @@ flowchart TB
 
 - **What is approved.** The shown values are
   `[{ action, capability, args }]`: the tool's name, its capability and its
-  validated arguments. Their digest is the SHA-256 of their RFC 8785 canonical
-  JSON, as [§5.14](../../spec/STANDARD-v1.1.0.md#514-approval) defines it. The
-  binding's digest is tested against digests the reference executor computed.
+  validated arguments, as [§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls) defines them
+  for a call. Their digest is the SHA-256 of their RFC 8785 canonical JSON,
+  as [§5.14](../../spec/STANDARD-v1.2.0.md#514-approval) defines it. The binding's digest is tested
+  against digests the reference executor computed, the `tool_call` vectors
+  among them.
 - **Who approves.** `auth.caller` in the endpoint is "the authenticated
   identity when the request presented credentials the runtime verified". The
   model cannot produce it, and the endpoint never reads model output. Outside
@@ -528,27 +625,151 @@ flowchart TB
 
 | §5.14 field | In the binding |
 |---|---|
-| `approver.kind: human` | The authenticated caller of the endpoint. That the caller is a person is the deployment's assertion |
+| `approver.kind: human` | The authenticated caller of the endpoint, recorded as an approver identity per the identity map (`endpoint_caller`): principal `sa-user:<id>`, `kind: human` as the deployment's assertion, `role` when the caller holds the requested one, `authenticated_by: x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread. The trace entry's `approval` carries the approvers that counted when the call ran (an approval that had lapsed is not listed): their principals in `approvers` and their `approver_identities` (§5.17 of 1.2) |
 | `approver.role` | `approval.role`, checked against the caller's `roles` |
 | `approver.min_approvers` | `approval.min_approvers`, an integer of at least 1, counting distinct callers whose approval has not expired |
-| `mode` | Not distinguished: the Standard names `in_session` and `out_of_band` without defining them. The decision always arrives through the endpoint, not the conversation |
-| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
+| `mode` | Decisions arrive through an authenticated endpoint, separate from the conversation: `out_of_band` (§5.14 of 1.2) |
+| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON, which the endpoint takes in either case and stores in lowercase |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
 | `expires` | `approval.expires_ms`. As in the reference executor, no approval is accepted later than `expires_ms` after the request, and one stored later counts for nothing. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made, however many approvers decide. A rejection is accepted until the request is used or expires, since it can only stop the call |
 | `approver.kind: standing_mandate`, `when_unattended` | Not implemented: an unapproved call is refused, which is `when_unattended: fail` |
 
+### Composite tools
+
+A grounded tool can call other tools while it runs, through
+`state.invokeTool()`. It lists them in `invokes`, by the names the runtime
+knows them under ([§5.18.4](../../spec/STANDARD-v1.2.0.md#5184-composite-tools)):
+
+```typescript
+export default groundedTool({
+  name: 'apply_change',
+  capability: 'mutate',
+  invokes: { write_config: writeConfig, verify_config: verifyConfig },
+  // ...
+});
+```
+
+- **Flags and approval.** The composite takes the effective flags of every
+  tool it lists, transitively, joined with its own, and the approval they
+  need: the most approvers, the shortest expiry, and a role one of them
+  sets (its own first), since its approval covers their nested calls. A
+  listed tool is one defined with `groundedTool` or `controlTool`, or with
+  plain `defineTool` and an `acs` annotation that loads as a binding record;
+  one with no binding the binding loads throws when the composite is
+  defined (V107).
+- **The list is enforced twice.** The binding passes the names as the tool's
+  `uses` (an empty list for a tool with no `invokes`), so a runtime that
+  enforces `uses` refuses `invokeTool` and `queueTool` outside the list. The
+  wrapper refuses one itself (F504) and records it.
+- **Nesting tokens.** Each invocation the composite's own code makes while
+  it runs issues a one-shot token for that tool, those arguments and that
+  execution, carrying what the composite's call held. A grounded tool that
+  takes a token is covered by the composite's approval and checkpoint: it
+  needs neither again, and its trace entry names the composite's
+  (`covered_by`), when the decisions that approved the composite are valid
+  for its own approval too (its role, approvers and expiry), and, if it
+  needs a checkpoint, when the composite's call used one. The runtime runs
+  whatever tool it knows under the invoked name, which need not be the one
+  listed (a copy, a wrapper, another definition), so the composite's flags
+  prove nothing about the call. Every other check still applies, its
+  prerequisites included. A call that finds no token, or that what the
+  composite held does not cover, is checked as a call of its own, such as
+  one an endpoint or a parallel call makes while the composite runs: being
+  in the same thread or execution is not evidence that the composite made
+  it.
+- **Only while it runs.** Once the composite's own code has settled, an
+  invocation through the state it was given is not a nested call: code that
+  kept the state and invokes later is refused with F504, and the token of an
+  invocation the composite did not wait for is no longer honoured.
+- **Tools defined with plain `defineTool`.** Their code runs without the
+  wrapper, so the composite's nesting state checks an invocation of one
+  itself, as a grounded tool checks its own call: that a `persist` or
+  `audit` call's data holds no secret; a `send`'s destination, at its
+  record's `destination` pointer, against every policy in force; that the
+  composite's decisions are valid for its approval (no decision of its own
+  can be asked); its prerequisites; and, once it has run, what it returned:
+  the output contract (R402), the composite's grounding policies that
+  require its capability (F505) and its profiles' minimum confidence
+  (F504), since the plain tool has no options of its own. A call whose
+  output is refused has run and failed: it is no prerequisite that ran, so
+  a plain `checkpoint` tool that saved nothing does not let a rollback run.
+  It records the call before it runs and again with its outcome, with the
+  composite's `covered_by`.
+- **The tool the runtime runs.** The runtime runs the tool it registers
+  under an invoked name, and the binding cannot read its registry.
+  `registerTools({ name: tool, ... })`, called once the agent's tools are
+  defined, with the tools the runtime registers (the default exports of
+  `agents/tools/`, by file name), tells it. A plain tool's checks are its
+  listed binding's, so a nested call of one runs only under a name
+  registered as that very tool; and an invocation of a name registered as
+  another tool than the one listed, or as two, is refused (F504). A name a
+  composite lists for a grounded tool needs registration only while a
+  destination policy is in force (the layer's, the profiles' given to the
+  composite or to a composite enclosing it, or the profiles' given to the
+  listed tool or to a tool it invokes, transitively): the tool that runs
+  checks itself if it is grounded, but under a policy the binding invokes
+  no name whose tool may be one that sends anywhere (F504).
+- **Queued calls.** A call queued with `state.queueTool` runs after the
+  composite's call has ended, as a call of its own. The composite's state
+  queues a listed grounded or control tool, which checks itself when it
+  runs; it refuses to queue a listed plain tool, which nothing would check
+  then, a tool it does not list, and any tool once the composite's call has
+  ended: `queueTool` throws the F504 refusal, which is recorded.
+- **What `invokes` cannot bound.** The composite's own code can still write
+  the store or reach the network directly, so the flags it takes from
+  `invokes` are a lower bound. Declare `flags` or `additional_capabilities`
+  for what it does itself.
+- **Rules that reach a nested call without a token.** The destination
+  policies and output rules of the profiles given to a composite (and to
+  the composites enclosing it) apply to every call of a tool the composite
+  has a pending invocation of, whether or not the call takes the token:
+  the runtime gives a tool its validated arguments (a zod `.default()` or
+  `.transform()`, a key stripped), which change the digest; a listed tool
+  may state another name than the one it is invoked under; and a composite
+  running outside an execution (an endpoint, an effect) issues tokens that
+  cover nothing. Such a call asks its own approval and checkpoint, and its
+  send and output are still checked against those rules. The binding
+  cannot tell it from another call of the tool made at that moment (a
+  parallel call, an endpoint's), so that call is checked against them too.
+
+### Control tools
+
+A stop or session action (`stopTool`, `sessionStop`, `sessionFail`,
+`sessionStatus`) acts when the named tool is called, whatever its result.
+`controlTool` defines a tool for that job: a **control-only** tool
+([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)) that performs no capability, is never
+refused, and records each call (`control: true`). Its annotation is
+`{ standard, ontology, tool, control: true }`. A record that cannot be
+written is reported to `onRecordFailure`, and the call still succeeds. Bind
+each stop or session action to one, and have the model call it once the gated
+work has succeeded. `lintAgentBindings` reports a binding to a tool that can
+be refused (F506).
+
 ### Evidence and audit trail
 
 Every ACS capability returns `evidence_anchors`. A grounded tool's `execute`
-must return them as an array, and the wrapper refuses an output without them. The result
-the model sees is the capability's output as JSON, anchors included.
+must return them as an array, and the wrapper refuses an output without them.
+The result the model sees is the output's I-JSON text with nothing around it,
+which [§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results) requires of every capability
+output carried as a string. `encodeCapabilityOutput` from
+[`@synaptiai/acs-core`](../../packages/acs-core/README.md) writes it, and
+refuses (R402) an output that lacks a required field, has an
+`evidence_anchors` that is not an array or a required `confidence` outside 0
+to 1, or holds a value I-JSON does not allow, such as an integer beyond 2^53. `decodeCapabilityOutput`
+reads such a text back.
 
 Each call, refused ones too, becomes an entry in a trace kept in the thread's
 key-value store: the tool, its capability, a digest of its arguments, the
-outcome, the checkpoint and approval it used, and its evidence anchors. The
-entry is written as `started` before the tool's own code runs and completed
-when it returns, so a call that is cut off in between (the client API's stop
-route "**MUST** abort the execution in flight") still shows what it used.
+outcome, the checkpoint and approval it used, the composite call that covered
+it, the layer that decided it (`recorded_by`), and its evidence anchors. A
+control tool's call is an entry with `control: true`. `actionRecord(entry,
+scope)` exports an entry as an audit record
+([§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)), with the thread as
+`scope`: a refused call is `rejected` with its code, and the record keeps the
+entry's `recorded_by`. The entry is written as
+`started` before the tool's own code runs and completed when it returns, so a
+call that is cut off in between (the client API's stop route "**MUST** abort
+the execution in flight") still shows what it used.
 
 Two SA limits shape this part:
 
@@ -567,25 +788,111 @@ Two SA limits shape this part:
   `result`, `error`, `stack` and `attachments`. Evidence has to travel inside
   `result`, as text the model also reads.
 
+An evidence anchor is the Standard's one item of `evidence_anchors`
+([§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)): `{ref, kind}`
+with an optional `digest` of what was read. The example tools return such
+anchors (`fileAnchor` gives `{ref: 'file:...', kind: 'file', digest:
+'sha256:...'}`), and `checkpoint_config` also cites the record of the
+checkpoint it took, `{ref: 'checkpoint:<id>', kind: 'record'}`: an output
+that reports an action is grounded by that action's record (§3.1). A bare
+string or another object is a deprecated legacy form: the default output
+check accepts it, as 1.1's did.
+
+The thread's trace is its evidence store
+([§6.6](../../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)):
+`exportEvidence(state)` gives the thread's anchors as `EvidenceRecord`s
+(`record_id` `<threadId>/<seq>/<index>`, the execution as `run_id`, the
+step, capability, tool and call id), `getEvidence(state, recordId)` one by
+its id, `findEvidence(state, {capability, kind, run_id})` those that match,
+and `exportEvidenceJsonl(state)` the JSON Lines export, each in the order
+they were appended. The store is deleted with its thread, so it is `session`
+durability, not bounded (`EVIDENCE_STORE_INFO`): evidence that must outlive
+the thread is exported when it is written. When a call completes with
+evidence anchors, the binding emits `acs.evidence_recorded` through
+`state.emit`, at most once and only to connected clients: it is a
+notification, not the record, and an `emit` that is missing or throws never
+fails the call.
+
+A grounded tool takes four more options:
+
+- **`grounding`**: one policy or a list
+  ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). When a policy
+  requires the tool's capability, an output that is neither grounded nor
+  marked inferred (`inference_method` and `confidence`) is refused with F505
+  and its entry recorded `failed`. A policy naming a capability the
+  ontology does not define throws when the tool is defined (V101). Without
+  the option the output check is 1.1's: items, `inference_method` and an
+  optional `confidence` are not checked.
+- **`seen`**: what the call's producer had, as `evidence_seen`: only what
+  this call received (`refsIn(args)`) and what the tool's own code read
+  during `execute`. Never the stored trace: a ref there was seen by an
+  earlier request, not by this one.
+- **`secrets`**: values the redactor replaces besides its default patterns
+  and those `configureLayer({ secrets })` registers for every tool and the
+  audit hook. They join the layer's (an array when the tool is defined, a
+  function's values at each call), so every entry the binding writes, other
+  tools' and the audit hook's included, is redacted with them too. Each is
+  replaced as it is, JSON-escaped (also as HTML-safe encoders such as Go's write it) and percent-encoded (`encodedForms`). Redaction is always on: every trace entry's `evidence_anchors`
+  and `error`, and every notification, pass through it. A `persist` or
+  `audit` tool refuses data that holds a credential-shaped value or a
+  registered secret (F504, §5.18.10).
+- **`profiles`**: the domain profiles the layer applies
+  ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
+  computes them: `bindingProfiles(context, documents)` with a `CoreContext`
+  of `@synaptiai/acs-core/wasm`, once, passed to every tool, or to
+  `configureLayer({ profiles })` before the tools are defined, which applies
+  them to every grounded tool beside its own (a tool defined before the
+  layer's profiles changed refuses its calls, R407). They raise
+  each capability's flags at the call's effective risk, with the tools it
+  `invokes`, and a composite's flags for what the tools it invokes perform,
+  transitively, so profiles given to a composite alone reach its nested
+  calls; a call they require a person for counts only approvals the
+  deployment attests as a person's (`kind: human`) and its entries carry
+  `person_required`. A composite that invokes such a tool needs a person's
+  approval too, since its approval covers the nested call (§5.18.4); a
+  nested call that needs a person is not covered by an approval no person
+  gave. Their grounding policies join `grounding`; and an output below
+  their `minimum_confidence` fails with F504 (`reason_code`), after the
+  grounding check. Given to a composite, these output rules, with the
+  composite's own `grounding`, reach the output of every nested call it
+  covers, at any depth: a plain tool's (which has no options of its own)
+  and a grounded tool's, after the tool's own rules (§5.21.3). Their
+  `allowed_destinations` join the layer's
+  destination policies for the tool's `send` calls (§4.4.2) and, given to a
+  composite, for every send its code invokes, at any depth: a nested call
+  the binding attributes to the composite (§5.18.4) is checked against the
+  policies of the profiles of each composite enclosing it. A profile with
+  an error throws; each warning (a misspelled member is W604, and ignored) goes
+  to `onWarning`, `console.warn` by default, and stays in `warnings`. The
+  profiles are part of every record's `config_sha256`.
+
 ### Checking a prompt before it runs
 
 The ACS validator checks a workflow against the ontology before anything
 runs. A prompt has no steps, but it has a fixed list of tools, and
-`lintPromptTools` checks what can be checked from that list: every tool is
-classified, each grounded tool states the name the prompt offers it under (the
-name an approver is shown and the trace records), and no tool needs a
-capability the prompt never offers. A prompt
-with a `mutate` tool and no `checkpoint` tool is an error, because the model
-could never get the call accepted.
+`lintPromptTools` checks what can be checked from that list, as
+[§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools) recommends of a host that knows the tools it
+offers:
+
+| Code | When |
+|---|---|
+| W617 UNBOUND_TOOL (warning) | A tool has no `acs` annotation. Its calls are the strictest case |
+| V111 TOOL_NAME_MISMATCH (error) | A tool states another name than the one the prompt offers it under. An approver would be shown, and the trace would record, another tool's name |
+| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
+| F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval, those the applied profiles require included |
+
+A tool defined with `groundedTool` is checked with the flags it computed,
+those its domain profiles and the layer's raise included (§5.21.3), which
+its record does not state; `checkBindings` takes them as `raised`.
 
 `lintAgentBindings` checks an agent definition. `stopTool`, `sessionStop`,
 `sessionFail` and `sessionStatus` act when the named tool is called
 ([Agents §1.2](https://standardagentspec.org/0.2.0/specification/agents#12-sideconfig)),
 and the text does not make any of them depend on the call's result. A refused
 call to a bound tool could therefore end the turn or the session, and hand a
-parent the model's text for an action that never ran. Binding a tool that can
-be refused is an error; bind a separate tool that the model calls once the
-gated one has succeeded.
+parent the model's text for an action that never ran. Bind a
+[control tool](#control-tools) instead. Both checks are the package's
+`checkBindings`, which the Python loader mirrors and the binding fixtures pin.
 
 ### What this guarantees, and what it does not
 
@@ -600,10 +907,42 @@ gated one has succeeded.
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm finds none and is checked as a call of its own, without the rules of the composite's profiles. One invoked in a new execution, or with arguments the runtime changed (a default, a key stripped), takes no token either and asks its own approval and checkpoint, which can refuse a call the composite needed; the destination policies and output rules of the composites with a pending invocation of the tool still apply to it. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force (the layer's, nor one of the profiles given to the composite, to a composite enclosing it, or to the listed tool or a tool it invokes), a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
+| Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
 its rules are tested against an in-memory `ThreadState`. It has not been run
 in a Standard Agents runtime.
+
+### Conformance (class SL)
+
+The binding claims the safety-layer conformance class of
+[Standard 1.2.0 §10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance).
+Its statement,
+[`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json),
+says what it covers (calls of tools defined with `groundedTool` or
+`controlTool`) and what it cannot see (tools defined with plain `defineTool`,
+provider-executed tools, writes made by effects, hooks, handlers or
+endpoints), its scope (one thread) and boundaries (a new execution), a
+checkpoint's maximum age (ten minutes), how it obtains approval (recorded
+through the endpoint) and how it keeps a check and its use atomic (the
+runtime's order, and `serially` within a realm). It lists its host gaps, the
+rows of the table above that rest on SA behaviour the text does not state,
+and no check of §5.18.10 it does not apply: it applies the destination
+policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
+secret checks of `persist` and `audit`, redacts every trace entry it
+writes (§6.7), and checks every grounded tool's output, and a nested plain
+call's, against its capability's output contract (R402, §5.18.10).
+
+It passes the normative fixtures of the class
+([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
+the 36 binding fixtures in the package's `test/bindings.test.ts`, and the 32
+call-sequence fixtures, played against the in-memory thread, in the binding's
+`test/calls.test.ts`, which also compares the statement with the binding's
+constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call
+of an unbound tool, which a Standard Agents tool without the binding's
+wrapper never brings to the binding, and the other is for a layer that does
+not see the calls a composite makes, which the binding sees.
 
 ## Running ACS workflows with Standard Agents
 
@@ -620,11 +959,11 @@ from either standard.
 title: Three ways to run an ACS workflow with Standard Agents
 ---
 flowchart TB
-  accDescr: With the executor in Python, outside Standard Agents, an agent is reached through the Thread Client API and performs one capability, which needs nothing new from either standard; running the executor inside a thread, with a handler as its host or a tool the model calls advancing the run, needs a JavaScript build of the executor that does not exist yet.
+  accDescr: With the executor in Python, outside Standard Agents, an agent is reached through the Thread Client API and performs one capability, which needs nothing new from either standard; running the executor inside a thread, with a handler as its host or a tool the model calls advancing the run, needs a runtime that can load the executor's WebAssembly build, which SA 0.2.0 does not promise.
   q{"Where does the ACS executor run?"}
   q -->|outside, in Python| out["A Standard Agent performs one capability, through the Thread Client API"]
   out --> today(["Needs nothing new"])
-  q -->|inside a thread| inside["Needs a JavaScript build of the executor"]
+  q -->|inside a thread| inside["Needs a runtime that can load the WebAssembly executor"]
   inside --> h["A handler-backed side is the host"]
   inside --> t["A tool the model calls advances the run"]
 ```
@@ -632,8 +971,15 @@ flowchart TB
 | Arrangement | How | State |
 |---|---|---|
 | The executor outside, an SA agent as one capability | The Python host answers `InvokeCapability` by creating a thread, sending the inputs as a message and reading the result, through the [Thread Client API](https://standardagentspec.org/0.2.0/specification/threads/client-api) | Needs nothing new, with any runtime that exposes that API (a runtime "**SHOULD**"). It has not been built or run here. The result is the agent's last message, parsed as JSON |
-| A handler as the host | A handler-backed side restores the run from the thread's key-value store on each inbound message, answers the pending action, performs the next ones and saves the run | Needs the executor in JavaScript |
-| A tool the model calls | A function tool submits the model's output for the pending step and returns the next step | Needs the executor in JavaScript. Order is advisory unless every tool that can mutate guards itself, as grounded tools do |
+| A handler as the host | A handler-backed side restores the run from the thread's key-value store on each inbound message, answers the pending action, performs the next ones and saves the run | Needs `@synaptiai/acs-core/wasm` loaded in definition code, which SA 0.2.0 does not say a runtime allows |
+| A tool the model calls | A function tool submits the model's output for the pending step and returns the next step | Needs `@synaptiai/acs-core/wasm` loaded in definition code, as above. Order is advisory unless every tool that can mutate guards itself, as grounded tools do |
+
+Whichever arrangement runs the executor, the host turns the string a tool, a
+sub-prompt or the Thread Client API returns into the capability's output by
+[Standard 1.2.0 §5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results): the I-JSON text of the
+output object, nothing around it, with every required field, else R402.
+`decodeCapabilityOutput` (TypeScript) and `decode_capability_output` (Python)
+do this; `encodeCapabilityOutput` is what `groundedTool` returns.
 
 With a handler as host, each executor action has a Standard Agents mechanism:
 
@@ -641,20 +987,21 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 |---|---|
 | `InvokeCapability` | `state.invokeTool(name, inputs)`, or a child agent for `delegate`. The result string is parsed and checked against the capability's output contract |
 | `CreateCheckpoint`, `Rollback` | A grounded `checkpoint` or `rollback` tool |
-| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest |
+| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest. The prompt to the approvers is protocol traffic, not a `send` step, when it carries only the action's values ([STANDARD §5.19.6](../../spec/STANDARD-v1.2.0.md#5196-protocol-traffic)) |
 | `AwaitEvent` | The handler returns. An inbound message, a child's completion, or an authenticated endpoint that queues the event wakes it |
-| `Sleep`, deadlines | `scheduleEffect(name, args, delay)` with an effect that queues a message. SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
-| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code |
-| The run between turns | `run.snapshot()` in the key-value store or a file, restored at the start of the next turn |
+| `Sleep`, deadlines | `scheduleEffect(name, args, run.wake_at() - now)` with an effect that queues a message: `wake_at` is the earliest time a tick changes the run ([STANDARD §5.19.3](../../spec/STANDARD-v1.2.0.md#5193-time)). SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
+| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
+| The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
-What stands in the way is the language, not the design. The reference core is
-a Rust crate with Python bindings. It compiles for `wasm32-unknown-unknown`
-without source changes, but exports no JavaScript interface, and its context
-loads the ontology from file paths. A WebAssembly build also needs a runtime
-whose definition code can load WebAssembly, which SA 0.2.0 does not say; a
-plain TypeScript build of what a tool-calling binding needs (the ontology
-table, effective flags, canonical JSON, the digest) has no such dependency. See
-[Changes proposed to ACS](#changes-proposed-to-the-agent-capability-standard).
+What stands in the way is the runtime, not the design. The reference core is
+a Rust crate; the TypeScript package's `./wasm` entry runs it in process
+through a JSON interface over WebAssembly, with a context built from bundled
+documents rather than file paths (`AcsCore`, `CoreContext.start`,
+`CoreRun.next`/`submit`/`snapshot`). That needs a runtime whose definition
+code can load WebAssembly, which SA 0.2.0 does not say; the package's plain
+TypeScript entry (the ontology table, effective flags, canonical JSON, the
+digest) has no such dependency. See
+[What stays open](#what-stays-open).
 
 Until then, the rules a workflow would enforce by position are enforced per
 call by grounded tools. That covers the checkpoint and approval rules. It does
@@ -674,7 +1021,10 @@ things follow.
 - **Each agent grounds its own tools.** A parent's checkpoint does not cover
   what a child changes, and a parent's approval does not reach a child's
   tools. A child that mutates takes its own checkpoints and asks for its own
-  approvals, in its own thread.
+  approvals, in its own thread: the per-thread rule is the tool-calling
+  case of Standard 1.2.0
+  [§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation),
+  a delegate's checkpoint in the scope where its change is checked.
 - **A parent cannot see what a child may do.** Nothing in a child's definition
   that a parent can read says whether it mutates. `subagent_create` is
   injected by the runtime and has no `execute` to wrap. A parent that wants to
@@ -749,17 +1099,19 @@ Two Standard Agents behaviours limit what the host may report.
   terminated instance still counts toward `maxInstances`, so a relationship
   whose delegations may be retried or replaced leaves it unset.
 
-**The step's flags do not follow the target.** The ontology gives `delegate`
-`risk: medium` and `mutation: false`, and neither `requires_checkpoint` nor
-`requires_approval`. A `delegate` step therefore validates and runs with no
-checkpoint and no approval, whatever the target agent does. Until the Standard
-relates the step's flags to its target (the change on what crosses a
-delegation, [proposed below](#changes-proposed-to-the-agent-capability-standard)),
-the workflow author raises them on a step whose target can change state: a
-declaration stricter than the ontology "is allowed and takes effect"
-([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)).
+**The step's flags follow the target, when the workflow says so.** The
+ontology gives `delegate` `risk: medium` and no checkpoint or approval flag.
+Standard 1.2.0 lets a workflow that targets 1.2 declare the agents its
+`delegate` steps may delegate to, `agents`
+([§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets)); a
+`delegate` step then takes the maxima of its target's agent manifest
+([§5.15.1](../../spec/STANDARD-v1.2.0.md#5151-agent-manifests)): a delegation
+to an agent that may `mutate` needs a checkpoint before it (F501) and an
+approval, and without the target's manifest the executor does not delegate.
 
 ```yaml
+agents: [deployer]
+steps:
 - capability: checkpoint
   purpose: Save a restore point before handing the change over.
   store_as: checkpoint_out
@@ -767,23 +1119,64 @@ declaration stricter than the ontology "is allowed and takes effect"
     scope: service_config
 - capability: delegate
   purpose: Hand the change to the deploy agent.
-  requires_checkpoint: true
-  requires_approval: true
   store_as: delegate_out
   input_bindings:
     task: {apply: rotate_certificate}
     agent: deployer
 ```
 
-With `requires_approval: true` the executor asks for approval before it
-delegates, as the reference catalog's `multi_agent_orchestration` does. With
-`requires_checkpoint: true` the step needs a `checkpoint` step before it
-(F501 without one) and uses that checkpoint up. A target that must change
-nothing is bound `read_only: true` instead; the host attests it in
-`effective.read_only`, and the Standard "does not say how a host enforces
-`read_only`". The raised flags act in the delegating workflow only. Its
-checkpoint covers its own state, not what the child changes, as the first
-point under [Composing grounded agents](#composing-grounded-agents) says.
+In Standard Agents an agent exercises what the tools its prompts offer
+perform, what the tools they invoke perform (a composite's `invokes`,
+§5.18.4), and what its subagents may: `deriveAgentManifest`
+(`examples/standard_agents/src/acs/agents.ts`) builds an agent's manifest
+from the `acs` annotations of those tools, following `invokes` transitively,
+and from its subagents' manifests. It loads the annotations as binding
+records, as the layer does, and reads the capabilities from what loads.
+Pass the helper tools a composite invokes
+but the prompts do not offer as `invoked`. A manifest has no member for
+flags: its maxima are its capabilities'. So `deriveAgentManifest` throws
+`ManifestDerivationError` when an offered or invoked tool has no annotation
+(`unannotated`), an annotation does not load, which the layer would treat
+as an unbound `mutate` at high risk (`malformed`, with its diagnostics), a
+tool invokes one it is not given (`unresolvedInvokes`), a tool's declared `flags` are stricter than
+its capabilities' ontology flags (`raisedFlags`), or a subagent's manifest is
+missing (`missingChildren`): each would leave out what the agent can do and
+lower the delegate step's flags. Annotate every tool with its binding record,
+bind a tool whose flags exceed its capability's by the capability that has
+them, and give every invoked tool before declaring `agents`. More of the
+mapping:
+
+- In a workflow that targets 1.2, its `agents` are the parent's declared
+  relationships: `lintDelegationTargets` reports a listed agent with no
+  relationship as V107 at `agents[i]`, with its `path` (§9.8). Below 1.2,
+  or with no version, `agents` has no effect: `declaredAgents` returns
+  `null` and the lint reports nothing. Both take the catalog's version
+  header (`null` for none), as §11.5 requires of a binding.
+- A manifest's `task` is the subagent's declared arguments:
+  `subagent_arguments_required` is the host side of a task refusal
+  (`taskRefusal`, the package's `checkTask`).
+- A delegation with `read_only: true` that the SA host cannot confine is
+  refused; in a 1.2 workflow, one accepted without `effective.read_only:
+  true` fails the step, not retried.
+- Create-or-continue is `continues`
+  ([§5.15.3](../../spec/STANDARD-v1.2.0.md#5153-continuing-a-delegation)):
+  each call returns its own `task_id` and attests `effective.fresh_context:
+  false`; `continues` that resolves to null creates a new child.
+- The model family is `modelFamily(model)` of the SA model definition's
+  `model` (the package's derivation rule, §5.15), and `effective.model_id` is
+  that model id.
+
+A workflow that does not declare `agents` keeps 1.1's behaviour: the author
+raises a delegate step's flags by hand (`requires_checkpoint: true`,
+`requires_approval: true`), as the reference catalog's
+`multi_agent_orchestration` does, or binds `read_only: true`. The raised
+flags act in the delegating workflow only. Its checkpoint covers its own
+state, not what the child changes, as the first point under
+[Composing grounded agents](#composing-grounded-agents) says.
+
+**Diagnostics.** A diagnostic's `location` projects to a `DefinitionIssue`'s
+`path` by §9.8 (`issuePath` in the package): `workflow`, then
+`.steps[step]`, then `.` and `field` (`review.steps[1].gates[0].when`).
 
 ## Packaging and conformance
 
@@ -804,9 +1197,11 @@ Three things a consumer of such a package cannot yet do:
   definitions, behind loaders. `package.json` names a package's entry agents,
   effects, endpoints and required parent hooks, and says nothing about its
   tools.
-- **Claim conformance.** ACS conformance levels describe validators. Nothing
-  in either standard says what it means for an agent, or a runtime, to be
-  grounded.
+- **Claim conformance for the agent.** The safety-layer class of Standard
+  1.2.0, which the binding claims ([Conformance](#conformance-class-sl)),
+  covers its tools' calls.
+  Nothing in either standard says what it means for an agent, or a runtime,
+  to be grounded.
 - **Rely on a version pair.** The specification is 0.2.0; the types package
   that an agent compiles against is 0.45.10 and declares
   `SPEC_VERSION = "0.2.0"`. The two version independently, and the types
@@ -842,16 +1237,19 @@ delivery guarantee; the thread file system has no durability or isolation
 rules like the key-value store's; a parked human turn has no deadline; and a
 child returns text and files but no structured data.
 
-## Changes proposed to the Agent Capability Standard
+## Changes to the Agent Capability Standard
 
 The mapping tested ACS against a host it was not designed around, and found
 gaps of its own: 64 findings, listed with their evidence and their status in
 [`findings_agent_capability_standard.yaml`](../research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
-What could be fixed without changing the Standard's text has been fixed in
-this repository. The rules a binding needs are proposed in
-[RFC-0005](../../spec/RFC-0005-tool-calling-hosts.md), a Draft for Standard
-1.2.0. The rest waits for the maintainers' decision, as
-[GOVERNANCE](../../spec/GOVERNANCE.md) requires for normative changes.
+All 64 are fixed. Those that needed no new normative text were fixed in this
+repository first. The rest are in [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md),
+a Candidate Standard whose changes
+[RFC-0005](../../spec/RFC-0005-tool-calling-hosts.md) to
+[RFC-0010](../../spec/RFC-0010-profiles-trust-versioning-and-dialect.md)
+record and the maintainers accepted, as [GOVERNANCE](../../spec/GOVERNANCE.md)
+requires for normative changes. Every change is backward compatible: a
+workflow valid under 1.1.0 validates and runs as before.
 
 ### Fixed in this repository
 
@@ -875,47 +1273,91 @@ this repository. The rules a binding needs are proposed in
 - **Vectors other implementations can test against**: the reference
   executor's approval digests and the trust score arithmetic of §8, listed in
   [CONFORMANCE.md](../../spec/CONFORMANCE.md).
-- **Documents that say what is enforced.** Domain profiles are presented as
-  informative data, which they are: no shipped component applies one. The
-  executor's trace kinds are listed and tested.
+- **Documents that say what is enforced.** Domain profiles take effect where
+  a host or safety layer applies them, and §5.21 says what each rule changes:
+  the reference executor, the Python adapter and this binding (a grounded
+  tool's `profiles`) apply their flags, person requirements, grounding
+  policies, minimum confidence and destination policies
+  (`allowed_destinations`, §4.4.2; no shipped profile sets one); the
+  validator given a profile reports the flags it raises. The executor's trace kinds
+  are listed and tested.
 
-### Proposed in RFC-0005
+### Accepted in Standard 1.2.0
 
-1. **How the rules apply to a stream of tool calls.** The Standard defines
-   its rules over the steps of a workflow and does not define a safety layer.
-   The RFC says what a `requires` edge means over a sequence of calls, how
-   long a checkpoint stays valid and when it is used up, what an approval for
-   a call shows and binds, and how a refusal is reported. The reference
-   implementations disagreed on several of these.
-2. **A tool binding record.** The word "tool" does not occur in the
-   Standard. The RFC proposes one record (capability, domain, declared flags,
-   ontology version) and the rules for an unclassified tool, a tool that
-   performs several capabilities and a tool whose capability depends on its
-   arguments.
-3. **One evidence anchor item.** `evidence_anchors` has no item schema, and
-   the schemas and the Python SDK use three different vocabularies of anchor
-   kinds.
+1. **How the rules apply to a stream of tool calls** (RFC-0005). Standard
+   1.1.0 defined its rules over the steps of a workflow and no safety layer.
+   Standard 1.2.0 says what a `requires` edge means over a sequence of calls,
+   how long a checkpoint stays valid and when it is used up, what an approval
+   for a call shows and binds, and how a refusal and a layer's own failure
+   are reported ([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)),
+   with a conformance class for safety layers
+   ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)).
+   The reference implementations had disagreed on several of these; the
+   Python SDK adapter and this binding now pass the same fixtures.
+2. **A tool binding record** (RFC-0005). The word "tool" did not occur in
+   Standard 1.1.0. Standard 1.2.0 has one record (capability, domain,
+   declared flags, ontology version, the tools a composite invokes) and the
+   rules for an unbound tool, a tool that performs several capabilities, a
+   tool whose capability depends on its arguments and a tool that only
+   signals the host.
+3. **One evidence anchor item** (RFC-0008). `evidence_anchors` had no item
+   schema, and the schemas and the Python SDK used three different
+   vocabularies of anchor kinds. Standard 1.2.0 has one evidence anchor
+   ([§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)), which this
+   binding's tools return and its trace records; grounding policies that the
+   executor and the safety layers check
+   ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)); and a rule that
+   keeps secrets out of evidence, audit records and stored data
+   ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)).
+4. **Approval, runs and the host protocol** (RFC-0006). The approval request
+   and its digest are stated in full, approvers can be attested, and a
+   deferred run can be resumed
+   ([§5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)).
+   The host protocol is a published schema,
+   `schemas/host_protocol.schema.json`
+   ([§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol)), with
+   cancellation, wake-up times and a run record every host keeps, and
+   executors have a conformance class, EX
+   ([§10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)).
+5. **What crosses a delegation** (RFC-0007, RFC-0009). With agent manifests
+   and a workflow's `agents`, a `delegate` step's flags follow its target
+   ([§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets)). A
+   delegate's effects are outside its delegator's checkpoints, and a
+   rollback reaches only what its checkpoint captured
+   ([§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation)).
+   Catalogs gain manifests and qualified names
+   ([§5.1.1](../../spec/STANDARD-v1.2.0.md#511-catalog-manifests-and-qualified-names)).
+6. **Checkpoints, sends and memory** (RFC-0009): what a checkpoint captures
+   and a rollback restores
+   ([§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)),
+   idempotency keys and destination policies for transmissions
+   ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)), and memory
+   scopes ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
+7. **What applying a domain profile changes** (RFC-0010). Executors, safety
+   layers and validators apply profiles, which only tighten
+   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)); the
+   contracts' schema dialect is defined
+   ([§4.1.2](../../spec/STANDARD-v1.2.0.md#412-schema-dialect)), and so is
+   how a document cites the ontology's version
+   ([§11.6](../../spec/STANDARD-v1.2.0.md#116-ontology-versions)).
 
-### Still open
+### What stays open
 
-- **A JavaScript build of the core.** A published TypeScript package of what
-  a tool-calling binding needs (the ontology table, effective flags,
-  canonical JSON, the digest) would replace the private copy this binding
-  keeps. A WebAssembly interface to the validator and executor would let ACS
-  workflows run inside a Standard Agents thread; the crate already compiles
-  for `wasm32-unknown-unknown` unchanged. This is the roadmap's
+- **Publishing and loading the core in an SA runtime.** What a
+  tool-calling binding needs (the ontology table, effective flags, canonical
+  JSON, the digest, the binding checks and the text-only output rule) is in
+  the TypeScript package [`@synaptiai/acs-core`](../../packages/acs-core/README.md),
+  which the binding imports, and its `./wasm` entry runs the reference
+  validator and executor, domain profiles included, in process. The package
+  is published to npm from a tag `acs-core-vX.Y.Z` on `main` once the
+  repository enables publishing (`.github/workflows/publish-npm.yml`). What
+  stays open is SA's: whether definition code may load WebAssembly, and how
+  a packed agent's npm dependencies are resolved (bundle the package to be
+  safe). Until a runtime allows it, an ACS workflow does not run inside an
+  SA thread ([Running ACS workflows](#running-acs-workflows-with-standard-agents)).
+  This was the roadmap's
   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
   item.
-- **What crosses a delegation.** A delegate's effects are outside its
-  delegator's checkpoints, and the ontology gives `delegate` no checkpoint or
-  approval flag whatever the target may do. The Standard should say so, and
-  an agent manifest would let a validator derive a `delegate` step's flags
-  from its target. Until then a workflow author raises the step's flags
-  ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
-- **What applying a domain profile changes**, and **a rule that keeps
-  secrets out of evidence, audit records and stored data**, both normative.
-- **The host protocol as a published schema**, with a conformance class for
-  executors; today it is described in a guide and defined in Rust types.
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of

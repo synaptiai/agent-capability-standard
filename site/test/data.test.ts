@@ -189,7 +189,7 @@ describe('workflows', () => {
   it('accepts any workflow name the Standard allows (§5.1 names no pattern)', () => {
     // The workflow page escapes the id where it writes it into CSS.
     for (const id of ['Bad', 'a-b', 'a"]{}', 'a b']) {
-      expect(parseCatalog('t.yaml', `"${id.replace(/"/g, '\\"')}":\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()).map((w) => w.id), id).toEqual([id]);
+      expect(parseCatalog('t.yaml', `${JSON.stringify(id)}:\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()).map((w) => w.id), id).toEqual([id]);
     }
   });
 
@@ -279,12 +279,13 @@ describe('skills', () => {
   });
 
   it('shows the frontmatter name and joins composed skills to workflows', () => {
-    // skills/capability-gap-analysis/SKILL.md frontmatter "name: gap-analysis-workflow";
-    // skills/debug-workflow/SKILL.md line 14 says it runs debug_code_change.
+    // skills/capability-gap-analysis/SKILL.md frontmatter "name: capability-gap-analysis"
+    // (the directory name, ACS-59); skills/debug-workflow/SKILL.md line 14
+    // says it runs debug_code_change.
     const gap = s.find((x) => x.dir === 'capability-gap-analysis')!;
-    expect(gap.name).toBe('gap-analysis-workflow');
+    expect(gap.name).toBe('capability-gap-analysis');
     expect(gap.workflow).toBe('capability_gap_analysis');
-    expect(s.find((x) => x.dir === 'digital-twin-sync-loop')!.name).toBe('digital-twin-sync-workflow');
+    expect(s.find((x) => x.dir === 'digital-twin-sync-loop')!.name).toBe('digital-twin-sync-loop');
     expect(s.find((x) => x.dir === 'debug-workflow')!.workflow).toBe('debug_code_change');
     expect(s.find((x) => x.dir === 'perspective-validation')!.workflow).toBeUndefined();
   });
@@ -299,7 +300,7 @@ describe('diagnostics', () => {
 
   it('has the codes of the current Standard §9.2-§9.7, each section with its §9.1 severity', () => {
     // Table rows counted per section of the newest spec/STANDARD-v*.md
-    // (9, 6, 4, 6, 5 and 16, so 46 codes, in 1.1.0).
+    // (9, 6, 4, 6, 5 and 16, so 46 codes, in 1.1.0; 11, 6, 4, 8, 6 and 26, so 61, in 1.2.0).
     const rows = diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`));
     const perSection = Object.fromEntries(Object.keys(rows).map((n) => [n, d.filter((x) => x.section === n).length]));
     expect(perSection).toEqual(rows);
@@ -316,7 +317,8 @@ describe('diagnostics', () => {
       category: 'Validation Errors',
       sectionAnchor: '92-validation-errors',
       anchor: 'v101',
-      descriptionMd: 'Capability ID not found in ontology',
+      // From 1.2.0 the row goes on to list where else an id is checked (§5.18.1, §5.20, ...).
+      descriptionMd: expect.stringMatching(/^Capability ID not found in ontology: a step's; .* \(§11\.6\)$/),
     });
     expect(d.find((x) => x.code === 'W602')).toMatchObject({ name: 'SAFETY_FLAG_DOWNGRADE', severity: 'warning' });
     expect(d.find((x) => x.code === 'F505')!.severity).toBe('error');
@@ -433,6 +435,10 @@ describe('citation, versions and counts', () => {
     expect(v.plugin).toMatch(/^\d+\.\d+\.\d+$/);
     expect(v.pythonPackage).toMatch(/^\d+\.\d+\.\d+$/);
     expect(repoText('pyproject.toml')).toContain(`version = "${v.pythonPackage}"`);
+    // packages/acs-core/package.json "version" (0.1.0 when the package was added).
+    const tsPackage = JSON.parse(repoText('packages/acs-core/package.json')) as { version: string };
+    expect(v.typescriptPackage).toBe(tsPackage.version);
+    expect(v.typescriptPackage).toMatch(/^\d+\.\d+\.\d+$/);
     expect(v.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 

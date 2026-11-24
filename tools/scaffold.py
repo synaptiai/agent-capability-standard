@@ -131,14 +131,67 @@ def scaffold_capability(args: argparse.Namespace) -> None:
                 "result": {
                     "description": "Primary output",
                 },
+                # The common output fields every contract declares
+                # (STANDARD v1.2 §4.1.1, ontology 2.2.0 templates A, B, D, E).
                 "evidence_anchors": {
                     "type": "array",
-                    "description": "Source references",
+                    "description": (
+                        "What the output is based on, as evidence anchors "
+                        "(Standard v1.2 §6.5). An empty list grounds nothing, "
+                        "and the output is then marked inferred (§3.1)."
+                    ),
+                    "items": {
+                        "anyOf": [
+                            {"$ref": "schemas/event_schema.yaml#/types/Anchor"},
+                            {
+                                "type": "string",
+                                "description": (
+                                    "Deprecated legacy form (Standard v1.2 §6.5) - "
+                                    "an anchor given by its ref alone, with no kind; "
+                                    "accepted, never counted toward grounding, "
+                                    "removed in 2.0"
+                                ),
+                            },
+                            {
+                                "type": "object",
+                                "description": (
+                                    "Deprecated legacy form (Standard v1.2 §6.5) - an "
+                                    "object that is not an evidence anchor (no kind, "
+                                    "or a kind outside the vocabulary); accepted, "
+                                    "never counted toward grounding, removed in 2.0"
+                                ),
+                            },
+                        ]
+                    },
                 },
                 "confidence": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
+                    "description": (
+                        "The producer's probability that the output's claim is "
+                        "correct, self-reported unless the host documents a "
+                        "calibration (Standard v1.2 §4.1.1)"
+                    ),
+                },
+                "inference_method": {
+                    "type": "string",
+                    "description": (
+                        "How the output was reached when it is not grounded in "
+                        "evidence; with confidence it marks the output inferred "
+                        "(Standard v1.2 §3.1, §4.1.1). A producer should use "
+                        "model_knowledge, deduction, induction, abduction, analogy, "
+                        "statistical, simulation, assumption or an x- vendor value; "
+                        "a grounding policy (§5.20) requires one of them."
+                    ),
+                },
+                "uncertainty": {
+                    "$ref": "schemas/event_schema.yaml#/types/Uncertainty",
+                    "description": (
+                        "The uncertainty of the output's principal value; its "
+                        "confidence equals the output's confidence (Standard v1.2 "
+                        "§4.1.1)"
+                    ),
                 },
             },
         },
@@ -328,12 +381,25 @@ def scaffold_profile(args: argparse.Namespace) -> None:
     # Title-case for comment header
     title = name.replace("-", " ").title()
 
+    ontology = REPO_ROOT / "schemas" / "capability_ontology.yaml"
+    ontology_version = "2.2.0"
+    if ontology.exists():
+        meta = (yaml.safe_load(ontology.read_text(encoding="utf-8")) or {}).get("meta")
+        if isinstance(meta, dict) and meta.get("version"):
+            ontology_version = str(meta["version"])
+
     content = f"""\
 # {title} Domain Profile
 # TODO: Add description of this domain profile
+#
+# A domain profile applies where a host, a safety layer or a validator
+# applies it (Standard v1.2 §5.21); its rules only tighten. Check it with
+# python tools/validate_profiles.py.
 
 domain: {name}
 version: "1.0.0"
+standard: "1.2.0"
+ontology: "{ontology_version}"
 description: |
   TODO: Describe the {name} domain profile.
 
@@ -342,6 +408,7 @@ trust_weights:
   secondary_source: 0.75
   external_source: 0.60
 
+# Takes only the members shown (another is S303).
 risk_thresholds:
   auto_approve: low
   require_review: medium
@@ -350,15 +417,19 @@ risk_thresholds:
     - mutate
     - send
 
+# Keys are capability ids or "*" (quoted), for every capability but
+# checkpoint: a checkpoint step is exempt, and an unknown id is V101, an
+# error.
 checkpoint_policy:
-  before_mutation: always
-  before_send: always
-  before_modification: high_risk
+  mutate: always
+  send: always
+  "*": high_risk
 
+# Takes only the members shown (another is S303).
 evidence_policy:
   required_anchor_types:
     - file
-    - tool_output
+    - tool
   minimum_confidence: 0.7
   require_grounding:
     - generate

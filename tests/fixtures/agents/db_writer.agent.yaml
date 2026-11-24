@@ -1,0 +1,10 @@
+# An agent manifest (STANDARD v1.2 §5.15.1) for the S3 fixtures: an agent
+# that may mutate (maxima: high, mutation, checkpoint and approval; its
+# read-only maxima: low, nothing required), with a declared task.
+agent: db-writer
+standard: "1.2"
+ontology: "2.2"
+capabilities: [retrieve, checkpoint, mutate]
+task:
+  table: {type: string, required: true}
+  rows: {type: array}

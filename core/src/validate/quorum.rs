@@ -548,6 +548,23 @@ pub(crate) fn check(
     }
 
     if let Some(families) = strings(q, "require_model_families", &at, report) {
+        // Families are written in lowercase and compared exactly (§5.15).
+        for (i, f) in families.iter().enumerate() {
+            if !crate::names::is_model_family(f) {
+                let mut d = at(Diagnostic::new(
+                    Code::NoncanonicalName,
+                    format!(
+                        "model family '{f}' is not canonical: [a-z][a-z0-9_-]*, compared exactly (§5.15)"
+                    ),
+                ))
+                .at("field", format!("quorum.require_model_families[{i}]"));
+                let lower = f.to_ascii_lowercase();
+                if crate::names::is_model_family(&lower) {
+                    d = d.suggest(format!("write it '{lower}'"));
+                }
+                report.push(d);
+            }
+        }
         // Literal model families can be checked now; any other reviewer's
         // family is only known at runtime.
         let literal: Option<HashSet<&str>> = delegates

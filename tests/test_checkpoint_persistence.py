@@ -7,8 +7,12 @@ restore it in a new instance, surviving process restarts.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -72,17 +76,25 @@ class TestStatePersistence:
 
 
 class TestCrossInstanceRestore:
-    """Tests for restoring state across different tracker instances."""
+    """A new tracker reads back another's records: it finds them (to restore
+    and audit), but they were taken in another scope, so they authorise
+    none of its calls (STANDARD 1.2.0 section 5.18.5)."""
 
     def test_restore_active_checkpoint(self, chk_dir: Path) -> None:
         # Instance 1: create checkpoint
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
         chk_id = tracker1.create_checkpoint(scope=["*"], reason="persist test")
 
-        # Instance 2: should see the checkpoint
+        # Instance 2: finds the checkpoint, which authorises nothing here
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
-        assert tracker2.has_valid_checkpoint()
-        assert tracker2.get_active_checkpoint_id() == chk_id
+        found = tracker2.find_checkpoint(chk_id)
+        assert found is not None and found.is_valid()
+        assert not tracker2.has_valid_checkpoint()
+        assert tracker2.get_active_checkpoint_id() is None
+        assert tracker2.valid_checkpoint_id() is None
+        assert tracker2.validate_and_reserve("call") == (False, None)
+        # Still instance 1's to use.
+        assert tracker1.validate_and_reserve("call") == (True, chk_id)
 
     def test_restore_history(self, chk_dir: Path) -> None:
         # Instance 1: create and consume
@@ -102,11 +114,13 @@ class TestCrossInstanceRestore:
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
         tracker1.create_checkpoint(scope=["src/*.py", "tests/*.py"], reason="scoped")
 
-        # Instance 2: verify scope matching works
+        # Instance 2: the scope reads back; no valid checkpoint covers it
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
-        assert tracker2.has_checkpoint_for_scope("src/main.py")
-        assert tracker2.has_checkpoint_for_scope("tests/test_foo.py")
-        assert not tracker2.has_checkpoint_for_scope("docs/README.md")
+        (found,) = tracker2.get_history()
+        assert found.matches_scope("src/main.py")
+        assert found.matches_scope("tests/test_foo.py")
+        assert not found.matches_scope("docs/README.md")
+        assert not tracker2.has_checkpoint_for_scope("src/main.py")
 
     def test_restore_metadata(self, chk_dir: Path) -> None:
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
@@ -115,9 +129,160 @@ class TestCrossInstanceRestore:
         )
 
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
-        active = tracker2.get_active_checkpoint()
-        assert active is not None
-        assert active.metadata == {"tool": "Edit", "path": "foo.py"}
+        (found,) = tracker2.get_history()
+        assert found.metadata == {"tool": "Edit", "path": "foo.py"}
+
+
+def _on_file(chk_dir: Path) -> dict[str, dict[str, Any]]:
+    """The checkpoints the state file records, by id."""
+    state = json.loads((chk_dir / "tracker_state.json").read_text(encoding="utf-8"))
+    return {e["id"]: e for e in [state["active"], *state["history"]] if e}
+
+
+class TestSharedDirectory:
+    """Trackers on one directory are separate scopes that share one state
+    file: each write merges, so none drops or rewinds another's records,
+    and nothing one reads back authorises its calls (STANDARD 1.2.0
+    section 5.18.5)."""
+
+    @pytest.mark.parametrize("b_loads", ["before c1", "after c1"])
+    def test_a_stale_tracker_neither_drops_nor_rewinds_anothers_records(
+        self, chk_dir: Path, b_loads: str
+    ) -> None:
+        """Before, B rewrote the file from its stale copy: c1, which A had
+        used, read back unused, and a new tracker ran a call on it."""
+        a = CheckpointTracker(checkpoint_dir=chk_dir)
+        b = (
+            CheckpointTracker(checkpoint_dir=chk_dir)
+            if b_loads == "before c1"
+            else None
+        )
+        c1 = a.create_checkpoint(["*"], "A's")
+        if b is None:
+            b = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert a.validate_and_reserve("w1") == (True, c1)
+        assert a.consume_if_valid("w1") == c1
+        c2 = b.create_checkpoint(["*"], "B's")
+        on_file = _on_file(chk_dir)
+        assert on_file[c1]["consumed"] is True
+        assert on_file[c2]["consumed"] is False
+        later = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert later.validate_and_reserve("x") == (False, None)
+        used = later.find_checkpoint(c1)
+        assert used is not None and used.consumed
+        assert later.find_checkpoint(c2) is not None
+
+    def test_a_tracker_keeps_anothers_holds_and_boundaries_to_itself(
+        self, chk_dir: Path
+    ) -> None:
+        a = CheckpointTracker(checkpoint_dir=chk_dir)
+        c1 = a.create_checkpoint(["*"], "A's")
+        b = CheckpointTracker(checkpoint_dir=chk_dir)
+        assert a.validate_and_reserve("w1") == (True, c1)
+        # B's boundary ends B's checkpoints, not A's; its writes keep A's
+        # hold.
+        assert b.end_validity("B's turn ended") == []
+        c2 = b.create_checkpoint(["*"], "B's")
+        state = json.loads((chk_dir / "tracker_state.json").read_text("utf-8"))
+        assert {"checkpoint_id": c1, "holder": "w1"} in state["reservations"]
+        assert _on_file(chk_dir)[c1]["invalidated_at"] is None
+        assert a.consume_if_valid("w1") == c1
+        assert b.validate_and_reserve("w2") == (True, c2)
+        assert b.consume_if_valid("w2") == c2
+        on_file = _on_file(chk_dir)
+        assert on_file[c1]["consumed"] and on_file[c2]["consumed"]
+
+    def test_a_record_a_tracker_removes_stays_removed(self, chk_dir: Path) -> None:
+        a = CheckpointTracker(checkpoint_dir=chk_dir)
+        a.create_checkpoint(["*"], "expires")
+        assert a._active_checkpoint is not None
+        a._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        b = CheckpointTracker(checkpoint_dir=chk_dir)
+        b.create_checkpoint(["*"], "B's")
+        assert a.clear_expired() == 1
+        assert len(_on_file(chk_dir)) == 1
+
+    def test_concurrent_writers_lose_nothing(self, chk_dir: Path) -> None:
+        import threading
+
+        trackers = [CheckpointTracker(checkpoint_dir=chk_dir) for _ in range(4)]
+        taken: list[str] = []
+        lock = threading.Lock()
+        barrier = threading.Barrier(len(trackers))
+
+        def take(tracker: CheckpointTracker) -> None:
+            barrier.wait()
+            for n in range(10):
+                checkpoint_id = tracker.create_checkpoint(["*"], f"{n}")
+                with lock:
+                    taken.append(checkpoint_id)
+
+        threads = [threading.Thread(target=take, args=(t,)) for t in trackers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+        assert set(_on_file(chk_dir)) == set(taken)
+        assert len(taken) == 40
+
+
+class TestShippedStateFile:
+    """A state file git tracks came with the repository: its checkpoints
+    were taken by no call of this layer, so the tracker does not load it
+    (STANDARD 1.2.0 sections 5.18.5, 5.18.6)."""
+
+    @staticmethod
+    def _git(path: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=path,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.invalid",
+            },
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def _shipped(self, tmp_path: Path) -> Path:
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        upstream = tmp_path / "upstream"
+        upstream.mkdir()
+        self._git(upstream, "init", "-q")
+        CheckpointTracker(checkpoint_dir=upstream / ".checkpoints").create_checkpoint(
+            scope=["*"], reason="shipped"
+        )
+        self._git(upstream, "add", "-f", ".checkpoints/tracker_state.json")
+        self._git(upstream, "commit", "-q", "-m", "state")
+        victim = tmp_path / "victim"
+        self._git(tmp_path, "clone", "-q", str(upstream), str(victim))
+        return victim / ".checkpoints"
+
+    def test_a_cloned_state_file_authorises_nothing(self, tmp_path: Path) -> None:
+        shipped = self._shipped(tmp_path)
+        assert (shipped / "tracker_state.json").is_file()
+        tracker = CheckpointTracker(checkpoint_dir=shipped)
+        assert not tracker.has_valid_checkpoint()
+        assert tracker.validate_and_reserve("call") == (False, None)
+
+    def test_the_same_state_untracked_still_loads(self, tmp_path: Path) -> None:
+        shipped = self._shipped(tmp_path)
+        assert CheckpointTracker(checkpoint_dir=shipped).checkpoint_count == 0
+        own = tmp_path / "own"
+        own.mkdir()
+        (own / "tracker_state.json").write_bytes(
+            (shipped / "tracker_state.json").read_bytes()
+        )
+        # Loaded (found), and, like any record read back, authorising
+        # nothing.
+        loaded = CheckpointTracker(checkpoint_dir=own)
+        assert loaded.checkpoint_count == 1
+        assert not loaded.has_valid_checkpoint()
 
 
 class TestCorruptStateHandling:
@@ -161,9 +326,11 @@ class TestCorruptStateHandling:
         chk_id = tracker.create_checkpoint(scope=["*"], reason="recovery")
 
         # Verify new state is clean
+        assert json.loads(state_file.read_text(encoding="utf-8"))["active"]["id"] == (
+            chk_id
+        )
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir)
-        assert tracker2.has_valid_checkpoint()
-        assert tracker2.get_active_checkpoint_id() == chk_id
+        assert tracker2.find_checkpoint(chk_id) is not None
 
 
 class TestAtomicWrites:
@@ -235,9 +402,9 @@ class TestClearExpiredPersistence:
     def test_clear_expired_persists_active_removal(self, chk_dir: Path) -> None:
         """Expired active checkpoint is cleared from disk after clear_expired()."""
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
-        # Create checkpoint that is already expired
-        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
-        # Force expiry by setting expires_at to the past
+        # Create a checkpoint, then force expiry by setting expires_at to the
+        # past (an expiry must be more than zero, STANDARD 1.2.0 §5.18.6)
+        tracker1.create_checkpoint(scope=["*"], reason="will expire")
         assert tracker1._active_checkpoint is not None
         tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10
@@ -257,7 +424,7 @@ class TestClearExpiredPersistence:
         """Expired history entries are removed from disk after clear_expired()."""
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
         # Create and consume a checkpoint (moves to history)
-        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
+        tracker1.create_checkpoint(scope=["*"], reason="will expire")
         assert tracker1._active_checkpoint is not None
         tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10
@@ -290,10 +457,12 @@ class TestHistoryPruningPersistence:
         # History should be exactly max_h (active is separate)
         assert len(tracker1._checkpoint_history) == max_h
 
-        # Restore from disk — history should still be exactly max_h
+        # On disk: an active checkpoint and exactly max_h in the history
+        state = json.loads((chk_dir / "tracker_state.json").read_text("utf-8"))
+        assert state["active"] is not None
+        assert len(state["history"]) == max_h
+        # Restore from disk: every record read back, active + history
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir, max_history=max_h)
-        assert len(tracker2._checkpoint_history) == max_h
-        # Active + history = max_h + 1
         assert tracker2.checkpoint_count == max_h + 1
 
     def test_history_cap_on_load_with_large_state(self, chk_dir: Path) -> None:

@@ -1,0 +1,18 @@
+# Standard version: 1.2.0
+# A literal task against the agent's declared task (STANDARD v1.2 §5.15.2):
+# colour is undeclared (S303) and table is missing (S304).
+write:
+  goal: Have the writer update a table.
+  risk: high
+  agents: [db-writer]
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: delegate
+    purpose: Ask the writer to update the table.
+    store_as: write_out
+    input_bindings:
+      agent: db-writer
+      task: {rows: [], colour: x}

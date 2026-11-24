@@ -1,0 +1,30 @@
+# Standard version: 1.2.0
+# W618 (STANDARD v1.2 §5.2.3): a join other than all_complete, and a join on
+# a step that declares no parallel_group, are ignored with a warning.
+gather_with_any:
+  goal: Gather from two sources in one group, with an undefined join.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the logs.
+    store_as: logs
+    parallel_group: gather
+    join: any_complete
+    input_bindings:
+      target: logs
+  - capability: search
+    purpose: Search the code.
+    store_as: code
+    parallel_group: gather
+    input_bindings:
+      query: error
+lonely_join:
+  goal: A step that joins nothing.
+  risk: low
+  steps:
+  - capability: observe
+    purpose: Observe the system.
+    store_as: seen
+    join: all_complete
+    input_bindings:
+      target: system

@@ -33,7 +33,7 @@ enum Producer<'s> {
 }
 
 fn resolve_root<'s>(scope: &'s Scope, root: &str) -> Option<Producer<'s>> {
-    if let Some(s) = scope.stores.get(root) {
+    if let Some(&s) = scope.stores.get(root) {
         return Some(Producer::Store(s));
     }
     scope.inputs.get(root).map(Producer::Input)
@@ -48,19 +48,41 @@ fn infer(schema: &Value, r: &Ref) -> (Type, bool) {
 
 impl Checker<'_> {
     /// Check every reference in a binding value (strings, lists, mappings).
+    /// `field` holds only names this Standard defines and indices.
     pub fn scan(&self, value: &Value, scope: &Scope, mode: Mode, field: &str, report: &mut Report) {
-        self.scan_inner(value, scope, mode, field, report, 0);
+        let mut tokens = crate::diag::split_field(field);
+        self.scan_inner(value, scope, mode, field, &mut tokens, report, 0);
     }
 
+    /// [`Checker::scan`] at `base.key`, where `key` is a key the document
+    /// chose (a `wait.correlate` key).
+    pub fn scan_key(
+        &self,
+        value: &Value,
+        scope: &Scope,
+        mode: Mode,
+        base: &str,
+        key: &str,
+        report: &mut Report,
+    ) {
+        let mut tokens = crate::diag::split_field(base);
+        tokens.push(key.to_string());
+        let field = format!("{base}.{key}");
+        self.scan_inner(value, scope, mode, &field, &mut tokens, report, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn scan_inner(
         &self,
         value: &Value,
         scope: &Scope,
         mode: Mode,
         field: &str,
+        tokens: &mut Vec<String>,
         report: &mut Report,
         depth: usize,
     ) {
+        let before = report.diagnostics.len();
         if depth > MAX_SCAN_DEPTH {
             report.push(
                 self.loc
@@ -70,13 +92,20 @@ impl Checker<'_> {
                     )
                     .at("field", field),
             );
+            report.stamp_since(before, tokens);
             return;
         }
         match value {
-            Value::String(s) => self.check_string(s, scope, mode, field, report),
+            Value::String(s) => {
+                self.check_string(s, scope, mode, field, report);
+                report.stamp_since(before, tokens);
+            }
             Value::Array(items) => {
                 for (i, v) in items.iter().enumerate() {
-                    self.scan_inner(v, scope, mode, &format!("{field}[{i}]"), report, depth + 1);
+                    tokens.push(i.to_string());
+                    let sub = format!("{field}[{i}]");
+                    self.scan_inner(v, scope, mode, &sub, tokens, report, depth + 1);
+                    tokens.pop();
                 }
             }
             Value::Object(m) => {
@@ -92,10 +121,14 @@ impl Checker<'_> {
                             .at("field", field),
                     );
                     self.check_string(&rebuilt, scope, mode, field, report);
+                    report.stamp_since(before, tokens);
                     return;
                 }
                 for (k, v) in m {
-                    self.scan_inner(v, scope, mode, &format!("{field}.{k}"), report, depth + 1);
+                    tokens.push(k.clone());
+                    let sub = format!("{field}.{k}");
+                    self.scan_inner(v, scope, mode, &sub, tokens, report, depth + 1);
+                    tokens.pop();
                 }
             }
             _ => {}
@@ -309,7 +342,7 @@ impl Checker<'_> {
                     "consumer input type mismatch: input '{key}' expects {expected} but got {actual} {from}"
                 ),
             )
-            .at("field", format!("input_bindings.{key}"))
+            .at_field_key("input_bindings", key)
             .at("input_key", key)
             .at("expected_type", expected.to_string())
             .at("actual_type", actual.to_string());

@@ -1,0 +1,22 @@
+{
+  "description": "A member with no I-JSON form (section 5.14), here an integer beyond 2^53 under an x- key, is S303: the record could not be recorded or digested, and is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "x-build": 1152921504606846976
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "look"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

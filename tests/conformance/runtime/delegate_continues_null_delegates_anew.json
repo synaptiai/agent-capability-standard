@@ -1,0 +1,74 @@
+{
+  "description": "continues that resolves to null delegates anew: a fresh context is allowed (\u00a75.15.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "continues": "${prior}",
+            "read_only": true
+          }
+        }
+      ],
+      "inputs": {
+        "prior": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {
+    "prior": null
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "inputs": {
+          "continues": null
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "effective": {
+            "fresh_context": true,
+            "read_only": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

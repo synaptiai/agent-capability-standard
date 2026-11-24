@@ -1,0 +1,21 @@
+# Standard version: 1.2.0
+# A listed agent without a manifest (STANDARD v1.2 §5.15.2): W621, whatever
+# the step declares, since the executor will not delegate there.
+review:
+  goal: Have two reviewers critique the draft.
+  risk: low
+  agents: [reviewer-a, ghost]
+  steps:
+  - capability: delegate
+    purpose: Ask the reviewer.
+    store_as: review_a
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}
+  - capability: delegate
+    purpose: Ask the ghost.
+    store_as: review_g
+    requires_approval: true
+    input_bindings:
+      agent: ghost
+      task: {draft: d}

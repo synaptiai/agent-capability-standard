@@ -18,10 +18,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ..state.redaction import DEFAULT_REDACTOR, Redactor
+
 logger = logging.getLogger(__name__)
 
 # Default maximum events retained in memory
 DEFAULT_MAX_EVENTS = 10000
+
+# Who writes the action records this log exports (STANDARD v1.2 §6.4).
+RECORDED_BY = {"name": "grounded_agency.coordination"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +46,9 @@ class CoordinationEvent:
         timestamp: ISO 8601 UTC timestamp.
         details: Free-form event-specific data.
         evidence_refs: Evidence anchor refs associated with this event.
+        intent: What the event records, as its audit record's ``intent``
+                (an ``audit`` step's event type, say); empty for the
+                event type.
     """
 
     event_id: str
@@ -53,10 +61,11 @@ class CoordinationEvent:
         default_factory=lambda: types.MappingProxyType({})
     )
     evidence_refs: tuple[str, ...] = field(default_factory=tuple)
+    intent: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
-        return {
+        out: dict[str, Any] = {
             "event_id": self.event_id,
             "event_type": self.event_type,
             "source_agent_id": self.source_agent_id,
@@ -66,6 +75,38 @@ class CoordinationEvent:
             "details": dict(self.details),
             "evidence_refs": list(self.evidence_refs),
         }
+        if self.intent:
+            out["intent"] = self.intent
+        return out
+
+    def to_action_record(
+        self, recorded_by: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """The event as an audit record (STANDARD v1.2 §6.4): an action
+        record of this log's own. The event's ``details`` stay under
+        ``details``, with the log's own members (``source_agent_id``,
+        ``target_agent_ids``, ``evidence_refs``) written last, so a detail
+        cannot replace them; nothing in ``details`` becomes a member of the
+        record. Its ``intent`` is the event's, else the event type, so the
+        record is the same whenever it is given; ``recorded_by`` defaults to
+        this log."""
+        record: dict[str, Any] = {
+            "action_id": self.event_id,
+            "timestamp": self.timestamp,
+            "actor": "agent",
+            "intent": self.intent or self.event_type,
+            "status": "executed",
+        }
+        if self.capability_id:
+            record["capability"] = self.capability_id
+        record["details"] = {
+            **dict(self.details),
+            "source_agent_id": self.source_agent_id,
+            "target_agent_ids": list(self.target_agent_ids),
+            "evidence_refs": list(self.evidence_refs),
+        }
+        record["recorded_by"] = dict(recorded_by or RECORDED_BY)
+        return record
 
 
 class CoordinationAuditLog:
@@ -76,9 +117,26 @@ class CoordinationAuditLog:
     Thread-safe via ``threading.Lock()``.  Uses ``collections.deque``
     with a max length so memory stays bounded — oldest events are
     silently dropped when the limit is reached.
+
+    Every value an event keeps passes through ``redactor`` before the event
+    is kept (its ``details``, ``intent``, ``evidence_refs``, event type, agent
+    ids and capability), so no member of the event, its :meth:`to_dict` or
+    its action record holds a secret (STANDARD v1.2 §6.7).
     """
 
-    def __init__(self, max_events: int = DEFAULT_MAX_EVENTS) -> None:
+    STORE_INFO: types.MappingProxyType[str, str] = types.MappingProxyType(
+        {"name": "grounded_agency.coordination.audit_log", "durability": "memory"}
+    )
+    """The ``store`` an ``audit`` step reports (§6.3): the log is held in
+    memory, bounded by ``max_events``, and keeps no retention of its own."""
+
+    def __init__(
+        self,
+        max_events: int = DEFAULT_MAX_EVENTS,
+        *,
+        redactor: Redactor | None = None,
+    ) -> None:
+        self.redactor: Redactor = redactor or DEFAULT_REDACTOR
         self._max_events = max_events
         self._events: deque[CoordinationEvent] = deque(maxlen=max_events)
         self._total_recorded: int = 0
@@ -96,35 +154,53 @@ class CoordinationAuditLog:
         capability_id: str = "",
         details: dict[str, Any] | types.MappingProxyType[str, Any] | None = None,
         evidence_refs: list[str] | tuple[str, ...] | None = None,
+        intent: str = "",
     ) -> CoordinationEvent:
-        """Create and append a new audit event.
+        """Create and append a new audit event. ``intent`` is its audit
+        record's ``intent``, when not the event type. Every value the event
+        keeps is redacted (§6.7) before the event is kept: ``details``,
+        ``intent`` and ``evidence_refs`` (an evidence ref can be a URL with a
+        token in it) as much as the event type, the agent ids and the
+        capability.
 
         Returns the recorded ``CoordinationEvent`` so callers can
         reference its ``event_id`` if needed.
         """
+        kept_details: Any = (
+            json.loads(json.dumps(details, default=str)) if details else {}
+        )
+        kept_details, _ = self.redactor.redact(kept_details)
+        text = self._redacted_text
         event = CoordinationEvent(
             event_id=os.urandom(16).hex(),
-            event_type=event_type,
-            source_agent_id=source_agent_id,
-            target_agent_ids=tuple(target_agent_ids),
-            capability_id=capability_id,
+            event_type=text(event_type),
+            source_agent_id=text(source_agent_id),
+            target_agent_ids=tuple(text(t) for t in target_agent_ids),
+            capability_id=text(capability_id),
             timestamp=datetime.now(UTC).isoformat(),
-            details=types.MappingProxyType(
-                json.loads(json.dumps(details, default=str)) if details else {}
+            details=types.MappingProxyType(kept_details),
+            evidence_refs=(
+                tuple(text(r) for r in evidence_refs) if evidence_refs else ()
             ),
-            evidence_refs=tuple(evidence_refs) if evidence_refs else (),
+            intent=text(intent),
         )
         with self._lock:
             self._events.append(event)
             self._total_recorded += 1
         logger.debug(
             "Audit: %s from %s -> %s [%s]",
-            event_type,
-            source_agent_id,
-            target_agent_ids,
+            event.event_type,
+            event.source_agent_id,
+            list(event.target_agent_ids),
             event.event_id[:8],
         )
         return event
+
+    def _redacted_text(self, value: Any) -> Any:
+        """A string with every secret replaced; any other value as it is
+        (the event's members are strings; ``details`` are redacted as
+        JSON)."""
+        return self.redactor.redact_text(value)[0] if isinstance(value, str) else value
 
     # ------------------------------------------------------------------
     # Queries
@@ -170,6 +246,13 @@ class CoordinationAuditLog:
         """Serialize all events to a list of dicts."""
         with self._lock:
             return [e.to_dict() for e in self._events]
+
+    def export_action_records(self) -> list[dict[str, Any]]:
+        """Every event as an audit record, an action record of this log's
+        own (STANDARD v1.2 §6.4): the log keeps its own form internally and
+        gives its records in the canonical shape."""
+        with self._lock:
+            return [e.to_action_record() for e in self._events]
 
     def __len__(self) -> int:
         with self._lock:

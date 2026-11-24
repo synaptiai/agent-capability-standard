@@ -6,7 +6,7 @@ This directory contains domain-specific workflow templates and configuration pro
 
 Domain templates provide ready-to-use starting points for specific industry verticals. Each domain includes:
 
-- **Profile** — Trust weights, risk thresholds, and checkpoint policies calibrated for the domain, as informative data (see [Status of Domain Profiles](#status-of-domain-profiles))
+- **Profile** — Trust weights, risk thresholds, checkpoint rules and evidence requirements calibrated for the domain, which take effect where a host, a safety layer or the validator applies the profile (see [Status of Domain Profiles](#status-of-domain-profiles))
 - **Workflows** — Pre-composed workflow patterns using the 36 atomic capabilities
 - **Documentation** — Guidance on customization and integration
 
@@ -88,8 +88,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - High trust for calibrated cameras (0.93-0.95)
-- Checkpoints before all image modifications and generation
-- Evidence requires image references and bounding boxes
+- Checkpoints before every `mutate` and `persist` (writing an image or a result out) and before any medium- or high-risk step
+- `detect`, `classify`, `predict`, `generate` and `transform` must cite evidence (`file`, `sensor` and other kinds; a bounding box goes in the anchor's `ref`)
 
 ### Audio
 
@@ -101,8 +101,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - High trust for studio recordings (0.93-0.95)
-- Checkpoints before speaker identification
-- Evidence requires time segments and signal quality metrics
+- Checkpoints before every `mutate` and `persist` (writing a transcript or synthesized audio out) and before any high-risk step; none before speaker identification
+- `detect`, `classify`, `predict`, `generate` and `transform` must cite evidence (`file`, `sensor` and other kinds; a time segment goes in the anchor's `ref`)
 
 ### Multi-modal
 
@@ -114,8 +114,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - Trust decreases with each generation step
-- Checkpoints before all modality conversions
-- Evidence requires source/target modality identification and alignment scores
+- Checkpoints before every `persist` (writing converted content out) and before any medium- or high-risk step
+- `detect`, `classify`, `predict`, `plan`, `generate` and `transform` must cite evidence, one anchor per contributing modality
 
 ## Profile Schema
 
@@ -124,12 +124,15 @@ All domain profiles follow the schema defined in [profile_schema.yaml](../../sch
 Key sections:
 
 ```yaml
-trust_weights:      # Source-specific trust (0.0 to 1.0)
-risk_thresholds:    # What risk levels require human involvement
-checkpoint_policy:  # When to create checkpoints
-evidence_policy:    # Evidence requirements for claims
-domain_sources:     # Expected data sources
-workflows:          # Recommended workflows
+standard: "1.2.0"   # The Standard and ontology the profile is written for
+ontology: "2.2.0"
+trust_weights:      # Source and trust-class weights (0.0 to 1.0)
+risk_thresholds:    # Which steps need approval, and which a person's
+checkpoint_policy:  # Capability ids or "*" that need a checkpoint
+evidence_policy:    # Grounding, anchor kinds and a minimum confidence
+allowed_destinations: # Where a send may go
+domain_sources:     # Expected data sources (informative)
+workflows:          # Recommended workflows (informative)
 ```
 
 ## Creating a Custom Domain
@@ -143,15 +146,17 @@ workflows:          # Recommended workflows
 
 3. **Set risk thresholds** appropriate for your domain
 
-4. **Define checkpoint policy** based on what actions are critical
+4. **Define checkpoint policy**: capability ids, or `"*"` (quoted) for every one but `checkpoint`, mapped to `always`, `high_risk`, `medium_risk` or `never`. Check the profile with `python tools/validate_profiles.py`: an unknown id or member is an error ([§5.21.2](../../spec/STANDARD-v1.2.0.md#5212-loading-a-profile))
 
-5. **Create workflow files** in `schemas/workflows/`. Nothing applies a profile to a workflow ([Status of Domain Profiles](#status-of-domain-profiles)), so write the checkpoints and approvals the domain needs into the workflows themselves: a `checkpoint` step before a step that changes state, and `requires_approval: true` or `requires_checkpoint: true` on a step whose ontology flags are weaker than the profile asks for
+5. **Create workflow files** in `schemas/workflows/`. A workflow does not select its profile, so one that needs a checkpoint or an approval wherever it runs declares it: a `checkpoint` step, `requires_approval: true`
 
 6. **Document** in `docs/domains/<your-domain>/README.md`
 
 7. **Validate** workflows against the capability ontology (without `--catalog` the validator checks only `schemas/workflow_catalog.yaml`). CI runs this in strict mode for every file in `schemas/workflows/`, so warnings fail too:
    ```bash
    python tools/validate_workflows.py --catalog schemas/workflows/<your-domain>_workflows.yaml --strict
+   python tools/validate_workflows.py --catalog schemas/workflows/<your-domain>_workflows.yaml --strict \
+     --profile schemas/profiles/<your_domain>.yaml   # as a run under the profile would be checked
    ```
 
 ## How Domains Demonstrate Domain-Agnostic Capabilities
@@ -180,16 +185,34 @@ This proves the atomic capability set is complete — different domains compose 
 
 ## Status of Domain Profiles
 
-A domain profile is informative data: what the authors of a domain consider appropriate for trusting sources, involving a person, taking checkpoints and expecting evidence. Nothing applies one. Standard 1.1.0 names `profile` as a descriptive workflow field ([§5.1](../../spec/STANDARD-v1.1.0.md#51-catalog-and-workflow-definition)) and lets a `trust_weights` key `trust_class:<class>` override a trust class's weight ([§8.3](../../spec/STANDARD-v1.1.0.md#83-trust-classes)), but says neither how a run selects a profile nor what its other settings change. No shipped component reads `schemas/profiles/*.yaml`: `grounded_agency/trust.py` applies `trust_weights` only when its caller passes them, and `tools/validate_profiles.py` checks a profile's shape only. Some settings use words outside the Standard's vocabulary: `require_human` admits `critical`, which is not a risk level of [§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition), and no `required_anchor_types` entry in the shipped profiles is an `Anchor.kind` of `schemas/event_schema.yaml`.
+A domain profile takes effect where it is **applied** (Standard 1.2.0
+[§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): by the reference
+executor (`Run.start(profiles=…)`, `WorkflowRunner(profiles=…)`), the
+validator (`tools/validate_workflows.py --profile`), the Python adapter
+(`GroundedAgentConfig(profiles=…)`), the Standard Agents binding and
+TypeScript hosts through the WebAssembly core; never by a workflow's
+`profile` field or the plugin hooks. Applied, a profile only tightens: its
+thresholds and `checkpoint_policy` raise the flags of steps and calls (under
+`require_human` and `block_autonomous` a person approves each one, which no
+standing mandate covers), and an output fails that its grounding policy
+(`require_grounding`, §5.20) finds ungrounded (F505) or that is below
+`minimum_confidence` (F504). Its `trust_weights` replace weights where a
+host computes trust scores (`grounded_agency.trust`). A profile with an
+error is refused; a misspelled top-level member is a logged warning (W604).
 
-So `block_autonomous`, `require_human`, `checkpoint_policy` and `minimum_confidence` take effect only where a host implements them or a workflow author writes them into the workflow, for example as a step's `requires_approval` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)). Where this documentation says a profile requires or blocks something, that is what the profile declares. What is enforced rests on the ontology's safety flags:
+A profile's destination policy (`allowed_destinations`, §4.4.2) is in force
+beside the host's: a `send` it does not allow fails F504 before approval.
+No shipped profile (`schemas/profiles/`, version 2.0.0) sets one.
+
+Without a profile, what is enforced rests on the ontology's safety flags:
 
 | What is enforced | By what |
 |------------------|---------|
-| No `mutate`, `send` or `rollback` step without a `checkpoint` step before it (V102); a step's flags are never weaker than the ontology's (W602) | The validator in `core/` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) |
+| No `mutate`, `send` or `rollback` step without a `checkpoint` step before it (V102); a step's flags are never weaker than the ontology's (W602) | The validator in `core/` ([§5.2.1](../../spec/STANDARD-v1.2.0.md#521-safety-flags)) |
 | A step runs only on a valid checkpoint and a decision on what the approver was shown, where its flags require them | The reference executor ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) |
 | A tool call needs a checkpoint (F501, strict mode) and is put to the host for approval (F502), where its capability requires them | The Python adapter ([Claude Agent SDK integration](../integrations/claude_agent_sdk.md)) |
 | A Write, Edit, MultiEdit, NotebookEdit or Bash call needs a valid checkpoint marker (F501) | The plugin hook ([Safety hooks](../../hooks/README.md)) |
+| A profile's `evidence_policy`, when a host applies it, is a grounding policy: outputs are grounded or marked inferred (F505, [§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)) | The executor, the Python adapter and the binding |
 
 ## Related Documentation
 

@@ -1,15 +1,15 @@
-"""The trust arithmetic of STANDARD v1.1.0 §8.1 to §8.3
-(``grounded_agency/trust.py``) against the language-neutral vectors in
+"""The trust arithmetic of STANDARD v1.2.0 §8.1 to §8.3
+(``grounded_agency/trust.py``) against the normative vectors in
 ``tests/conformance/trust/``, against ``schemas/authority_trust_model.yaml``,
-and against the one other place that computes the decay, the benchmark
-scenario ``benchmarks/scenarios/conflicting_sources.py``.
+and against the benchmark scenario
+``benchmarks/scenarios/conflicting_sources.py``, which resolves its
+conflicts with :func:`grounded_agency.trust.resolve`.
 """
 
 from __future__ import annotations
 
 import json
 import math
-import random
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +18,14 @@ import pytest
 from benchmarks.scenarios import conflicting_sources as benchmark
 from grounded_agency import _core
 from grounded_agency.trust import (
+    TIE_BREAKERS,
     TRUST_CLASS_PREFIX,
+    Candidate,
     TrustModel,
     decay_factor,
     half_life_days,
+    merge_trust_weights,
+    resolve,
     static_weight,
     trust_score,
 )
@@ -40,7 +44,13 @@ def load(name: str) -> dict[str, Any]:
 DECAY = load("decay.json")
 WEIGHT = load("weight.json")
 SCORE = load("score.json")
-FILES = {"decay.json": DECAY, "weight.json": WEIGHT, "score.json": SCORE}
+RESOLVE = load("resolve.json")
+FILES = {
+    "decay.json": DECAY,
+    "weight.json": WEIGHT,
+    "score.json": SCORE,
+    "resolve.json": RESOLVE,
+}
 
 
 def cases(doc: dict[str, Any]) -> list[Any]:
@@ -68,15 +78,15 @@ def model(schema: dict[str, Any]) -> TrustModel:
 # ---------------------------------------------------------------------------
 
 
-def test_the_directory_holds_the_three_files() -> None:
+def test_the_directory_holds_the_four_files() -> None:
     assert sorted(p.name for p in VECTORS.glob("*.json")) == sorted(FILES)
 
 
 @pytest.mark.parametrize("name", sorted(FILES))
 def test_a_vector_file_states_its_status_tolerance_and_fields(name: str) -> None:
     doc = FILES[name]
-    assert doc["standard"] == "1.1.0"
-    assert doc["status"] == "informative"
+    assert doc["standard"] == "1.2.0"
+    assert doc["status"] == "normative"
     assert 0 < doc["tolerance"] <= 1e-9
     names = [v["name"] for v in doc["vectors"]]
     assert len(set(names)) == len(names)
@@ -84,25 +94,25 @@ def test_a_vector_file_states_its_status_tolerance_and_fields(name: str) -> None
         assert set(vector) <= set(doc["fields"]), vector["name"]
     # ASCII, so no tool that normalises or transcodes text can change it.
     assert (VECTORS / name).read_text(encoding="utf-8").isascii()
-    # What the Standard leaves open is listed, not left unsaid.
-    assert doc["not_covered"]
-    assert all(isinstance(case, str) and case for case in doc["not_covered"])
-    assert "`not_covered`" in doc["description"]
+    # 1.2 decides every case 1.1 left open (§8.1): nothing is left out.
+    assert "not_covered" not in doc
 
 
-def test_the_decay_vectors_stay_out_of_what_the_standard_leaves_open() -> None:
-    """No vector pins a reading of a case in ``not_covered``: a floor above
-    0.5, where §8.1's two sentences conflict, or a negative age."""
-    for vector in DECAY["vectors"]:
-        assert vector.get("min_trust", 0.0) <= 0.5, vector["name"]
-        assert vector["age_hours"] >= 0, vector["name"]
-    assert SCORE["model"]["decay_model"]["min_trust"] <= 0.5
-    for vector in SCORE["vectors"]:
-        assert vector["age_hours"] >= 0, vector["name"]
-        assert "confidence" in vector, vector["name"]
+def test_an_error_vector_expects_no_value() -> None:
+    """A vector that expects a refusal states no numeric result."""
+    for doc, results in (
+        (DECAY, {"decay_factor"}),
+        (WEIGHT, {"weight"}),
+        (SCORE, {"decay_factor", "weight", "score"}),
+    ):
+        for vector in doc["vectors"]:
+            if vector.get("expect_error"):
+                assert not results & set(vector), vector["name"]
+            else:
+                assert results <= set(vector), vector["name"]
 
 
-@pytest.mark.parametrize("name", ["weight.json", "score.json"])
+@pytest.mark.parametrize("name", ["weight.json", "score.json", "resolve.json"])
 def test_a_vector_file_reads_the_canonical_model(
     name: str, schema: dict[str, Any]
 ) -> None:
@@ -132,35 +142,56 @@ def vector_decay(vector: dict[str, Any], half_life: str, min_trust: Any) -> floa
     return decay_factor(vector["age_hours"], half_life_days(half_life) * 24, min_trust)
 
 
+def profile_weights(vector: dict[str, Any]) -> dict[str, float] | None:
+    """A vector's ``profile_trust_weights``: one profile's, or a list of
+    several profiles' merged (the lowest per key, §8.3)."""
+    given = vector.get("profile_trust_weights")
+    if isinstance(given, list):
+        return merge_trust_weights(*given)
+    return given
+
+
 def vector_weight(vector: dict[str, Any], model: dict[str, Any]) -> float:
     return static_weight(
         model["source_ranking"]["weights"],
         model["trust_classes"]["weights"],
         source_type=vector.get("source_type"),
         trust_class=vector.get("trust_class"),
-        profile_trust_weights=vector.get("profile_trust_weights"),
+        profile_trust_weights=profile_weights(vector),
     )
 
 
 @pytest.mark.parametrize("vector", cases(DECAY))
 def test_decay_vector(vector: dict[str, Any]) -> None:
+    if vector.get("expect_error"):
+        with pytest.raises(ValueError):
+            vector_decay(vector, vector["half_life"], vector.get("min_trust"))
+        return
     got = vector_decay(vector, vector["half_life"], vector.get("min_trust"))
     assert got == within(DECAY, vector["decay_factor"])
 
 
 @pytest.mark.parametrize("vector", cases(WEIGHT))
 def test_weight_vector(vector: dict[str, Any]) -> None:
+    if vector.get("expect_error"):
+        with pytest.raises(ValueError):
+            vector_weight(vector, WEIGHT["model"])
+        return
     assert vector_weight(vector, WEIGHT["model"]) == within(WEIGHT, vector["weight"])
 
 
 @pytest.mark.parametrize("vector", cases(SCORE))
 def test_score_vector(vector: dict[str, Any]) -> None:
     settings = SCORE["model"]["decay_model"]
+    if vector.get("expect_error"):
+        with pytest.raises(ValueError):
+            vector_weight(vector, SCORE["model"])
+        return
     decay = vector_decay(vector, settings["half_life"], settings.get("min_trust"))
     weight = vector_weight(vector, SCORE["model"])
     assert decay == within(SCORE, vector["decay_factor"])
     assert weight == within(SCORE, vector["weight"])
-    assert trust_score(weight, decay, vector["confidence"]) == within(
+    assert trust_score(weight, decay, vector.get("confidence", 1.0)) == within(
         SCORE, vector["score"]
     )
 
@@ -169,14 +200,59 @@ def test_score_vector(vector: dict[str, Any]) -> None:
 def test_score_vector_through_the_model(vector: dict[str, Any]) -> None:
     """``TrustModel`` composes the three functions, with ages in days."""
     model = TrustModel.from_mapping(SCORE["model"])
-    got = model.score(
-        vector["age_hours"] / 24,
-        source_type=vector.get("source_type"),
-        trust_class=vector.get("trust_class"),
-        confidence=vector["confidence"],
-        profile_trust_weights=vector.get("profile_trust_weights"),
-    )
-    assert got == within(SCORE, vector["score"])
+
+    def score() -> float:
+        return model.score(
+            vector["age_hours"] / 24,
+            source_type=vector.get("source_type"),
+            trust_class=vector.get("trust_class"),
+            confidence=vector.get("confidence", 1.0),
+            profile_trust_weights=profile_weights(vector),
+        )
+
+    if vector.get("expect_error"):
+        with pytest.raises(ValueError):
+            score()
+        return
+    assert score() == within(SCORE, vector["score"])
+
+
+@pytest.mark.parametrize("vector", cases(RESOLVE))
+def test_resolve_vector(vector: dict[str, Any]) -> None:
+    """§8.2: each strategy's result, ties and refusals."""
+    model = TrustModel.from_mapping(RESOLVE["model"])
+    candidates = [
+        Candidate(
+            age_days=c["age_hours"] / 24,
+            source_type=c.get("source_type"),
+            trust_class=c.get("trust_class"),
+            confidence=c.get("confidence"),
+        )
+        for c in vector["candidates"]
+    ]
+
+    def run() -> Any:
+        return resolve(
+            model,
+            candidates,
+            field=vector.get("field"),
+            strategy=vector["strategy"],
+            profile_trust_weights=vector.get("profile_trust_weights"),
+            tie_breakers=vector.get("tie_breakers"),
+        )
+
+    expect = vector["expect"]
+    if expect.get("error"):
+        with pytest.raises(ValueError):
+            run()
+        return
+    got = run()
+    assert got.outcome == expect["outcome"]
+    assert got.winner == expect.get("winner")
+    assert list(got.order) == expect.get("order", [])
+    assert list(got.tied) == expect.get("tied", [])
+    if "scores" in expect:
+        assert list(got.scores) == [within(RESOLVE, x) for x in expect["scores"]]
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +285,17 @@ def test_the_factor_never_rises_with_age() -> None:
     assert all(0.25 <= f <= 1.0 for f in factors)
 
 
+def test_an_age_below_zero_counts_as_zero() -> None:
+    """§8.1: a future-dated observation is never fresher than a present
+    one; refusing it would make clock skew between sources an error."""
+    assert decay_factor(-1, 240) == 1.0
+    assert decay_factor(-1e-9, 240, 0.25) == 1.0
+    assert decay_factor(-math.inf, 240) == 1.0
+
+
 @pytest.mark.parametrize(
     ("age", "half_life", "min_trust"),
     [
-        (-1, 240, None),
-        (-1e-9, 240, 0.25),
         (math.nan, 240, None),
         (1, 0, None),
         (1, -240, None),
@@ -243,7 +325,22 @@ def test_half_life_days(text: str, days: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["P0D", "P00D", "10D", "P10", "P1W", "PT240H", "P1.5D", "P-1D", "", 10]
+    "text",
+    [
+        "P0D",
+        "P00D",
+        "10D",
+        "P10",
+        "P1W",
+        "PT240H",
+        "P1.5D",
+        "P-1D",
+        "",
+        10,
+        # Digits outside ASCII, which `\\d` and int() would read as 10
+        "P\u0661\u0660D",
+        "P\uff11\uff10D",
+    ],
 )
 def test_half_life_days_refuses_other_forms(text: Any) -> None:
     with pytest.raises(ValueError):
@@ -406,25 +503,7 @@ def test_from_mapping_needs_a_half_life_and_unit_weights(
 
 
 def test_the_benchmark_reads_the_same_model(model: TrustModel) -> None:
-    assert benchmark._TRUST_WEIGHTS == model.source_weights
-    assert benchmark._TRUST_HALF_LIFE_HOURS == model.half_life_days * 24
-    assert benchmark._TRUST_MIN == model.min_trust
-
-
-def test_the_decay_is_the_benchmark_scenarios() -> None:
-    """Same arithmetic, so the same value to the last bit, also where the
-    Standard's sentences pull apart: a ``min_trust`` above 0.5 holds the
-    factor above 0.5 at one half-life."""
-    rng = random.Random(8)
-    ages = [0.0, 0.1, 1.0, 240.0, 480.0, 5000.0]
-    ages += [rng.uniform(0, 2000) for _ in range(200)]
-    for half_life in (24.0, 240.0, 717.5):
-        for min_trust in (0.0, 0.25, 0.6, 1.0):
-            for age in ages:
-                assert decay_factor(age, half_life, min_trust) == (
-                    benchmark._recency_weight(age, half_life, min_trust)
-                )
-    assert decay_factor(240, 240, 0.6) == 0.6
+    assert benchmark._TRUST_MODEL == model
 
 
 def test_the_score_is_the_benchmark_scenarios(model: TrustModel) -> None:
@@ -439,3 +518,103 @@ def test_the_score_is_the_benchmark_scenarios(model: TrustModel) -> None:
             source = case[key]
             got = model.score(source["hours_ago"] / 24, source_type=source["type"])
             assert got == pytest.approx(result[f"score_{key}"], rel=1e-12, abs=0)
+
+
+# ---------------------------------------------------------------------------
+# §8.2: field authority, tie-breakers and the strategies
+# ---------------------------------------------------------------------------
+
+
+def test_the_model_reads_field_authority_fields_not_examples(
+    schema: dict[str, Any],
+) -> None:
+    model = TrustModel.from_mapping(schema)
+    fields = schema["field_authority"]["fields"]
+    assert model.field_authority == {
+        f["field"]: tuple(f["authorities"]) for f in fields
+    }
+    assert model.tie_breakers == tuple(
+        schema["conflict_resolution_function"]["tie_breakers"]
+    )
+    # examples that differ from fields change nothing: they are illustrative.
+    changed = {
+        **schema,
+        "field_authority": {
+            "fields": [{"field": "serial_number", "authorities": ["human_note"]}],
+            "examples": [
+                {"field": "serial_number", "authorities": ["hardware_sensor"]}
+            ],
+        },
+    }
+    other = TrustModel.from_mapping(changed)
+    assert other.field_authority == {"serial_number": ("human_note",)}
+    pick = other.resolve(
+        [
+            Candidate(age_days=0, source_type="hardware_sensor"),
+            Candidate(age_days=0, source_type="human_note"),
+        ],
+        field="serial_number",
+        strategy="prefer_authoritative_sources",
+    )
+    assert pick.winner == 1
+    # A model without fields has no field authorities.
+    assert (
+        TrustModel.from_mapping(
+            {k: v for k, v in schema.items() if k != "field_authority"}
+        ).field_authority
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    "authority",
+    [
+        {"fields": [{"field": "x", "authorities": ["no_such_source"]}]},
+        {"fields": [{"field": "x", "authorities": []}]},
+        {"fields": [{"field": "x", "authorities": ["human_note", "human_note"]}]},
+        {"fields": [{"authorities": ["human_note"]}]},
+        {
+            "fields": [
+                {"field": "x", "authorities": ["human_note"]},
+                {"field": "x", "authorities": ["primary_api"]},
+            ]
+        },
+        {"fields": "serial_number"},
+    ],
+)
+def test_from_mapping_refuses_malformed_field_authorities(
+    schema: dict[str, Any], authority: dict[str, Any]
+) -> None:
+    with pytest.raises(ValueError):
+        TrustModel.from_mapping({**schema, "field_authority": authority})
+
+
+def test_from_mapping_refuses_an_unknown_tie_breaker(schema: dict[str, Any]) -> None:
+    bad = {
+        **schema,
+        "conflict_resolution_function": {"tie_breakers": ["prefer_loudest"]},
+    }
+    with pytest.raises(ValueError):
+        TrustModel.from_mapping(bad)
+    assert set(schema["conflict_resolution_function"]["tie_breakers"]) <= set(
+        TIE_BREAKERS
+    )
+
+
+def test_resolve_refuses_unknown_names_and_empty_conflicts(model: TrustModel) -> None:
+    one = [Candidate(age_days=0, source_type="human_note")]
+    with pytest.raises(ValueError):
+        resolve(model, one, strategy="prefer_loudest")
+    with pytest.raises(ValueError):
+        resolve(model, one, tie_breakers=["coin_toss"])
+    with pytest.raises(ValueError):
+        resolve(model, [])
+
+
+def test_merge_trust_weights_keeps_the_lowest_per_key() -> None:
+    assert merge_trust_weights({"a": 0.9, "b": 0.2}, None, {"a": 0.7}) == {
+        "a": 0.7,
+        "b": 0.2,
+    }
+    with pytest.raises(ValueError):
+        merge_trust_weights({"a": 1.5})

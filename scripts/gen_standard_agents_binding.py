@@ -1,20 +1,25 @@
-"""Generate the files the Standard Agents binding takes from this repository,
-and the approval digest vectors.
+"""Generate the files the TypeScript package and the Standard Agents binding
+take from this repository, and the approval digest vectors.
 
-The reference binding in examples/standard_agents/ must agree with the
-ontology and with the reference executor, so two of its files are generated:
+The TypeScript package in packages/acs-core/ (which the reference binding in
+examples/standard_agents/ depends on) must agree with the ontology and with
+the reference executor, so one of its files is generated:
 
-- src/acs/ontology.gen.ts: each capability's layer, safety flags and
-  required output fields, and the ontology's `requires` edges, from
-  schemas/capability_ontology.yaml
-- test/fixtures/approval-digests.json: a copy of the approval digest
-  vectors, which the binding's own digest is tested against
+- packages/acs-core/src/ontology.gen.ts: each capability's layer, safety
+  flags and required output fields, and the ontology's `requires` edges,
+  from schemas/capability_ontology.yaml; the trust classes of
+  schemas/agent_identity_schema.yaml; the current Standard version (the
+  newest spec/STANDARD-v*.md) and the versions the core supports
 
 The approval digest vectors are tests/conformance/approval/digests.json:
-approval requests of the reference executor (STANDARD v1.1.0 §5.14), each
+approval requests of the reference executor (STANDARD v1.2.0 §5.14), each
 with the shown values, their RFC 8785 canonical JSON and the SHA-256 digest
-of it. They are conformance data for any implementation; the binding's
-fixture is the same text.
+of it. They are conformance data for any implementation; the package's
+tests read the file in place.
+
+The binding's former copies (examples/standard_agents/src/acs/ontology.gen.ts
+and test/fixtures/approval-digests.json) must not exist: --check fails if
+one does.
 
 It also writes schemas/interop/standard_agents_annotation.schema.json, the
 schema of the annotation the binding puts on a tool, whose capability and
@@ -28,6 +33,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -37,7 +43,15 @@ from grounded_agency import _core
 
 ROOT = Path(__file__).resolve().parent.parent
 ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
-OUT = ROOT / "examples" / "standard_agents"
+AGENT_IDENTITY = ROOT / "schemas" / "agent_identity_schema.yaml"
+PACKAGE = ROOT / "packages" / "acs-core"
+ONTOLOGY_TS = PACKAGE / "src" / "ontology.gen.ts"
+BINDING = ROOT / "examples" / "standard_agents"
+# Files this script once wrote into the binding; the package holds them now.
+REMOVED = (
+    BINDING / "src" / "acs" / "ontology.gen.ts",
+    BINDING / "test" / "fixtures" / "approval-digests.json",
+)
 ANNOTATION_SCHEMA = (
     ROOT / "schemas" / "interop" / "standard_agents_annotation.schema.json"
 )
@@ -45,10 +59,23 @@ DIGEST_VECTORS_OUT = ROOT / "tests" / "conformance" / "approval" / "digests.json
 ME = "scripts/gen_standard_agents_binding.py"
 
 HEADER = f"""\
-// Generated from schemas/capability_ontology.yaml by
+// Generated from schemas/capability_ontology.yaml,
+// schemas/agent_identity_schema.yaml and spec/STANDARD-v*.md by
 // {ME}. DO NOT EDIT: regenerate with
 //   python {ME}
 """
+
+
+def current_standard() -> str:
+    """The version of the newest spec/STANDARD-v*.md."""
+    versions = [
+        tuple(int(part) for part in m.group(1).split("."))
+        for path in (ROOT / "spec").glob("STANDARD-v*.md")
+        if (m := re.fullmatch(r"STANDARD-v(\d+\.\d+\.\d+)\.md", path.name))
+    ]
+    if not versions:
+        raise SystemExit("no spec/STANDARD-v*.md file")
+    return ".".join(map(str, max(versions)))
 
 
 def ts(value: Any) -> str:
@@ -56,13 +83,26 @@ def ts(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_ontology(ontology: dict[str, Any]) -> str:
+def render_ontology(ontology: dict[str, Any], identity: dict[str, Any]) -> str:
     layer_of = {
         capability: layer
         for layer, info in ontology["layers"].items()
         for capability in info["capabilities"]
     }
+    trust_classes = identity["agent_identity"]["properties"]["trust_class"]["enum"]
     lines = [HEADER]
+    lines.append(
+        "/** The Agent Capability Standard version this package implements. */"
+    )
+    lines.append(f"export const STANDARD_VERSION = {ts(current_standard())};")
+    lines.append("")
+    lines.append(
+        "/** The Standard versions a workflow may target (§11.5), as the core supports them. */"
+    )
+    lines.append(
+        f"export const SPEC_VERSIONS = {ts(list(_core.SPEC_VERSIONS))} as const;"
+    )
+    lines.append("")
     lines.append(
         f"export const ONTOLOGY_VERSION = {ts(str(ontology['meta']['version']))};"
     )
@@ -97,11 +137,60 @@ def render_ontology(ontology: dict[str, Any]) -> str:
     )
     lines.append("] as const;")
     lines.append("")
+    lines.append(
+        "/** The trust classes of an `agent_identity` (§5.17), in the schema's order. */"
+    )
+    lines.append(f"export const TRUST_CLASSES = {ts(trust_classes)} as const;")
+    lines.append("")
     return "\n".join(lines)
 
 
 def render_annotation_schema(ontology: dict[str, Any]) -> str:
+    """The annotation as a carrier of the tool binding record (STANDARD
+    1.2.0 section 5.18.1): the record's members, the Standard it cites, and
+    informative copies (`layer`, the effective flags) that may not
+    contradict the capability's ontology entry."""
     version = {"type": "string", "pattern": r"^\d+\.\d+\.\d+$"}
+    capability_ids = [node["id"] for node in ontology["nodes"]]
+    levels = ["low", "medium", "high"]
+    flag_properties = {
+        "risk": {"enum": levels},
+        "mutation": {"type": "boolean"},
+        "requires_checkpoint": {"type": "boolean"},
+        "requires_approval": {"type": "boolean"},
+    }
+    copies: list[dict[str, Any]] = []
+    for node in ontology["nodes"]:
+        risk = node.get("risk", "low")
+        then: dict[str, Any] = {
+            "layer": {"const": node["layer"]},
+            "risk": {"enum": levels[levels.index(risk) :]},
+        }
+        if node.get("mutation") and not node.get("mutation_overridable"):
+            then["mutation"] = {"const": True}
+        if node.get("requires_checkpoint"):
+            then["requires_checkpoint"] = {"const": True}
+        if node.get("requires_approval"):
+            then["requires_approval"] = {"const": True}
+        copies.append(
+            {
+                "if": {
+                    "properties": {"capability": {"const": node["id"]}},
+                    "required": ["capability"],
+                },
+                "then": {"properties": then},
+            }
+        )
+    not_with_control = [
+        "capability",
+        "domain",
+        "flags",
+        "additional_capabilities",
+        "classifier",
+        "invokes",
+        "approval",
+        "destination",
+    ]
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": (
@@ -111,22 +200,16 @@ def render_annotation_schema(ontology: dict[str, Any]) -> str:
         "title": "Agent Capability Standard annotation for a Standard Agents tool",
         "description": (
             "The value of the `acs` key in a Standard Agent Specification "
-            "tool's `annotations`: the ontology capability the tool performs "
-            "and its effective safety flags. Generated by "
-            f"{ME} from the ontology."
+            "tool's `annotations`: a carrier of the tool binding record "
+            "(schemas/interop/tool_binding.schema.json, Standard 1.2.0 "
+            "section 5.18.1), with the Standard it cites. `layer` and the "
+            "effective flags are informative copies, which a safety layer "
+            "ignores; a copy may not name another layer than the "
+            "capability's, or be weaker than its ontology flags. Generated "
+            f"by {ME} from the ontology."
         ),
         "type": "object",
-        "required": [
-            "standard",
-            "ontology",
-            "capability",
-            "layer",
-            "risk",
-            "mutation",
-            "requires_checkpoint",
-            "requires_approval",
-        ],
-        "additionalProperties": False,
+        "required": ["standard", "ontology"],
         "properties": {
             "standard": {
                 **version,
@@ -142,45 +225,118 @@ def render_annotation_schema(ontology: dict[str, Any]) -> str:
                     "and flags come from (`meta.version`)."
                 ),
             },
+            "tool": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "The name the tool states for itself: what an approver is "
+                    "shown, and the record's `tool`."
+                ),
+            },
             "capability": {
-                "enum": [node["id"] for node in ontology["nodes"]],
-                "description": "The one ontology capability the tool performs.",
+                "enum": capability_ids,
+                "description": "The ontology capability the tool performs.",
             },
             "layer": {
                 "enum": list(ontology["layers"]),
-                "description": "The capability's layer.",
+                "description": "Informative copy: the capability's layer.",
             },
             "domain": {
                 "type": "string",
+                "pattern": r"^[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_]*)*$",
+                "description": (
+                    "The capability's domain parameter, a domain id (section "
+                    "5.2.4), e.g. `config` or `image.object`."
+                ),
+            },
+            "flags": {
+                "type": "object",
+                "properties": flag_properties,
+                "additionalProperties": False,
+                "description": "The safety flags the tool declares (section 5.2.1).",
+            },
+            "additional_capabilities": {
+                "type": "array",
+                "items": {"enum": capability_ids},
+                "minItems": 1,
+                "uniqueItems": True,
+                "description": "Other capabilities the same call performs (section 5.18.3).",
+            },
+            "classifier": {
+                "type": "string",
                 "minLength": 1,
-                "description": "The capability's domain parameter, e.g. `config`.",
+                "description": "Names the classifier a layer applies to each call (section 5.18.3).",
+            },
+            "invokes": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": True,
+                "description": "The tools the tool may call while it runs (section 5.18.4).",
+            },
+            "approval": {
+                "type": "object",
+                "properties": {
+                    "min_approvers": {"type": "integer", "minimum": 1},
+                    "role": {"type": "string", "minLength": 1},
+                    "expires": {
+                        "type": "string",
+                        "pattern": (
+                            r"^(\d+(ms|s|m|h|d)|P(\d+D)?(T(\d+H)?(\d+M)?"
+                            r"(\d+(\.\d{1,9})?S)?)?)$"
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+                "description": "How approval of a call is counted (section 5.18.7).",
+            },
+            "control": {
+                "const": True,
+                "description": "The tool only signals the host: never refused (section 5.18.3).",
+            },
+            "destination": {
+                "type": "string",
+                "pattern": "^(/([^~/]|~[01])*)*$",
+                "description": (
+                    "For a `send` tool: an RFC 6901 pointer to the argument "
+                    "that holds the destination (section 4.4.2)."
+                ),
             },
             "risk": {
-                "enum": ["low", "medium", "high"],
+                "enum": levels,
                 "description": (
-                    "Effective risk: the higher of the tool's declaration "
-                    "and the ontology's value (Standard §5.2.1)."
+                    "Informative copy: the effective risk, at least the "
+                    "ontology's (section 5.2.1)."
                 ),
             },
             "mutation": {
                 "type": "boolean",
-                "description": "Whether the tool changes persistent state.",
+                "description": "Informative copy: whether the tool changes persistent state.",
             },
             "requires_checkpoint": {
                 "type": "boolean",
-                "description": "Whether a checkpoint must precede each call.",
+                "description": "Informative copy: whether a checkpoint must precede each call.",
             },
             "requires_approval": {
                 "type": "boolean",
-                "description": "Whether each call needs approval.",
+                "description": "Informative copy: whether each call needs approval.",
             },
         },
+        "patternProperties": {"^x-": {}},
+        "additionalProperties": False,
+        "oneOf": [
+            {"required": ["capability"], "not": {"required": ["control"]}},
+            {
+                "required": ["control"],
+                "not": {"anyOf": [{"required": [m]} for m in not_with_control]},
+            },
+        ],
+        "allOf": copies,
     }
     return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
 
 
 # ---------------------------------------------------------------------------
-# Approval digest vectors (STANDARD v1.1.0 §5.14)
+# Approval digest vectors (STANDARD v1.2.0 §5.14)
 # ---------------------------------------------------------------------------
 
 HUMAN = {"kind": "human"}
@@ -229,8 +385,10 @@ DIGEST_VECTORS = [
         "numbers",
         "Numbers are written as ECMAScript writes the binary64 value, so"
         " -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1,"
-        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section"
-        " 5.14 gives for integers.",
+        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the largest magnitude"
+        " section 5.14 allows for an integer, a number written without a"
+        " fraction or an exponent. 1e+21 is written with an exponent, so it"
+        " is a binary64 value and that bound does not apply to it.",
         {
             "numbers": [
                 0,
@@ -298,6 +456,17 @@ DIGEST_VECTORS = [
         approval={"approver": HUMAN, "shows": ["${setting}", "${current.data}"]},
     ),
     DigestVector(
+        "unresolved_reference",
+        "A `shows` reference that resolves to nothing (here a member the"
+        " retrieved value does not have) is null in `shown`: one element per"
+        " reference, in order.",
+        {"present": 1},
+        approval={
+            "approver": HUMAN,
+            "shows": ["${current.data.absent}", "${current.data}"],
+        },
+    ),
+    DigestVector(
         "empty_shows",
         "`shows` is an empty list: `shown` is the empty array.",
         approval={"approver": HUMAN, "shows": []},
@@ -329,14 +498,38 @@ DIGEST_VECTORS = [
 
 DIGEST_FIELDS = {
     "name": "The vector's name, unique in this file.",
+    "kind": (
+        "`step`: an approval request of a workflow step, with `approval`;"
+        " without `shows`, `inputs`; with `shows`, `bindings`; asked again"
+        " after a recheck, `recheck_read`. `tool_call`: the approval of a"
+        " tool call (STANDARD v1.2.0 §5.18.7), with `call`."
+    ),
     "about": "What the vector covers.",
     "approval": (
-        "The `approval` field of the step that asks, as the workflow declares"
-        " it; null when the step has none."
+        "For a `step` vector: the `approval` field of the step that asks, as"
+        " the workflow declares it; null when the step has none."
     ),
     "inputs": (
-        "The step's resolved inputs. Present where the step declares no"
-        " `shows`, so that `shown` is built from them."
+        "For a `step` vector: the step's resolved inputs. Present where the"
+        " step declares no `shows`, so that `shown` is built from them."
+    ),
+    "bindings": (
+        "For a `step` vector whose step declares `shows`: the values its"
+        " references resolve against, by root name: the workflow input"
+        " `setting` and the store `current` of the step before it, so that"
+        " `${current.data}` resolves to `bindings.current.data`. A reference"
+        " to something they do not hold resolves to null."
+    ),
+    "recheck_read": (
+        "For a `step` vector asked again after a recheck: the value the"
+        " recheck read, which differs from the value approved before (the"
+        " recheck `source` resolved against `bindings`). The vector is the"
+        " request asked again; the first request showed the `shows` values"
+        " alone."
+    ),
+    "call": (
+        "For a `tool_call` vector: the call, `{action, capability, args}`;"
+        " `shown` is `[call]`."
     ),
     "shown": "The JSON array of shown values that the approval request carries.",
     "canonical": (
@@ -461,6 +654,17 @@ def _ecmascript_number(x: float) -> str:
     return f"{sign}{digits[0]}{fraction}e{'+' if n > 0 else '-'}{abs(n - 1)}"
 
 
+# The workflow input of every digest run, and what its `retrieve` step
+# returns besides the vector's value.
+SETTING = "x"
+
+
+def retrieved(vector: DigestVector) -> dict[str, Any]:
+    """What the `retrieve` step returns, and so what the store `current`
+    holds."""
+    return {"data": vector.value, "confidence": 1.0, "evidence_anchors": []}
+
+
 def approval_requests(
     validator: _core.Validator, vector: DigestVector
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -471,15 +675,17 @@ def approval_requests(
         validator,
         digest_catalog(vector.approval),
         "change",
-        {"setting": "x"},
+        {"setting": SETTING},
+        # The catalog is a value built here, with no header (§11.5).
+        header=None,
         attendance="attended",
         run_id="r",
         now_ms=0,
     )
     outputs: dict[str, dict[str, Any]] = {
-        "retrieve": {"data": vector.value, "confidence": 1.0},
-        "checkpoint": {"checkpoint_id": "cp-1"},
-        "mutate": {"success": True},
+        "retrieve": retrieved(vector),
+        "checkpoint": {"checkpoint_id": "cp-1", "evidence_anchors": []},
+        "mutate": {"success": True, "evidence_anchors": []},
     }
     requests: list[dict[str, Any]] = []
     inputs: dict[str, Any] = {}
@@ -494,8 +700,7 @@ def approval_requests(
         if kind == "InvokeCapability":
             if action["capability"] == "mutate":
                 inputs = action["inputs"]
-            value = {**outputs[action["capability"]], "evidence_anchors": []}
-            response = {"kind": "Output", "value": value}
+            response = {"kind": "Output", "value": outputs[action["capability"]]}
         elif kind == "RequestApproval":
             requests.append(action)
             response = {
@@ -511,6 +716,54 @@ def approval_requests(
             break
         run.submit(action["id"], response, 0)
     raise SystemExit(f"{vector.name}: the digest workflow did not complete")
+
+
+# Approval of a tool call (STANDARD 1.2.0 section 5.18.7): `shown` is
+# `[{"action", "capability", "args"}]`, `capability` null for an unbound
+# tool. `tool_call` repeats the `object` vector's value on purpose, so the
+# call shape has a vector of its own.
+TOOL_CALL_VECTORS = [
+    (
+        "tool_call",
+        "A tool call: shown is [{action, capability, args}] (STANDARD 1.2.0"
+        " section 5.18.7).",
+        {
+            "action": "write_config",
+            "capability": "mutate",
+            "args": {"key": "a", "value": "b"},
+        },
+    ),
+    (
+        "tool_call_unbound",
+        "A call of a tool with no binding: its capability is null (STANDARD"
+        " 1.2.0 sections 5.18.2 and 5.18.7).",
+        {"action": "run_script", "capability": None, "args": {"cmd": "x"}},
+    ),
+]
+
+
+def tool_call_vectors() -> list[dict[str, Any]]:
+    """The tool-call vectors, digested by the reference canonicaliser
+    (`_core.approval_digest`) and checked against this script's own."""
+    out = []
+    for name, about, call in TOOL_CALL_VECTORS:
+        shown = [call]
+        canonical = canonical_json(shown)
+        digest = _core.approval_digest(shown)
+        if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != digest:
+            raise SystemExit(f"{name}: {canonical} does not have digest {digest}")
+        out.append(
+            {
+                "name": name,
+                "kind": "tool_call",
+                "about": about,
+                "call": call,
+                "shown": shown,
+                "canonical": canonical,
+                "digest": digest,
+            }
+        )
+    return out
 
 
 def render_digests() -> str:
@@ -530,29 +783,45 @@ def render_digests() -> str:
         canonical = canonical_json(shown)
         if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != digest:
             raise SystemExit(f"{name}: {canonical} does not have digest {digest}")
-        entry = {"name": name, "about": vector.about, "approval": vector.approval}
+        entry = {
+            "name": name,
+            "kind": "step",
+            "about": vector.about,
+            "approval": vector.approval,
+        }
         if "shows" not in (vector.approval or {}):
             if shown != [inputs]:
                 raise SystemExit(f"{name}: shown is not the step's inputs")
             entry["inputs"] = inputs
+        else:
+            entry["bindings"] = {"setting": SETTING, "current": retrieved(vector)}
+        if vector.reread is not None:
+            entry["recheck_read"] = vector.reread
         entry.update(shown=shown, canonical=canonical, digest=digest)
         vectors.append(entry)
+    vectors.extend(tool_call_vectors())
     if len({v["name"] for v in vectors}) != len(vectors):
         raise SystemExit("two digest vectors have the same name")
     doc = {
         "generated_by": ME,
-        "standard": "1.1.0",
-        "section": "5.14",
-        "status": "informative",
+        "standard": "1.2.0",
+        "section": "5.14, 5.18.7",
+        "status": "normative",
         "description": (
-            "Approval digests computed by the reference executor"
-            " (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each"
-            " vector is one approval request. STANDARD v1.1.0 section 5.14"
-            " states that a decision is valid only if the SHA-256 digest of"
-            " the canonical JSON (RFC 8785) of the shown values matches. What"
-            " is shown when a step declares no `shows`, and the object added"
-            " when a step asks again after a recheck, are the reference"
-            " executor's behaviour; the Standard does not state them. This"
+            "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7,"
+            " normative under section 10.3), computed by the reference"
+            " executor (core/src/exec/machine.rs, core/src/exec/canonical.rs)."
+            " Each `step` vector is one approval request of a workflow step;"
+            " each `tool_call` vector is the approval of a tool call. The"
+            " shown values are a JSON array; the digest is the SHA-256 of the"
+            " UTF-8 encoding of their canonical JSON (RFC 8785), as 64"
+            " lowercase hexadecimal digits, compared regardless of case. An"
+            " implementation that computes or checks approval digests"
+            " produces each vector's `canonical` text and `digest` from its"
+            " `shown` values; an executor shows each `step` vector's `shown`"
+            " values, given its `inputs` or `bindings` and any"
+            " `recheck_read`, and a safety layer each `tool_call` vector's."
+            " This"
             " file is printable ASCII: any other character is written as a"
             " JSON \\u escape, so no tool that normalises or transcodes text"
             " can change a vector."
@@ -573,11 +842,10 @@ def main(argv: list[str]) -> int:
     )
     check = parser.parse_args(argv).check
     ontology = _core.load_yaml(str(ONTOLOGY))
-    digests = render_digests()
+    identity = _core.load_yaml(str(AGENT_IDENTITY))
     rendered = {
-        OUT / "src" / "acs" / "ontology.gen.ts": render_ontology(ontology),
-        DIGEST_VECTORS_OUT: digests,
-        OUT / "test" / "fixtures" / "approval-digests.json": digests,
+        ONTOLOGY_TS: render_ontology(ontology, identity),
+        DIGEST_VECTORS_OUT: render_digests(),
         ANNOTATION_SCHEMA: render_annotation_schema(ontology),
     }
     stale = [
@@ -585,10 +853,13 @@ def main(argv: list[str]) -> int:
         for p, text in rendered.items()
         if not p.exists() or p.read_text(encoding="utf-8") != text
     ]
+    leftover = [p for p in REMOVED if p.exists()]
     if check:
         for p in stale:
             print(f"out of date: {p.relative_to(ROOT)}")
-        if stale:
+        for p in leftover:
+            print(f"no longer generated, delete it: {p.relative_to(ROOT)}")
+        if stale or leftover:
             print(f"run: python {ME}")
             return 1
         print(f"{len(rendered)} generated files up to date")
@@ -596,7 +867,9 @@ def main(argv: list[str]) -> int:
     for p in stale:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(rendered[p], encoding="utf-8")
-    print(f"{len(rendered)} files ({len(stale)} written)")
+    for p in leftover:
+        p.unlink()
+    print(f"{len(rendered)} files ({len(stale)} written, {len(leftover)} removed)")
     return 0
 
 

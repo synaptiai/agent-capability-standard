@@ -1,0 +1,19 @@
+# Standard version: 1.2.0
+# Negative fixture (STANDARD v1.2 §5.20): a grounding policy must name the
+# capabilities whose outputs are checked in 'require'. S304.
+grounding_missing_require:
+  goal: State a grounding policy without require.
+  risk: low
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    kinds: [file]
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  success:
+  - Never valid

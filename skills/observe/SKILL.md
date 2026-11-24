@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep, Bash
 context: fork
 agent: explore
-layer: PERCEIVE
 ---
 
 ## Intent
@@ -70,8 +69,8 @@ observation:
       notable: boolean  # Whether this is noteworthy
   anomalies: array[string]  # Unexpected findings
 timestamp: string  # ISO 8601 timestamp
-confidence: 0..1  # Based on observation quality
-evidence_anchors: ["file:line", "command:output"]
+confidence: number  # probability that the observation describes the target's state as it was (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "command:output", kind: tool}]
 assumptions: []  # What was assumed about the target
 next_actions: array[string]  # 0-3 suggested follow-ups
 ```
@@ -84,8 +83,8 @@ next_actions: array[string]  # 0-3 suggested follow-ups
 | `timestamp` | string | ISO 8601 date-time the observation was made |
 | `observation.status` | string | Summary status (healthy, degraded, error, unknown) |
 | `observation.aspects` | array | List of observed aspects with values |
-| `confidence` | number | 0.0-1.0 based on observation completeness |
-| `evidence_anchors` | array[string] | References to raw observation data |
+| `confidence` | number | Probability, 0.0-1.0, that the observation describes the target's state as it was (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to raw observation data |
 
 ## Examples
 
@@ -117,8 +116,8 @@ observation:
 timestamp: "2024-01-15T10:30:00Z"
 confidence: 0.95
 evidence_anchors:
-  - "command:ps aux | grep nginx"
-  - "command:netstat -an | grep :80"
+  - {ref: "command:ps aux | grep nginx", kind: tool}
+  - {ref: "command:netstat -an | grep :80", kind: tool}
 assumptions:
   - "Process identified by name 'nginx'"
 next_actions:
@@ -154,8 +153,8 @@ observation:
 timestamp: "2024-01-15T10:35:00Z"
 confidence: 0.9
 evidence_anchors:
-  - "config/database.yml:1-25"
-  - "command:ls -la config/database.yml"
+  - {ref: "file:config/database.yml:1-25", kind: file}
+  - {ref: "command:ls -la config/database.yml", kind: tool}
 assumptions:
   - "File contains database credentials based on content inspection"
 next_actions:

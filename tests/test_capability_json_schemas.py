@@ -1,10 +1,12 @@
 """The strict JSON Schema rendering of the capability contracts.
 
 schemas/generated/capability_contracts.schema.json is generated from the
-ontology by scripts/gen_capability_json_schemas.py. Checked here: the file is
-the generator's output, it is valid Draft 2020-12, it says what the ontology
-says, example outputs validate against it, and the reference validator reads
-it as it reads the ontology's own spelling.
+ontology's resolved contracts by scripts/gen_capability_json_schemas.py
+(STANDARD v1.2 §4.1.2). Checked here: the file is the generator's output, it
+is valid Draft 2020-12, it says what the contracts say, example outputs
+validate against it, and the reference validator reads it as it reads the
+ontology's own spelling (with `nullable` left out of the comparison, the one
+divergence §4.1.2 states).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -35,23 +38,32 @@ assert spec and spec.loader
 gen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gen)
 
-# Every keyword the rendering may hold: Draft 2020-12 keywords, and the one
-# that records the ontology's `type: any`.
+# Every keyword the rendering may hold: the Draft 2020-12 keywords of the
+# dialect (STANDARD v1.2 §4.1.2), and the one that records `type: any`.
 KEYWORDS = {
     "additionalProperties",
     "allOf",
     "anyOf",
+    "const",
     "default",
     "description",
     "enum",
+    "examples",
     "format",
     "items",
+    "maxItems",
+    "maxLength",
     "maximum",
+    "minItems",
+    "minLength",
     "minimum",
     "oneOf",
+    "pattern",
     "properties",
     "required",
+    "title",
     "type",
+    "uniqueItems",
     "x-acs-type",
 }
 
@@ -66,6 +78,13 @@ def document() -> dict[str, Any]:
 def ontology() -> dict[str, Any]:
     loaded: dict[str, Any] = _core.load_yaml(str(ONTOLOGY))
     return loaded
+
+
+@pytest.fixture(scope="module")
+def contracts() -> dict[str, Any]:
+    """The contracts the reference core resolved, which the generator renders."""
+    resolved: dict[str, Any] = _core.Validator(str(ONTOLOGY), str(ROOT)).contracts()
+    return resolved
 
 
 def nodes(schema: dict[str, Any], path: str) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -87,7 +106,8 @@ def all_nodes(document: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
 
 
 def as_written(schema: dict[str, Any]) -> dict[str, Any]:
-    """The ontology's spelling of a rendered schema: the two rules undone."""
+    """The dialect's spelling of a schema rendered without `nullable`: the
+    `any` and `a|b` rules undone."""
     out: dict[str, Any] = {}
     for key, value in schema.items():
         if key == "x-acs-type":
@@ -96,11 +116,44 @@ def as_written(schema: dict[str, Any]) -> dict[str, Any]:
             out["type"] = "|".join(value)
         elif key == "properties":
             out[key] = {name: as_written(sub) for name, sub in value.items()}
-        elif key == "items":
+        elif key in ("items", "additionalProperties") and isinstance(value, dict):
             out[key] = as_written(value)
+        elif key in ("allOf", "anyOf", "oneOf"):
+            out[key] = [as_written(sub) for sub in value]
         else:
             out[key] = value
     return out
+
+
+def without_nullable(schema: Any) -> Any:
+    """A contract with every `nullable` member dropped."""
+    if isinstance(schema, dict):
+        return {k: without_nullable(v) for k, v in schema.items() if k != "nullable"}
+    if isinstance(schema, list):
+        return [without_nullable(v) for v in schema]
+    return schema
+
+
+def nullable_nodes(schema: Any, path: str) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Every schema under a contract that says `nullable: true`."""
+    if isinstance(schema, dict):
+        if schema.get("nullable") is True:
+            yield path, schema
+        for key, value in schema.items():
+            yield from nullable_nodes(value, f"{path}/{key}")
+    elif isinstance(schema, list):
+        for i, value in enumerate(schema):
+            yield from nullable_nodes(value, f"{path}/{i}")
+
+
+def at(document: dict[str, Any], path: str) -> dict[str, Any]:
+    """The rendered schema at a contract path (`<name>/<key>/...`)."""
+    name, *keys = path.split("/")
+    node: Any = document["$defs"][name]
+    for key in keys:
+        node = node[int(key)] if isinstance(node, list) else node[key]
+    assert isinstance(node, dict)
+    return node
 
 
 def contract(document: dict[str, Any], name: str) -> Draft202012Validator:
@@ -189,20 +242,56 @@ def test_required_fields_are_declared_properties(document: dict[str, Any]) -> No
     assert not undeclared
 
 
-def test_rendering_differs_from_the_ontology_only_in_type(
-    document: dict[str, Any], ontology: dict[str, Any]
+def test_document_renders_the_resolved_contracts(
+    document: dict[str, Any], ontology: dict[str, Any], contracts: dict[str, Any]
 ) -> None:
+    assert document["$defs"] == gen.render_contracts(ontology, contracts)
+
+
+def test_rendering_differs_from_the_contracts_only_in_type(
+    ontology: dict[str, Any], contracts: dict[str, Any]
+) -> None:
+    rendered = gen.render_contracts(ontology, contracts, nullable_as_null=False)
     for node in ontology["nodes"]:
         for side in ("input", "output"):
-            rendered = document["$defs"][f"{node['id']}.{side}"]
+            name = f"{node['id']}.{side}"
             # Compared as text, so the order of the keywords counts too.
-            assert json.dumps(as_written(rendered)) == json.dumps(
-                node[f"{side}_schema"]
-            ), f"{node['id']}.{side}"
+            assert json.dumps(as_written(rendered[name])) == json.dumps(
+                without_nullable(contracts[node["id"]][side])
+            ), name
     # Both rules were exercised: the ontology uses both spellings.
-    types = [node.get("type") for _, node in all_nodes(document)]
+    types = [n.get("type") for name in rendered for _, n in nodes(rendered[name], name)]
     assert any(isinstance(t, list) for t in types)
-    assert any("x-acs-type" in node for _, node in all_nodes(document))
+    assert any(
+        "x-acs-type" in n for name in rendered for _, n in nodes(rendered[name], name)
+    )
+
+
+def test_no_dialect_spelling_is_left(document: dict[str, Any]) -> None:
+    text = json.dumps(document)
+    assert '"$ref"' not in text
+    assert '"nullable"' not in text
+    for path, node in all_nodes(document):
+        kind = node.get("type")
+        names = kind if isinstance(kind, list) else [kind] if kind else []
+        assert all(n in gen.JSON_TYPES for n in names), path
+
+
+def test_nullable_members_admit_null(
+    document: dict[str, Any], contracts: dict[str, Any]
+) -> None:
+    found = [
+        (path, schema)
+        for cap, sides in contracts.items()
+        for side, contract in sides.items()
+        for path, schema in nullable_nodes(contract, f"{cap}.{side}")
+    ]
+    # The canonical Anchor and Uncertainty the contracts reach have some.
+    assert found
+    for path, schema in found:
+        rendered = at(document, path)
+        if "type" in schema:
+            assert "null" in rendered["type"], path
 
 
 # --- Values ----------------------------------------------------------------
@@ -269,20 +358,67 @@ def test_bounds_and_open_objects(document: dict[str, Any]) -> None:
     assert validator.is_valid({**output, "retrieved_by": "cache"})
 
 
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"ref": "file:a.txt", "kind": "file"}],
+        [{"ref": "file:a.txt", "kind": "file", "digest": "sha256:" + "0" * 64}],
+        # The deprecated legacy forms (STANDARD v1.2 §6.5) are accepted.
+        ["file:a.txt"],
+        [{"ref": "file:a.txt"}],
+        [{"ref": "tool:Read:1", "kind": "tool_output"}],
+    ],
+)
+def test_anchor_items_and_the_legacy_forms(
+    document: dict[str, Any], items: list[Any]
+) -> None:
+    output = {**EXAMPLE_OUTPUTS["retrieve"], "evidence_anchors": items}
+    assert contract(document, "retrieve.output").is_valid(output)
+
+
+@pytest.mark.parametrize("item", [1, True, None, ["file:a"]])
+def test_an_item_that_names_no_evidence_is_outside_the_contract(
+    document: dict[str, Any], item: Any
+) -> None:
+    output = {**EXAMPLE_OUTPUTS["retrieve"], "evidence_anchors": [item]}
+    assert not contract(document, "retrieve.output").is_valid(output)
+
+
+def test_common_output_fields(document: dict[str, Any]) -> None:
+    """Any string inference_method is valid against the contract (the
+    vocabulary is enforced only under a grounding policy); an uncertainty
+    must have its type (STANDARD v1.2 §4.1.1)."""
+    validator = contract(document, "mutate.output")
+    output = EXAMPLE_OUTPUTS["mutate"]
+    assert validator.is_valid({**output, "inference_method": "llm-reasoning"})
+    assert validator.is_valid(
+        {
+            **output,
+            "confidence": 0.4,
+            "uncertainty": {"type": "epistemic", "confidence": 0.4},
+        }
+    )
+    assert not validator.is_valid({**output, "uncertainty": {"confidence": 0.4}})
+    assert not validator.is_valid({**output, "confidence": 1.5})
+
+
 # --- The reference validator's reading -------------------------------------
 
 
 @pytest.fixture(scope="module")
 def strict_ontology(
     tmp_path_factory: pytest.TempPathFactory,
-    document: dict[str, Any],
     ontology: dict[str, Any],
+    contracts: dict[str, Any],
 ) -> Path:
-    """The ontology with each contract replaced by its strict rendering."""
+    """The ontology with each contract replaced by its strict rendering,
+    without the `"null"` that `nullable` adds: §5.4 reads one and not the
+    other (STANDARD v1.2 §4.1.2), so the comparison below would part on it."""
+    rendered = gen.render_contracts(ontology, contracts, nullable_as_null=False)
     strict = copy.deepcopy(ontology)
     for node in strict["nodes"]:
         for side in ("input", "output"):
-            node[f"{side}_schema"] = document["$defs"][f"{node['id']}.{side}"]
+            node[f"{side}_schema"] = rendered[f"{node['id']}.{side}"]
     path = tmp_path_factory.mktemp("strict") / "capability_ontology.yaml"
     # JSON is YAML, and the core's loader reads it.
     path.write_text(json.dumps(strict, ensure_ascii=False), encoding="utf-8")
@@ -442,10 +578,51 @@ def test_render_schema_recurses() -> None:
 
 
 @pytest.mark.parametrize(
+    ("written", "rendered"),
+    [
+        ({"type": "string", "nullable": True}, {"type": ["string", "null"]}),
+        ({"type": ["string", "null"], "nullable": True}, {"type": ["string", "null"]}),
+        (
+            {"type": "object|array", "nullable": True},
+            {"type": ["object", "array", "null"]},
+        ),
+        ({"type": "string", "nullable": False}, {"type": "string"}),
+        ({"nullable": True, "description": "d"}, {"description": "d"}),
+        ({"type": "any", "nullable": True}, {"x-acs-type": "any"}),
+        (
+            {"type": "any", "title": "t", "x-note": 1},
+            {"x-acs-type": "any", "title": "t", "x-note": 1},
+        ),
+        (
+            {"type": "string", "pattern": "^a$", "minLength": 1, "const": "a"},
+            {"type": "string", "pattern": "^a$", "minLength": 1, "const": "a"},
+        ),
+    ],
+)
+def test_render_schema_dialect_keywords(written: Any, rendered: Any) -> None:
+    assert gen.render_schema(written, "s") == rendered
+
+
+def test_nullable_as_null_off_drops_nullable() -> None:
+    written = {
+        "type": "object",
+        "properties": {"n": {"type": "number", "nullable": True}},
+    }
+    assert gen.render_schema(written, "s", nullable_as_null=False) == {
+        "type": "object",
+        "properties": {"n": {"type": "number"}},
+    }
+
+
+@pytest.mark.parametrize(
     "written",
     [
-        {"type": "string", "nullable": True},  # a keyword with no rendering
+        {"type": "string", "nullable": "yes"},  # nullable is a boolean
+        {"type": "string|null"},  # a union with null is outside the dialect
+        {"$ref": "schemas/nowhere.yaml#/X"},  # a $ref the core did not resolve
         {"type": "any", "enum": [1, 2]},  # `any` that would not accept every value
+        {"type": "any", "minimum": 0},
+        {"type": "string", "unknownKeyword": 1},  # a keyword with no rendering
         {"type": "object", "properties": {"a": "string"}},
         {"type": "object", "properties": ["a"]},
         {"oneOf": []},
@@ -462,8 +639,9 @@ def test_a_capability_without_a_contract_is_an_error() -> None:
         "meta": {"version": "0.0.0"},
         "nodes": [{"id": "retrieve", "input_schema": {"type": "object"}}],
     }
+    contracts = {"retrieve": {"input": {"type": "object"}}}
     with pytest.raises(gen.RenderError, match="retrieve.output"):
-        gen.render_document(ontology)
+        gen.render_document(ontology, contracts)
 
 
 def test_check_fails_on_drift(
@@ -484,3 +662,156 @@ def test_check_fails_on_drift(
     # Writing again restores the file.
     assert gen.main([]) == 0
     assert gen.main(["--check"]) == 0
+
+
+# --- The dialect at load, and the stated divergence (STANDARD v1.2 §4.1.2) ---
+
+
+def synthetic(tmp_path: Path, ontology: dict[str, Any], output: dict[str, Any]) -> Path:
+    """The ontology with `retrieve`'s output contract replaced, as a file."""
+    changed = copy.deepcopy(ontology)
+    for node in changed["nodes"]:
+        if node["id"] == "retrieve":
+            node["output_schema"] = output
+    path = tmp_path / "capability_ontology.yaml"
+    path.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"type": "object", "properties": {"x": {"type": "string|null"}}},
+        {"type": "object", "properties": {"x": {"type": "any", "minimum": 0}}},
+        {"type": "object", "properties": {"x": {"type": "string", "if": {}}}},
+    ],
+    ids=["union_with_null", "any_beside_an_assertion", "unknown_keyword"],
+)
+def test_the_dialect_metaschema_refuses(
+    ontology: dict[str, Any], output: dict[str, Any]
+) -> None:
+    """`schemas/capability_ontology.schema.json` checks the contracts against
+    the dialect, so a keyword outside it fails the ontology's own check."""
+    import yaml
+
+    schema = json.loads(
+        (ROOT / "schemas" / "capability_ontology.schema.json").read_text()
+    )
+    changed = copy.deepcopy(ontology)
+    for node in changed["nodes"]:
+        if node["id"] == "retrieve":
+            node["output_schema"] = output
+    validator = Draft202012Validator(schema)
+    assert list(validator.iter_errors(changed))
+    shipped = yaml.safe_load(ONTOLOGY.read_text(encoding="utf-8"))
+    assert not list(validator.iter_errors(shipped))
+
+
+def test_nullable_divergence_is_pinned(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """§5.4 reads a rendered `["number", "null"]` as nullable but not the
+    dialect's `nullable: true`: ordering on such a member is W610 against the
+    rendering only, and nothing else differs."""
+    output = {
+        "type": "object",
+        "required": ["n", "evidence_anchors"],
+        "properties": {
+            "n": {"type": "number", "nullable": True},
+            "evidence_anchors": {"type": "array"},
+        },
+    }
+    dialect_path = synthetic(tmp_path, ontology, output)
+    rendered = gen.render_schema(output, "retrieve.output", nullable_as_null=True)
+    assert rendered["properties"]["n"]["type"] == ["number", "null"]
+    rendering_dir = tmp_path / "rendering"
+    rendering_dir.mkdir()
+    rendering_path = synthetic(rendering_dir, ontology, rendered)
+    catalog = {
+        "probe": {
+            "goal": "Order on a nullable member.",
+            "risk": "low",
+            "steps": [
+                {
+                    "capability": "retrieve",
+                    "purpose": "Produce n.",
+                    "store_as": "r",
+                    "input_bindings": {"target": "x"},
+                },
+                transform("t", "constant", "${r.n} > 1"),
+            ],
+        }
+    }
+    on_dialect = _core.Validator(str(dialect_path), str(ROOT)).validate(
+        catalog, "1.1.0"
+    )
+    on_rendering = _core.Validator(str(rendering_path), str(ROOT)).validate(
+        catalog, "1.1.0"
+    )
+    assert [d["code"] for d in on_dialect["diagnostics"]] == []
+    assert [
+        (d["code"], d["location"]["step"]) for d in on_rendering["diagnostics"]
+    ] == [("W610", 1)]
+
+
+def test_unresolved_contract_ref_is_refused(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """A contract whose `$ref` names nothing refuses the ontology at load, so
+    no consumer (this generator included) sees it."""
+    path = synthetic(tmp_path, ontology, {"$ref": "schemas/nowhere.yaml#/X"})
+    with pytest.raises(ValueError) as caught:
+        _core.Validator(str(path), str(ROOT))
+    message = str(caught.value)
+    assert "retrieve" in message and "output" in message
+    assert "schemas/nowhere.yaml#/X" in message
+
+
+def test_the_adapter_refuses_an_unresolved_contract_ref(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """The safety layer loads the ontology through the core as well: a
+    contract `$ref` that names nothing refuses its configuration (§4.1.2),
+    though the layer never reads that contract. The same ontology with the
+    target in place loads."""
+    from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+    output = {
+        "type": "object",
+        "properties": {"data": {"$ref": "schemas/nope.yaml#/x"}},
+    }
+    path = synthetic(tmp_path, ontology, output)
+    root = tmp_path / "root"
+    shutil.copytree(ROOT / "schemas", root / "schemas")
+
+    def adapter() -> GroundedAgentAdapter:
+        return GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=str(path),
+                schema_root=str(root),
+                checkpoint_dir=str(tmp_path / ".cp"),
+            )
+        )
+
+    with pytest.raises(ValueError, match=r"schemas/nope\.yaml#/x.*names nothing"):
+        adapter()
+    (root / "schemas" / "nope.yaml").write_text("x: {type: string}\n")
+    assert adapter().capability_count == 36
+
+
+def test_a_same_file_contract_ref_resolves_in_the_ontology(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """`$ref: "#<pointer>"` names a node of the ontology itself (§4.1.2)."""
+    changed = copy.deepcopy(ontology)
+    changed["x-defs"] = {"Thing": {"type": "object", "properties": {}}}
+    output = {
+        "type": "object",
+        "properties": {"x_local": {"$ref": "#/x-defs/Thing"}},
+    }
+    path = synthetic(tmp_path, changed, output)
+    contracts = _core.Validator(str(path), str(ROOT)).contracts()
+    assert contracts["retrieve"]["output"]["properties"]["x_local"] == {
+        "type": "object",
+        "properties": {},
+    }

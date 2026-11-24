@@ -15,8 +15,8 @@ import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology } from '../data/ontology';
 import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
-import { readRepoFile, trackedUnder } from './repo';
-import { blockText, codeLines, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
+import { readRepoFile, trackedIn, trackedUnder } from './repo';
+import { blockText, codeLines, sectionBlocks, sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
 import { andList, plural } from './words';
 
@@ -83,15 +83,126 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
 
 /**
  * Field tables the page draws as a `Port` column (F-S2 for §4.1, F-S24 for
- * §6.3): one row per field, required filled and optional outlined, with its
- * type glyph and type string, grouped by dotted prefix. The figure wraps
- * the source table and keeps it, folded, under the drawing, so the page
- * does not show the same fields twice. `what` starts the caption.
+ * §6.3, and §5.18.1's, §5.21.2's and §7.1's): one row per field, required
+ * filled and optional outlined, with its type glyph and type string, grouped
+ * by dotted prefix. The figure wraps the source table and keeps it, folded,
+ * under the drawing, so the page does not show the same fields twice.
+ * `what` starts the caption.
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
+  'table-5.1': { section: '5.1 ', name: 'Fields every workflow defines', what: 'The part every workflow defines' },
+  'table-5.18.1': { section: '5.18.1 ', name: 'Tool binding fields', what: 'A tool binding' },
+  'table-5.21.2': { section: '5.21.2 ', name: 'Domain profile members', what: 'A domain profile' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
+  'table-6.5': { section: '6.5 ', name: 'Evidence anchor fields', what: 'An evidence anchor' },
+  'table-6.6': { section: '6.6 ', name: 'Evidence record fields', what: 'An evidence record' },
+  'table-7.1': { section: '7.1 ', name: 'Parts of an entity id', what: 'An entity id' },
+  'table-8.4': { section: '8.4 ', name: 'Manual override rules', what: 'The trust model\'s overrides member' },
 };
+
+// ---------------------------------------------- §5.18 code tables
+
+/**
+ * Tables whose Code column the page draws as diagnostic tiles, as it does
+ * §5.8.3's and §9's: §5.18's (tool-calling hosts), and those of the
+ * dialect, domain profiles and versions. Each figure wraps the section's
+ * table at `index` (0-based, default the first), and each code links to its
+ * entry on the diagnostics page. A code the diagnostics loader does not
+ * know fails the build (rehype-spec-slots).
+ */
+export const CODE_TABLE_FIGURES: Readonly<Record<string, { level: number; section: string; name: string; index?: number }>> = {
+  'dialect-forms': { level: 4, section: '4.1.2 ', name: 'The forms the schema dialect adds' },
+  'offered-tools': { level: 4, section: '5.18.2 ', name: 'What a host checks of the tools it offers' },
+  'composite-codes': { level: 4, section: '5.18.4 ', name: 'Codes of a composite tool' },
+  'edge-codes': { level: 4, section: '5.18.5 ', name: 'How each edge type applies to calls' },
+  'checkpoint-refusals': { level: 4, section: '5.18.6 ', name: 'Calls refused for want of a checkpoint' },
+  'call-refusals': { level: 4, section: '5.18.8 ', name: 'The codes a call is refused with' },
+  'capability-checks': { level: 4, section: '5.18.10 ', name: 'Capability checks and their codes' },
+  'profile-codes': { level: 4, section: '5.21.2 ', name: 'What loading a profile reports', index: 1 },
+  'profile-raises': { level: 4, section: '5.21.3 ', name: 'What each threshold and rule raises' },
+  'profile-rules': { level: 4, section: '5.21.3 ', name: 'The other rules a profile puts in force', index: 1 },
+  'version-codes': { level: 3, section: '11.5 ', name: 'The codes of a version declaration', index: 1 },
+  'citing-codes': { level: 3, section: '11.6 ', name: 'What a consumer of a cited document reports', index: 1 },
+};
+
+const CODE = /\b[A-Z]\d{3}\b/g;
+
+/** The codes of a code-table figure's Code column, in table order, each once, with their diagnostics. */
+export function codeTableCodes(key: string, text: string, where: string): Diagnostic[] {
+  const f = CODE_TABLE_FIGURES[key];
+  if (!f) throw new Error(`${where}: no code table figure ${key}`);
+  const rows = tableRows(sectionTable(text, f.section, f.index ?? 0, where));
+  const col = rows[0]!.indexOf('Code');
+  if (col === -1) throw new Error(`${where}: §${f.section.trim()}'s table ${(f.index ?? 0) + 1} has no Code column`);
+  const byCode = new Map(loadDiagnostics().map((d) => [d.code, d]));
+  const seen: Diagnostic[] = [];
+  for (const r of rows.slice(1)) {
+    for (const c of r[col]!.match(CODE) ?? []) {
+      const d = byCode.get(c);
+      if (!d) throw new Error(`${where}: §${f.section.trim()} names ${c}, which the diagnostics loader does not know`);
+      if (!seen.includes(d)) seen.push(d);
+    }
+  }
+  if (seen.length === 0) throw new Error(`${where}: §${f.section.trim()}'s table names no code`);
+  return seen;
+}
+
+export function codeTableCaption(key: string, text: string, where: string): string {
+  const f = CODE_TABLE_FIGURES[key]!;
+  const rows = tableRows(sectionTable(text, f.section, f.index ?? 0, where)).length - 1;
+  const ds = codeTableCodes(key, text, where);
+  const errors = ds.filter((d) => d.severity === 'error').length;
+  const sev = errors === ds.length ? (ds.length === 1 ? 'an error' : 'all errors') : errors === 0 ? (ds.length === 1 ? 'a warning' : 'all warnings') : `${plural(errors, 'error', 'errors')} and ${plural(ds.length - errors, 'warning', 'warnings')}`;
+  return `${plural(rows, 'row', 'rows')} name ${plural(ds.length, 'code', 'codes')}, ${sev}; each tile links to the code's entry on the diagnostics page.`;
+}
+
+// ---------------------------------------------- §10.4 safety-layer fixtures
+
+export interface FixtureGroup {
+  label: string;
+  count: number;
+  dir: string;
+}
+
+const SL_FIXTURE_DIRS = [
+  { kind: 'Binding fixtures', dir: 'tests/conformance/bindings' },
+  { kind: 'Call-sequence fixtures', dir: 'tests/conformance/calls' },
+] as const;
+
+/**
+ * The safety-layer fixtures of §10.4, by kind and by the feature (`needs`)
+ * a layer must have to run them, read from the fixture files. A feature the
+ * fixtures name that §10.4 does not define fails the build.
+ */
+export function safetyLayerFixtures(text: string, where: string): FixtureGroup[] {
+  const prose = sectionBlocks(text, '10.4 ', where).map((b) => toString(b)).join(' ');
+  const out: FixtureGroup[] = [];
+  for (const { kind, dir } of SL_FIXTURE_DIRS) {
+    const groups = new Map<string, number>();
+    for (const path of trackedIn(dir, '.json')) {
+      const doc = JSON.parse(readRepoFile(path)) as { needs?: unknown };
+      const needs = Array.isArray(doc.needs) ? doc.needs.map(String) : [];
+      for (const n of needs) {
+        if (!prose.includes(n)) throw new Error(`${where}: §10.4 does not define the feature ${n} that ${path} needs`);
+      }
+      const key = needs.length === 0 ? '' : needs.join(', ');
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+    if (groups.size === 0) throw new Error(`${where}: ${dir} holds no fixture`);
+    for (const [needs, count] of [...groups].sort((a, b) => (a[0] === '' ? -1 : b[0] === '' ? 1 : a[0].localeCompare(b[0])))) {
+      out.push({ label: `${kind}, ${needs === '' ? 'any layer' : `needs ${needs}`}`, count, dir });
+    }
+  }
+  return out;
+}
+
+export function safetyLayerFixturesCaption(groups: FixtureGroup[]): string {
+  const total = (kind: string) => groups.filter((g) => g.label.startsWith(kind)).reduce((a, g) => a + g.count, 0);
+  const any = groups.filter((g) => g.label.endsWith('any layer')).reduce((a, g) => a + g.count, 0);
+  const all = groups.reduce((a, g) => a + g.count, 0);
+  return `${plural(total('Binding fixtures'), 'binding fixture', 'binding fixtures')} and ${plural(total('Call-sequence fixtures'), 'call-sequence fixture', 'call-sequence fixtures')}; ${any} of the ${all} need no feature, and a layer that lacks a feature skips the fixtures that need it.`;
+}
 
 /** The caption of a field-table figure. */
 export function tableFigureCaption(key: string, text: string, where: string): string {
@@ -179,9 +290,11 @@ export interface DecayColumn {
  * half-life formula and min_trust as a floor on the decay factor.
  */
 export function decayColumns(text: string, where: string): { columns: DecayColumn[]; minTrust: number; halfLife: string } {
-  const prose = sectionParagraphs(text, '8.1 ', where).join(' ').replace(/\s+/g, ' ');
+  // The section's whole text: 1.1 states the formula in prose, 1.2 in its
+  // factor table (`max(0.5 ** (age / half_life), min_trust)`).
+  const prose = sectionBlocks(text, '8.1 ', where).map((n) => blockText(n)).join(' ').replace(/\s+/g, ' ');
   if (!prose.includes('0.5 ** (age / half_life)')) throw new Error(`${where}: §8.1 no longer states 0.5 ** (age / half_life)`);
-  if (!/min_trust, when present, is a floor on the decay factor/.test(prose)) throw new Error(`${where}: §8.1 no longer makes min_trust a floor on the decay factor`);
+  if (!/min_trust(, when present,)? is a floor on the decay factor/.test(prose)) throw new Error(`${where}: §8.1 no longer makes min_trust a floor on the decay factor`);
   const m = loadTrustModel();
   const columns = Array.from({ length: 9 }, (_, i) => {
     const k = i / 2;
@@ -371,7 +484,11 @@ export function levelParts(text: string): LevelPart[] {
   return out;
 }
 
-/** §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. */
+/**
+ * §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. They must
+ * be §10.1's levels L1, L2, ... in order; §10.1's other rows (from 1.2.0 the
+ * classes SL and EX) have their requirements in sections of their own.
+ */
 export function conformanceLevels(text: string, where: string): LevelColumn[] {
   const blocks = sectionBlocks(text, '10.2 ', where);
   const out: LevelColumn[] = [];
@@ -387,7 +504,7 @@ export function conformanceLevels(text: string, where: string): LevelColumn[] {
     });
     out.push({ level: m[1]!, name: m[2]!, items });
   });
-  const table = tableRows(sectionTable(text, '10.1 ', 0, where)).slice(1).map((r) => r[0]!);
+  const table = tableRows(sectionTable(text, '10.1 ', 0, where)).slice(1).map((r) => r[0]!).filter((l) => /^L\d+$/.test(l));
   if (table.join() !== out.map((c) => c.level).join()) throw new Error(`${where}: §10.1 lists ${table.join(', ')}, §10.2 ${out.map((c) => c.level).join(', ')}`);
   return out;
 }
@@ -416,9 +533,10 @@ export function conformanceSuite(text: string, where: string): SuitePart[] {
     if (!Array.isArray(doc.cases)) throw new Error(`tests/conformance/expressions/${f}.json has no cases list`);
     return a + doc.cases.length;
   }, 0);
-  const runtime = trackedUnder(RUNTIME_FIXTURE_DIR, '.json').length;
+  const runtime = trackedIn(RUNTIME_FIXTURE_DIR, '.json').length;
   return [
     { label: 'Positive fixtures (pass_)', count: count('pass_'), dir: 'tests/fixtures' },
+    { label: 'Positive fixtures with warnings (warn_)', count: count('warn_'), dir: 'tests/fixtures' },
     { label: 'Negative fixtures (fail_)', count: count('fail_'), dir: 'tests/fixtures' },
     { label: 'Patch fixtures (patch_)', count: count('patch_'), dir: 'tests/fixtures' },
     { label: 'Expression cases', count: exprCases, dir: 'tests/conformance/expressions' },
@@ -433,6 +551,104 @@ export function suiteCaption(parts: SuitePart[]): string {
     return p.count === 1 ? words.replace(/s$/, '') : words;
   };
   return `The repository's conformance suite: ${andList(parts.map((p) => `${p.count} ${name(p)}`))}; ${name(top)} are the largest part.`;
+}
+
+// ------------------------------------------------ the approval digest vectors (§10.3)
+
+export const DIGEST_VECTORS_SOURCE = 'tests/conformance/approval/digests.json';
+
+export interface DigestGroup {
+  label: string;
+  count: number;
+  /** The group's name for one vector and for several, for the caption. */
+  one: string;
+  many: string;
+}
+
+const DIGEST_GROUPS = [
+  { label: 'Steps that declare shows', one: 'step that declares shows', many: 'steps that declare shows' },
+  { label: 'Steps that show their resolved inputs', one: 'step that shows its resolved inputs', many: 'steps that show their resolved inputs' },
+  { label: 'Steps asked again after a recheck', one: 'step asked again after a recheck', many: 'steps asked again after a recheck' },
+  { label: 'Tool calls', one: 'tool call', many: 'tool calls' },
+] as const;
+
+/**
+ * The approval digest vectors §10.3 makes normative, grouped by what they
+ * show (§5.14, §5.18.7): a step's `shows` values, a step's resolved inputs
+ * (no `shows`), a step asked again after a recheck, and a tool call. Checked
+ * against §10.3, which must name the file and both kinds, and against the
+ * file, which must say it is normative.
+ */
+export function digestVectors(text: string, where: string): DigestGroup[] {
+  const prose = sectionBlocks(text, '10.3 ', where).map((b) => toString(b)).join(' ');
+  for (const k of [DIGEST_VECTORS_SOURCE, 'step', 'tool_call']) {
+    if (!prose.includes(k)) throw new Error(`${where}: §10.3 no longer names ${k}`);
+  }
+  type Vector = { name: string; kind: string; approval?: { shows?: unknown; recheck?: unknown } | null };
+  const doc = JSON.parse(readRepoFile(DIGEST_VECTORS_SOURCE)) as { status?: unknown; vectors?: Vector[] };
+  if (doc.status !== 'normative' || !Array.isArray(doc.vectors)) throw new Error(`${DIGEST_VECTORS_SOURCE}: not a normative list of vectors`);
+  const groupOf = (v: Vector): number => {
+    if (v.kind === 'tool_call') return 3;
+    if (v.kind !== 'step') throw new Error(`${DIGEST_VECTORS_SOURCE}: vector ${v.name} has kind ${v.kind}`);
+    if (v.approval?.recheck) return 2;
+    return v.approval && 'shows' in v.approval ? 0 : 1;
+  };
+  const counts = DIGEST_GROUPS.map(() => 0);
+  for (const v of doc.vectors) counts[groupOf(v)]!++;
+  return DIGEST_GROUPS.map((g, i) => ({ ...g, count: counts[i]! })).filter((g) => g.count > 0);
+}
+
+export function digestCaption(groups: DigestGroup[]): string {
+  const total = groups.reduce((a, g) => a + g.count, 0);
+  const parts = groups.map((g) => plural(g.count, g.one, g.many));
+  return `The ${plural(total, 'normative approval digest vector', 'normative approval digest vectors')}: ${andList(parts)}; each gives the canonical JSON of what is shown and its SHA-256.`;
+}
+
+// ---------------------------------- the destination and memory vectors (§10.3)
+
+export const DESTINATION_VECTORS_SOURCE = 'tests/conformance/destinations/match.json';
+export const MEMORY_VECTORS_SOURCE = 'tests/conformance/memory/store.json';
+
+export interface EffectVectorGroup {
+  label: string;
+  count: number;
+  /** The file the group's vectors are in. */
+  source: string;
+}
+
+/**
+ * The destination vectors (§4.4.2) and memory vectors (§4.5) §10.3 makes
+ * normative: the patterns, valid and invalid; the destinations checked
+ * against policies, allowed and refused; and the memory store's cases.
+ * Checked against §10.3, which must name both files, and against the files.
+ */
+export function effectVectors(text: string, where: string): EffectVectorGroup[] {
+  const prose = sectionBlocks(text, '10.3 ', where).map((b) => toString(b)).join(' ');
+  for (const k of [DESTINATION_VECTORS_SOURCE, MEMORY_VECTORS_SOURCE]) {
+    if (!prose.includes(k)) throw new Error(`${where}: §10.3 no longer names ${k}`);
+  }
+  const dest = JSON.parse(readRepoFile(DESTINATION_VECTORS_SOURCE)) as { patterns?: { valid?: unknown }[]; matches?: { allowed?: unknown }[] };
+  if (!Array.isArray(dest.patterns) || !Array.isArray(dest.matches)) throw new Error(`${DESTINATION_VECTORS_SOURCE}: no patterns or matches list`);
+  if (dest.patterns.some((p) => typeof p.valid !== 'boolean')) throw new Error(`${DESTINATION_VECTORS_SOURCE}: a pattern without a boolean valid`);
+  if (dest.matches.some((m) => typeof m.allowed !== 'boolean')) throw new Error(`${DESTINATION_VECTORS_SOURCE}: a match without a boolean allowed`);
+  const mem = JSON.parse(readRepoFile(MEMORY_VECTORS_SOURCE)) as { status?: unknown; cases?: unknown[] };
+  if (mem.status !== 'normative' || !Array.isArray(mem.cases)) throw new Error(`${MEMORY_VECTORS_SOURCE}: not a normative list of cases`);
+  const valid = dest.patterns.filter((p) => p.valid === true).length;
+  const allowed = dest.matches.filter((m) => m.allowed === true).length;
+  return [
+    { label: 'Valid patterns', count: valid, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Invalid patterns', count: dest.patterns.length - valid, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Destinations allowed', count: allowed, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Destinations refused', count: dest.matches.length - allowed, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Memory store cases', count: mem.cases.length, source: MEMORY_VECTORS_SOURCE },
+  ];
+}
+
+export function effectVectorsCaption(groups: EffectVectorGroup[]): string {
+  const n = (label: string) => groups.find((g) => g.label === label)?.count ?? 0;
+  const patterns = n('Valid patterns') + n('Invalid patterns');
+  const destinations = n('Destinations allowed') + n('Destinations refused');
+  return `The normative destination vectors check ${plural(patterns, 'pattern', 'patterns')} (${n('Valid patterns')} valid, ${n('Invalid patterns')} invalid) and ${plural(destinations, 'destination', 'destinations')} against policies (${n('Destinations allowed')} allowed, ${n('Destinations refused')} refused); the memory vectors script ${plural(n('Memory store cases'), 'store', 'stores')} through persist and recall.`;
 }
 
 // ---------------------------------------------- F-S30 which change bumps which number

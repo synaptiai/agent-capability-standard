@@ -1,8 +1,8 @@
 {
-  "standard": "1.1.0",
+  "standard": "1.2.0",
   "section": "8.1",
-  "status": "informative",
-  "description": "Trust scores: score = trust_weight(source) * confidence * recency_factor, the conflict_resolution_function.formula of schemas/authority_trust_model.yaml, with the decay factor of STANDARD v1.1.0 section 8.1 and the static weight of section 8.3. Section 8.1 lists the factors a score must support and does not state how they compose; the product is the formula of that schema, one of the schemas section 6.1 requires. min_trust floors the decay factor only: not the score and not the static weight. `model` holds the values of the schema that the vectors read. `not_covered` lists the cases the vectors leave out because the Standard does not state their result, each with what the reference implementation does; a vector for one of them would make one reading look required. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
+  "status": "normative",
+  "description": "Trust scores of STANDARD v1.2.0 section 8.1: score = weight * confidence * decay, computed in that order in binary64, with the static weight of section 8.3 and the decay factor of section 8.1. A confidence of 1 when the source reports none; an age below zero counts as zero; min_trust floors the decay factor only, not the score and not the static weight. Evidence without a static weight has no score, and an implementation refuses it (expect_error). Field authority is not a factor of the score (section 8.2 ranks by it). `model` holds the values of schemas/authority_trust_model.yaml that the vectors read. Normative (section 10.3). grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
   "tolerance": 1e-12,
   "fields": {
     "name": "The vector's name, unique in this file.",
@@ -11,16 +11,12 @@
     "trust_class": "The trust class of the identity of the item's sender. Absent: the evidence has none.",
     "profile_trust_weights": "The trust_weights of the domain profile in force. Absent: no profile.",
     "age_hours": "The age of the observation, in hours.",
-    "confidence": "The confidence the source reports.",
+    "confidence": "The confidence the source reports. Absent: it reports none, and the factor is 1.",
     "decay_factor": "The expected decay factor.",
     "weight": "The expected static weight.",
-    "score": "The expected score: weight * confidence * decay_factor. A conforming value of each of the three differs from the expected one by at most `tolerance`."
+    "score": "The expected score: weight * confidence * decay_factor. A conforming value of each of the three differs from the expected one by at most `tolerance`. Absent when expect_error is true.",
+    "expect_error": "true: the evidence has no static weight and an implementation refuses it; the vector then has no expected values."
   },
-  "not_covered": [
-    "Field authority, a factor section 8.1 lists. Neither the Standard nor the schema's formula gives it arithmetic; the schema lists field_authority examples only. The reference implementation does not compute it.",
-    "A score with no stated confidence. The benchmark scenario benchmarks/scenarios/conflicting_sources.py multiplies weight by recency and has no confidence; the reference implementation's default confidence of 1.0 gives the same score. Every vector here states a confidence.",
-    "The strategies of section 8.2, which choose among conflicting sources and compute no score."
-  ],
   "model": {
     "source_ranking": {
       "weights": {
@@ -122,6 +118,33 @@
       "decay_factor": 0.9330329915368074,
       "weight": 0.65,
       "score": 0.0
+    },
+    {
+      "name": "no_confidence_is_one",
+      "about": "The source reports no confidence: the factor is 1, so the score is weight * decay: 0.88 * 0.5.",
+      "source_type": "primary_api",
+      "age_hours": 240,
+      "decay_factor": 0.5,
+      "weight": 0.88,
+      "score": 0.44
+    },
+    {
+      "name": "negative_age",
+      "about": "An age below zero counts as zero: the score is weight * confidence.",
+      "source_type": "system_of_record",
+      "age_hours": -48,
+      "confidence": 0.5,
+      "decay_factor": 1.0,
+      "weight": 0.92,
+      "score": 0.46
+    },
+    {
+      "name": "unweighable",
+      "about": "A source type with no weight: no score.",
+      "source_type": "no_such_source",
+      "age_hours": 0,
+      "confidence": 1.0,
+      "expect_error": true
     }
   ]
 }

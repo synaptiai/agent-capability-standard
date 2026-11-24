@@ -7,12 +7,14 @@
 # Capability domain parameters use 'image.*' (e.g., domain: image.object).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: vision
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for computer vision and image processing environments.
   Emphasizes visual evidence grounding, spatial reasoning accuracy,
@@ -53,18 +55,24 @@ risk_thresholds:
     - send                    # Never autonomously distribute visual content
 
 checkpoint_policy:
-  before_image_modification: always      # Always checkpoint before modifying images
-  before_classification_output: always   # Always checkpoint before final classification
-  before_generation: always              # Always checkpoint before generating images
-  before_batch_processing: high_risk     # Checkpoint before large batch operations
-  during_pipeline_stages: medium_risk    # Checkpoint at pipeline stage boundaries
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_image_modification -> mutate; before_classification_output and
+  # before_generation -> persist; before_batch_processing (high_risk) and
+  # during_pipeline_stages (medium_risk) -> "*": medium_risk.
+  mutate: always
+  persist: always
+  "*": medium_risk
 
 evidence_policy:
   required_anchor_types:
-    - image_reference          # Source image URI or hash
-    - bounding_box             # Spatial region coordinates
-    - confidence_score         # Model confidence for detections
-    - pixel_evidence           # Pixel-level evidence (segmentation masks)
+    # §6.5 kinds: image_reference and pixel_evidence -> file, plus the kinds
+    # of domain_sources. bounding_box and confidence_score are not kinds.
+    - file
+    - log
+    - sensor
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.80     # Moderate-high confidence for visual tasks
   require_grounding:
     - detect                   # Object detections must reference image regions

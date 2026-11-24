@@ -1,0 +1,173 @@
+{
+  "description": "A rollback step completes whether or not it restored everything: its output says restored false, and the run goes on (\u00a74.4.1, as in 1.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        },
+        {
+          "capability": "rollback",
+          "purpose": "rollback step",
+          "store_as": "rb",
+          "input_bindings": {
+            "checkpoint_id": "${cp.checkpoint_id}"
+          }
+        },
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "a",
+          "input_bindings": {
+            "event": {
+              "what": "rolled back"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "rollback",
+        "step": 3,
+        "inputs": {
+          "checkpoint_id": "cp1"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "restored": false,
+          "unrestored": [
+            {
+              "item": "cfg",
+              "reason": "failed"
+            }
+          ],
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit",
+        "step": 4
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "rb": {
+        "restored": false
+      }
+    }
+  },
+  "trace_kinds": [
+    "step_completed"
+  ]
+}

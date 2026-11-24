@@ -38,20 +38,7 @@ pub(crate) const TRUST_CLASSES: &[&str] = &[
 
 /// An `authenticated_by` value: a standard mechanism or a vendor one.
 pub(crate) fn known_mechanism(m: &str) -> bool {
-    MECHANISMS.contains(&m) || vendor(m)
-}
-
-/// A vendor mechanism: `x-` then a lower-case letter or digit, then lower-case
-/// letters, digits, `_`, `.` or `-` (the schema's pattern).
-fn vendor(m: &str) -> bool {
-    let Some(rest) = m.strip_prefix("x-") else {
-        return false;
-    };
-    let mut chars = rest.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c))
+    MECHANISMS.contains(&m) || crate::grounding::vendor(m)
 }
 
 /// V106 for each `identity@1` input bound without the declaration; S303 for

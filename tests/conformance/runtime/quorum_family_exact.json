@@ -1,0 +1,181 @@
+{
+  "description": "Model families compare exactly: a reviewer whose host attests 'Acme' does not cover 'acme' (F504; \u00a75.15, \u00a75.16).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "input_bindings": {
+            "agent": "ra",
+            "task": {
+              "review": "${change}"
+            },
+            "model_family": "acme",
+            "read_only": true
+          },
+          "timeout": "2h",
+          "wait": {
+            "event_type": "review.done"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "agent": "rb",
+            "task": {
+              "review": "${change}"
+            },
+            "model_family": "bolt",
+            "read_only": true
+          },
+          "timeout": "2h",
+          "wait": {
+            "event_type": "review.done"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "gate",
+          "input_bindings": {
+            "target": "${change}",
+            "constraints": [
+              "two families"
+            ],
+            "action_on_violation": "block"
+          },
+          "quorum": {
+            "verdicts": [
+              "${ra.result: object}",
+              "${rb.result: object}"
+            ],
+            "reviewers": [
+              "ra",
+              "rb"
+            ],
+            "vocabulary": [
+              "approve",
+              "request_changes"
+            ],
+            "pass_values": [
+              "approve"
+            ],
+            "min_pass": 2,
+            "pinned_to": "${change}",
+            "require_model_families": [
+              "acme",
+              "bolt"
+            ]
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1",
+          "quorum@1"
+        ]
+      }
+    }
+  },
+  "header": "1.1.0",
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "read_only": true,
+            "model_family": "Acme"
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1",
+          "reviewer_id": "ra",
+          "value": "approve",
+          "pinned": "c1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "effective": {
+            "read_only": true,
+            "model_family": "bolt"
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2",
+          "reviewer_id": "rb",
+          "value": "approve",
+          "pinned": "c1"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F504",
+    "step": 2
+  },
+  "trace_kinds": [
+    "quorum"
+  ]
+}

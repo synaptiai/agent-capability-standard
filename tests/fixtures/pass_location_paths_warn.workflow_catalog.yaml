@@ -1,0 +1,22 @@
+# Standard version: 1.1.0
+# Unknown fields whose paths need structured segments (STANDARD v1.2 §9.8):
+# the sibling keys a (holding b) and a.b, a misspelled step field and an
+# unknown workflow field each get an exact path. W604.
+w:
+  goal: Read a record.
+  risk: low
+  owner: nobody
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings:
+      target: records
+      a: {b: 1}
+      a.b: 2
+  - capability: retrieve
+    purpose: Read it again.
+    store_as: r2
+    requires_aproval: true
+    input_bindings:
+      target: records

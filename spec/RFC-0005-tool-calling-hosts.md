@@ -1,22 +1,25 @@
 # RFC-0005: Tool-calling hosts
-**Status:** Draft
+**Status:** Accepted
 **Target:** Standard v1.2.0
-**Date:** 2026-11-14
+**Date:** 2026-11-15
 
 ## Summary
 
 Standard 1.1.0 states its safety rules over the steps of a workflow. For a
 host where a model chooses one tool call after another and no workflow runs,
-it has one sentence, in [§5.2.1](STANDARD-v1.1.0.md#521-safety-flags):
-"Validators, executors and safety layers MUST act on effective flags." It does
-not define a safety layer, and the word "tool" does not occur in it.
+it had one sentence, in [§5.2.1](STANDARD-v1.1.0.md#521-safety-flags):
+"Validators, executors and safety layers MUST act on effective flags." It
+did not define a safety layer, and the word "tool" did not occur in it.
 
-This RFC proposes how the Standard applies to such a host. It answers findings
-ACS-01 (decisions 1, 3 and 9), ACS-02 (4), ACS-03 (5), ACS-06 (8), ACS-08
-(6), ACS-38, ACS-39 and ACS-57 (2) and ACS-41 (7) of the
+This RFC decides how the Standard applies to such a host. Standard 1.2.0
+carries the decisions as §5.18 (Tool-Calling Hosts), §5.2.2 (Checkpoint Use)
+and class SL (§10.4) of [STANDARD-v1.2.0](STANDARD-v1.2.0.md). It answers
+findings ACS-01, ACS-02, ACS-03, ACS-07, ACS-08, ACS-36, ACS-38, ACS-39,
+ACS-41, ACS-55 and ACS-57, and questions ACS-Q01 to ACS-Q04, ACS-Q07 and
+ACS-Q08 of the
 [Standard Agents mapping](../docs/research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
-Each numbered rule can be accepted, amended or rejected on its own. None is
-normative until a Standard version carries it.
+The maintainers accepted it on 2026-11-15, with every remaining finding to
+be implemented in 1.2.0; the open questions of the Draft are decided below.
 
 ## Motivation
 
@@ -30,368 +33,368 @@ enforced the safety flags and disagreed:
 | Python adapter (`grounded_agency/adapter.py`) | One per call, used up after success | 30 minutes | Refuses in strict mode |
 | Plugin hook (`hooks/pretooluse_require_checkpoint.sh`) | A marker file, never used up | The marker's expiry | Blocks |
 
-The ontology requires approval for `execute`, `mutate` and `send`. Neither the
-hook nor the adapter then asked for it, and a call has no step and no `shows`,
-so each binding chooses what to hash. A refusal was prose in one layer and a
-§9.8 object in another. The adapter now asks (5.6). The levels of
-[§10](STANDARD-v1.1.0.md#10-conformance) cover validators only, so a binding
-has nothing to conform to.
+The ontology requires approval for `execute`, `mutate` and `send`; the hook
+asked for none, and a call has no step and no `shows`, so each binding chose
+what to hash. A refusal was prose in one layer and a §9.8 object in another.
+No record said which capability a tool performs, a tool with no metadata
+became `execute`, and skill-level hooks asked a model whether the user had
+approved. The levels of [§10](STANDARD-v1.1.0.md#10-conformance) cover
+validators only, so a binding had nothing to conform to.
 
 ## Goals
 
 - Rules over calls that a safety layer on any tool-calling host can
-  implement.
-- The same effective flags, codes and approval digest as for a workflow; no
-  new diagnostic code or capability.
-- Fixtures that any language can run.
-- No change to what a validator accepts, except through 8.5.
+  implement, with the same effective flags, codes and approval digest as a
+  workflow.
+- One host-neutral binding record, with the existing carriers as instances.
+- Language-neutral fixtures, run by two reference layers.
+- No change to what a validator accepts or what the executor does.
 
 ## Non-goals
 
-Not covered here; the findings named stay open:
-
-- Delegation: a `delegate` call's flags, checkpoints across a delegation, and
-  an agent manifest (ACS-04, ACS-18, ACS-29).
-- Domain profiles, including `required_anchor_types` (ACS-05).
-- A schema for the executor's host protocol (ACS-37).
-
-Also left out: standing mandates, `skip` and `defer_to_queue` for a call,
-and how a host stores records or authenticates approvers.
+- Delegation semantics beyond scope: a `delegate` call's flags, checkpoints
+  across a delegation and agent descriptors (ACS-04, ACS-18, ACS-29) are
+  decided elsewhere in 1.2.0.
+- Evidence anchors (ACS-06): decision 8 of the Draft is withdrawn from this
+  RFC; the evidence rules of 1.2.0 decide it.
+- The executor's host protocol (ACS-37), the send destination policy
+  (ACS-52) and the secrets rule (ACS-23), which §5.18.10 references.
+- Standing mandates, `skip` and `defer_to_queue` for a call, and how a host
+  stores records or authenticates approvers.
 
 ## Key decisions
 
-### 1) Three terms are defined
+### 1) Terms and placement
 
-Added to [§2](STANDARD-v1.1.0.md#2-terms):
-
-- **Tool-calling host**: a runtime in which a model chooses each tool call
-  and its arguments, and no workflow's step list determines the next action.
-- **Tool binding**: a record that states which capability a tool performs and
-  which safety flags it declares.
-- **Safety layer**: the code that decides, before a tool's effect, whether a
-  call may run under decisions 2 to 6: a pre-call hook, a permission callback
-  or a wrapper around the tool's own code.
-
-A **call** is one invocation of one tool. Reason: §5.2.1 places a MUST on
-safety layers without defining one.
+§2 defines tool-calling host, call, tool binding, safety layer, layer scope
+and execution boundary. The rules are a section of the Standard (§5.18), where
+§5.2.1's MUST already points, and conformance is a separate class, SL
+(§10.4), not a fifth level: a layer validates no catalog and a validator
+checks no call. (Draft open question 8.)
 
 ### 2) One host-neutral binding record
 
-A JSON Schema, `tool_binding.schema.json`, under `schemas/interop/`:
+`schemas/interop/tool_binding.schema.json`: `tool`, `ontology`, `standard`,
+`capability` (or `control`), `domain`, `flags`, `additional_capabilities`,
+`classifier`, `invokes`, `approval`, and, for a `send` tool, `destination`
+(the argument a destination policy checks, §4.4.2).
 
-| Field | Required | Meaning |
-|---|---|---|
-| `tool` | yes | The tool's name on the host |
-| `capability` | yes | An ontology capability id |
-| `domain` | no | The capability's domain parameter |
-| `flags` | no | Declared safety flags (§5.2.1) |
-| `additional_capabilities` | no | Other capabilities the same call performs |
-| `invokes` | no | Names of the bindings the tool calls |
-| `ontology` | yes | The ontology version used |
-
-- **2.1** An unknown capability id is V101, as for a step, and the binding is
-  not loaded.
-- **2.2** Effective flags are the stricter of declaration and ontology, as
-  for a step: a weaker declaration has no effect and is W602, except
-  `mutation: false` on a `mutation_overridable` capability. A host may
-  refuse such a binding instead, as strict validation turns a warning into
-  an error; the TypeScript binding does. Reason: a tool's author gets no
-  power a workflow's author lacks.
-- **2.3** A tool with no binding is treated as the strictest case: `risk:
-  high`, and `mutation`, `requires_checkpoint` and `requires_approval` true.
-  Reason: a layer cannot know that an unknown tool only reads.
-- **2.4** A tool that performs several capabilities takes the strictest flags
-  across them, flag by flag, and the `requires` edges of each. Reason: one
-  call can comment on an issue and close it.
-- **2.5** A layer may classify a call from its arguments, as the Python
-  mapper reads a shell command. The classifier narrows only for input it
-  recognises; otherwise, and when it fails, the declared worst case applies.
-  Reason: without it every shell call needs a checkpoint and an approval,
-  and with an allow-list the weaker class is never the default.
-- **2.6** A tool takes the strictest flags over its own and, transitively,
-  those of the bindings in `invokes`. A host SHOULD refuse an invocation
-  outside the list. The list bounds named invocation, not storage or network
-  calls, so the result is a lower bound.
-- **2.7** The record describes; the enforcing code is authoritative. A layer
-  computes effective flags from the ontology and the declared flags, and
-  ignores copies a carrier holds, such as the annotation's `layer`. A record
-  is not evidence of enforcement. Reason: an annotation cannot enforce, and
-  a copy can be stale.
-
-The Python SDK's tool `metadata` and the `acs` annotation
-(`schemas/interop/standard_agents_annotation.schema.json`) become carriers of
-the record. Neither is an instance today: each names its members its own
-way, and `tool` is the tool's name on the host.
+- **2.1** An unknown capability is V101; a malformed record S303/S304; an
+  unsupported ontology major or cited standard V109; two records for one
+  tool V110. A record
+  that does not load leaves its tool unbound.
+- **2.2** Effective flags are the strictest of declaration and ontology,
+  flag by flag; a weaker declaration is W602 and has no effect, except
+  `mutation: false` on a single `mutation_overridable` capability. A host
+  may refuse such a record; the TypeScript binding does.
+- **2.3** An unbound tool is the strictest case: high risk, mutation,
+  checkpoint and approval. A host that knows the tools it offers reports
+  each unbound one as W617. (Draft open question 4: neither `observe` at
+  medium risk, which fails open, nor refusal, which makes a layer unusable
+  on a host with many built-in tools; a person can still approve.)
+- **2.4** Several capabilities: `additional_capabilities`, strictest flags
+  and every capability's prerequisites.
+- **2.5** Classifiers narrow per call only for arguments they recognise; the
+  record is the worst case. A classification can be weaker than the worst
+  case, never weaker than its own capability's ontology flags. (Draft open
+  question 7: "cannot weaken" bounds a capability, not a tool's worst case.)
+- **2.6** Composites: `invokes`, strictest flags transitively; V107 for an
+  unresolved name, V105 for a cycle. A nested call is covered by the
+  composite's approval and checkpoint where the layer can attribute it, and
+  checked on its own where it cannot; its prerequisites are checked either
+  way. Attribution needs evidence that the composite's own code made the
+  call (the TypeScript binding's one-shot nesting token), not merely the
+  same thread or execution. A nested call outside the list is F504. The
+  list bounds named invocation only: the flags it gives are a lower
+  bound.
+- **2.7** The record describes; the enforcing code is authoritative, and
+  copies in a carrier are ignored. The Python SDK's tool `metadata` and the
+  `acs` annotation are carriers; the annotation schema now rejects copies
+  inconsistent with the capability.
+- **2.8** Classification by effect, with a table: a change to a resource
+  that can be read back, local or remote, is `mutate`; delivering a
+  message, notification or event, or a request of unknown effect, is
+  `send`; a write to the agent's own memory store is `persist`, anywhere
+  else `mutate`; a restore of a checkpoint taken in the scope, which the
+  call names, is `rollback`, and restoring any other state is `mutate`;
+  further instructions on a delegated task are `delegate`; a tool that only
+  signals the host is control-only. One call a classifier
+  reads as several actions takes the strictest flags and every
+  prerequisite of all of them. (Draft open question 6.)
+- **2.9** Control-only tools are never refused (no gate, no host policy; a
+  failure to record one is reported). A host action that follows any call
+  of a tool (a stop tool) must not be tied to a tool that is not
+  control-only and is unbound, has a prerequisite, or requires a checkpoint
+  or approval: F506.
 
 ### 3) Over a call sequence, only `requires` refuses
 
-- **3.1 Scope.** History counts within one scope: the host's unit of
-  conversation state, such as a thread or session, in which calls are ordered
-  and the layer's records last. The layer names it. A delegate is another
-  scope.
-- **3.2 `requires`.** A `to` call is refused unless a `from` call completed
-  successfully earlier in the scope. A call that started while the other was
-  running did not come before it, as in a `parallel_group`
-  ([§4.3](STANDARD-v1.1.0.md#43-edge-types-and-dependency-semantics)). A
-  missing `checkpoint` is F501, or F503 for `rollback`: the codes the
-  executor raises when it cannot take a checkpoint or has none to roll back
-  to. Decision 4 says when a checkpoint counts. Any other `requires` edge is
-  V102; ontology 2.1.0 has none.
-- **3.3 `soft_requires`** never refuses. A layer MAY report W601.
-- **3.4 `precedes` is not enforced.** §4.3 applies it "when both are present"
-  in a closed step list. A call sequence is open: at the `to` call the layer
-  cannot know whether a `from` call will follow, and when one does the
-  earlier call has had its effect, so a refusal protects nothing.
-- **3.5 `conflicts_with` is not enforced.** It forbids two capabilities in
-  one `parallel_group` and allows them in sequence, so a host that runs a
-  scope's calls one at a time cannot violate it. Concurrency across calls,
-  runs and agents is ACS-16, which stays open.
+- **3.1** History counts over the scope's lifetime; a checkpoint's power to
+  authorise ends at a boundary or its maximum age (decision 4). A delegate's
+  calls are another scope unless the layer orders them together and says
+  so. (Draft open question 1, first part.)
+- **3.2** `requires`: F501 for a missing checkpoint, F503 for `rollback`,
+  V102 for any other prerequisite; §9.1 says a V-code keeps its meaning
+  when a layer uses it for a call.
+- **3.3** `soft_requires` never refuses; W601 may be reported.
+- **3.4** `precedes` is neither enforced nor reported: at the earlier call
+  nothing is known, and at the later one a refusal protects nothing. (Draft
+  open question 1, second part.)
+- **3.5** `conflicts_with` is not enforced over calls.
+- **3.6** Check and use are atomic per scope: a lock or reservation, or a
+  host that runs the scope's calls one at a time, as stated.
 
 ### 4) One checkpoint per call, until a boundary
 
-- **4.1** One checkpoint authorises one call whose effective
-  `requires_checkpoint` is true; overlapping calls never share one. The same
-  rule is added for steps. Reason: it is the executor's rule
-  ([Running workflows](../docs/guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)),
-  which the Standard does not state: a catalog with one checkpoint before two
-  `mutate` steps validates.
-- **4.2 When it is used up.** The executor and the TypeScript binding use
-  the checkpoint up once every check has passed, before the effect; a call
-  that then fails does not get it back. The Python adapter reserves it before
-  the call and uses it up after success; a failed call releases it. This RFC
-  proposes the first: a layer may never learn a call's outcome, a call that
-  reports an error may still have changed something, and a crash between
-  effect and record would leave the checkpoint valid for a second change. For
-  the adapter's rule: a call that failed and changed nothing costs a
-  checkpoint, and the executor runs a step's `retry` attempts under the
-  checkpoint the step used. That rule needs the adapter's reservation, so
-  that overlapping calls cannot share one.
-- **4.3 Validity ends at a boundary.** Under
-  [§5.13](STANDARD-v1.1.0.md#513-waiting-for-events) a checkpoint taken
-  before a wait "no longer authorises the step". A tool-calling host has no
-  `wait` step; its counterpart is a point where the scope stops and later
-  resumes, such as a thread that goes idle while a person decides. A prompt
-  answered while the call waits (5.6) is not one: in the executor an approval
-  is not a wait. A layer states an **execution boundary**, where the host
-  exposes one, and a **maximum age**, which also bounds a long prompt. A
-  checkpoint authorises a call only before the next boundary and within that
-  age.
-- **4.4 Rollback.** A `rollback` call needs a checkpoint to exist in the
-  scope, valid or not, and uses none up; with none it is F503. Reason, as in
-  the executor, whose gates and failure modes roll back to the latest
-  checkpoint, valid or not: validity limits what a checkpoint authorises, not
-  what it restores.
-- **4.5 Refusal.** With no valid checkpoint the call is refused with F501. A
-  refused call uses nothing up. The executor asks its host for one here;
-  whether a layer may is an open question.
-- **4.6 Fail closed.** A layer that cannot read its records or complete a
-  check refuses; one that cannot classify a call applies 2.3 or 2.5. A mode
-  that only logs is outside the conformance class.
+- **4.1** One checkpoint authorises one gated call, and one gated step
+  (§5.2.2, the executor's rule): the most recently taken of the valid
+  ones, so an earlier valid checkpoint serves once the latest is used. A
+  checkpoint is taken by the call that saves the state, not by a call that
+  only leads to one (a skill's instructions).
+- **4.2** It is used up when the call is allowed to start, before the
+  effect, whatever the outcome. A checkpoint held while a host prompt is
+  open is re-checked and used in one atomic step when the call is allowed.
+  A hold the layer cannot resolve (it lapses, the layer restarts, the host
+  never reports a refusal) counts as used. (Draft open question 2: before
+  the effect, for every host.)
+- **4.3** Validity ends at the next execution boundary the layer names and
+  at its maximum age, at most 30 minutes. A prompt answered within the call
+  is not a boundary. (Draft open question 2: the Standard caps the age.)
+- **4.4** A `rollback` call needs a checkpoint taken earlier, valid or
+  not, and uses none; else F503. For workflows, a gate or failure-mode
+  rollback restores the latest checkpoint (F503 with none) and a `rollback`
+  step restores the checkpoint its input names, as the executor does.
+- **4.5** With no valid checkpoint a call is refused with F501; a layer does
+  not take one itself. The executor keeps having its host take one for a
+  step (§5.2.2). (Draft open question 2.)
+- **4.6** Fail closed: R407 when a check cannot complete; a host claiming a
+  conforming layer runs no covered call without its decision, or names the
+  gap.
 
 ### 5) Approval binds to tool, capability and arguments
 
-- **5.1** A call whose effective `requires_approval` is true runs only on a
-  valid [§5.14](STANDARD-v1.1.0.md#514-approval) decision; otherwise F502.
-  Approval is checked first, as in the executor and the TypeScript binding,
-  so a restore point can be taken after the wait for a person. The Python
-  adapter checks the checkpoint first.
-- **5.2 What is shown and hashed.** The array `[{"action": <tool name>,
-  "capability": <id>, "args": <validated arguments>}]`, which the TypeScript
-  binding uses, with §5.14's digest: SHA-256 of its RFC 8785 canonical JSON.
-  For a step with no `shows` the executor shows the resolved inputs in an
-  array, `[inputs]`. The proposed object carries that value as `args` and
-  adds the tool's name and the capability. Reason: the executor's request
-  names its step, and a call has no such position; with `[args]` alone one
-  decision fits every tool that takes the same arguments.
-- **5.3 One decision per call.** The call that runs under a decision uses it
-  up; an identical later call needs a new one. Reason: §5.14 requires that a
-  decision "has not been used before".
-- **5.4** A decision expires after the period the layer states for the tool,
-  and counts only when at least `min_approvers` (default 1) distinct
-  approvers, as the host authenticated them, agree.
-- **5.5** A rejection must not be lost to a concurrent approval: once any
-  approver rejects, the request is rejected.
-- **5.6 The host's own prompt.** A permission prompt that shows a person
-  the tool and the inputs the call will run with, and decides that call
-  alone, satisfies 5.1 and 5.3 `in_session` with one approver; binding the
-  decision to the call replaces the digest. Every such call goes to the
-  prompt, even one an allow-list would pass; a remembered "always allow" is
-  not a decision per call. A prompt that is skipped, cannot be shown, or
-  shows other inputs than those that run gives F502.
-- **5.7** With no one to ask the call is refused with F502, as under
-  `when_unattended: fail`.
+- **5.1** A gated call runs only on a valid §5.14 decision; else F502.
+- **5.2** Shown and hashed: `[{action, capability, args}]`, `capability`
+  null for an unbound tool. (Draft open question 3.)
+- **5.3** One decision per call, used up when the call starts. (Draft open
+  question 3.)
+- **5.4** Expiry and `min_approvers` come from the binding's `approval`;
+  any rejection rejects.
+- **5.5** The order of the approval and checkpoint checks is the layer's;
+  neither is used up until both pass. (Draft open question 3.)
+- **5.6** A host prompt showing the tool and the arguments, deciding that
+  call alone, is a one-approver `in_session` decision; every gated call
+  goes to it; the layer records the digest. It cannot meet
+  `min_approvers` above 1, nor a `role` the host does not authenticate to
+  the layer. A layer relies on a prompt only in host configurations it
+  knows to put it to a person, and names them; in any other (a mode that
+  approves calls itself or lets a classifier answer) it refuses with F502.
+- **5.6a** Arguments the host changes while answering a prompt are
+  classified again; the call is refused if it then needs approval, or a
+  checkpoint or prerequisite it does not hold.
+- **5.7** No one to ask: F502.
 
 ### 6) A refusal is a §9.8 diagnostic
 
-A refusal is the [§9.8](STANDARD-v1.1.0.md#98-diagnostic-format) diagnostic.
-Its `location` holds `tool` and `capability`, and no `workflow` or `step`. On
-a text-only channel the text opens with the code and name: `F501
-CHECKPOINT_REQUIRED: ...`. Reason: a client can tell which rule refused
-without parsing prose, and §9.8 does not change.
+`location` holds `tool`, `capability` (absent when unbound) and optionally
+`call`; on a text-only channel the text opens with the code and name. A
+host policy such as a rate limit is F504; a failure of the layer itself is
+R407.
 
 ### 7) A text-only result carries I-JSON text
 
-Where a tool's result is a string, a capability output is the I-JSON text of
-the output object with nothing around it. The consumer parses it and checks
-the fields the output contract requires, as the executor does (R402
-otherwise). Where the host has validated structure, such as a submit tool's
-arguments, that is preferred. A producer checks §5.14's I-JSON limits first.
-Reason: each binding otherwise asserts its own encoding and check.
+A capability output on a string channel is the I-JSON text of the output
+object, nothing around it; the consumer checks required fields (R402); the
+producer checks I-JSON limits first (R402); validated structure is
+preferred. The rule binds every producer and consumer of a string output,
+whether or not a safety layer runs, a host that answers an executor's
+capability call from a model's or a sub-prompt's string included.
 
-### 8) One anchor item, one kind vocabulary
+### 8) (Withdrawn) Evidence anchors
 
-Every capability output requires `evidence_anchors`, an array with no `items`.
-Three `kind` vocabularies exist:
-
-| Where | `kind` values |
-|---|---|
-| `schemas/event_schema.yaml`, `Anchor` | `file`, `url`, `tool`, `log`, `sensor`, `human_note`, `api` |
-| `schemas/world_state_schema.yaml`, `Anchor` | `file`, `url`, `tool`, `log`, `sensor`, `human_note` |
-| Python SDK, `EvidenceAnchor` (a free string; the values its code writes) | `tool_output`, `file`, `command`, `mutation`, `coordination` |
-
-- **8.1** One `EvidenceAnchor`, from the event schema's `Anchor`: `ref` and
-  `kind` required, `timestamp` and `excerpt` optional.
-- **8.2** One `kind` vocabulary, the event schema's seven values, for both
-  schemas and the SDK.
-- **8.3** A host's own kind carries an `x-` prefix, as vendor fields do.
-  `ref` is an opaque string whose schemes the host documents.
-- **8.4** An optional `digest`: `sha256:` and the hex digest of the anchored
-  content, so a consumer can tell whether it changed.
-- **8.5** Outputs gain `items` only once every catalog in the repository
-  validates with it in strict mode.
-
-Reason: a consumer cannot check an anchor whose shape each producer chooses.
+Moved out of this RFC: ACS-06 is decided with the evidence rules of
+Standard 1.2.0.
 
 ### 9) A conformance class for safety layers
 
-- **9.1 A class for safety layers**, beside validator levels L1 to L4. A
-  layer conforms when, for the calls it covers, it applies decisions 2 to 6
-  and passes the fixtures. Its statement names the host, the calls it covers
-  and those it cannot see, its scope, boundary and maximum age, and how
-  approval is obtained, with its expiry.
-- **9.2 Call-sequence fixtures**, language-neutral JSON under
-  `tests/conformance/calls/`:
+- **9.1** Class SL (§10.4): a layer loads bindings as §5.18.1–§5.18.4
+  state, applies §5.18.5–§5.18.9 and the capability checks of §5.18.10,
+  and fails closed; it passes the binding fixtures and call-sequence
+  fixtures whose needs it supports, and publishes a conformance statement
+  naming the host, the calls covered and not seen, scope, boundaries,
+  maximum age, approval (with the host configurations in which a prompt is
+  relied on, and whether roles can be verified), concurrency, fixture
+  features, host gaps, the covered calls whose results carry no capability
+  output, and any §5.18.10 check it does not apply (a conforming layer has
+  none). Both reference layers list none and claim the class. The
+  output-contract row applies to the results a layer receives as capability
+  outputs, in the form its host delivers them: the Python adapter checks
+  the text of each result of an MCP tool bound to a capability (R402), a
+  tool `create_grounded_mcp_server` serves as it returns and another
+  server's at PostToolUse, and its statement names the calls whose results
+  come in other forms (Claude Code's own tools). A call whose output a
+  layer refuses has failed: it takes no checkpoint and is no prerequisite
+  that ran.
+- **9.2** Fixtures: `tests/conformance/bindings/` and
+  `tests/conformance/calls/`, generated by `scripts/gen_call_fixtures.py`
+  with a `--check` mode, with schemas beside them. A fixture's `needs`
+  (`unbound_calls`, `nested_calls`, `recorded_approval`, and for binding
+  fixtures `offered_tools`, since §5.18.2's offered-tool checks are a
+  SHOULD) names features a layer may lack and state.
+- **9.3** Reference layers: the Python adapter (a hook before each tool)
+  and the TypeScript binding (inside each tool) run every fixture whose
+  needs they support. The plugin's shell hooks are aligned with the rules
+  Claude Code lets them apply and do not claim the class.
 
-```json
-{
-  "description": "One checkpoint authorises one call.",
-  "ontology": "2.1.0",
-  "bindings": [
-    {"tool": "save", "capability": "checkpoint"},
-    {"tool": "write", "capability": "mutate"}
-  ],
-  "sequence": [
-    {"call": "save", "expect": "run"},
-    {"call": "write", "args": {"key": "a"}, "approve": ["alice"], "expect": "run"},
-    {"call": "write", "args": {"key": "b"}, "approve": ["alice"], "expect": {"refuse": "F501"}}
-  ]
-}
-```
+### 10) Capability checks are host-neutral
 
-A fixture is one scope with a person present. Each `bindings` entry is a
-record under the fixture's `ontology`; a tool not listed is unbound. A bound
-tool succeeds and returns what its output contract requires, and a
-`checkpoint` call that runs takes a checkpoint. A `sequence` entry is a call
-or an event. A call has `args` (default `{}`), `approve` or `reject` naming
-who decided on it beforehand, on its 5.2 value or at the prompt of 5.6
-(neither: undecided; one approver needed, no expiry), and `expect`: `"run"`
-or `{"refuse": <code>}`. An event is `{"boundary": true}`, or
-`{"expire": true}` when the checkpoint maximum age passes. Six sequences,
-with `save` bound to `checkpoint`, `write` to `mutate`, `undo` to
-`rollback`, and `other` unbound:
+§5.18.10 states the checks of `checkpoint`, `mutate`, `send`, `execute`,
+`rollback`, `persist`, `audit` and `transform` as requirements of the
+capabilities, citing the destination policy (§4.4.2) and the secrets rule
+(§6.7). A check the Standard requires is decided by code; a model's
+judgement may add a refusal but never satisfies one. Skill-level hooks are
+one implementation; SECURITY.md §5.4 maps every condition of the six
+skills' hooks to a row or to "model-judged addition, not required", and the
+prompt hooks no longer ask a model about approval, checkpoints or rate
+limits. With §5.18.8's required layer, this is the answer to ACS-55's
+"required hook": a host that claims the class runs no covered call without
+the layer, and a host that does not run a skill's hooks applies their
+checks by other means or does not cover those calls. No frontmatter key is
+added.
 
-| Fixture | Sequence | Expected |
-|---|---|---|
-| `checkpoint_single_use` | `save`; `write` approved; `write` approved | run; run; F501 |
-| `refused_call_keeps_checkpoint` | `save`; `write` undecided; same `write`, approved | run; F502; run |
-| `checkpoint_stale_after_boundary` | `save`; boundary; `write` approved | run; F501 |
-| `rollback_needs_checkpoint` | `undo`; `save`; `write` approved; `undo` | F503; run; run; run |
-| `unbound_tool_is_strictest` | `other` approved; `save`; `other`, new arguments, undecided; same `other`, approved | F501; run; F502; run |
-| `decision_single_use` | `save`; `write` approved; `save`; same `write`, undecided | run; run; run; F502 |
+### 11) Records name the layer and its configuration
 
-No expectation depends on the order of 5.1. A fixture for a failed call waits
-for 4.2.
-
-- **9.3 Reference implementations.** The Python adapter and the TypeScript
-  binding ([`examples/standard_agents/`](../examples/standard_agents/README.md))
-  run the same fixtures: one from a hook before each tool, one from inside
-  it. The TypeScript binding sees only the tools it wraps, so
-  `unbound_tool_is_strictest` is outside what it covers.
+Every record a layer writes names the layer, its version and a digest of
+the bindings and settings it applied, or the settings listed; the plugin's
+audit lines carry the sha256 of `hooks/hooks.json` and the effective
+environment settings that change its decisions.
 
 ## Backward compatibility
 
-- Validators accept what they accept today, except under 8.5. No code is
-  added; existing codes gain a `location` that §9.8 permits.
-- The terms, section, class, schema and fixtures are additions: MINOR under
-  [GOVERNANCE](GOVERNANCE.md#versioning).
-- 4.1, stated for steps, makes the executor's behaviour normative; an
-  executor that lets one checkpoint authorise several steps must change.
-- The Python adapter changes under 3.2 (it checks no `requires` edge, so a
-  `rollback` call with no checkpoint runs), 4.2 and 4.3 (it states no
-  boundary). 4.6 puts its non-strict mode outside the class.
-- 2.3: a deployment whose unregistered tools ran unchecked must bind them,
-  and the SDK's `execute` default for an MCP tool without metadata goes.
-- The plugin hook would not conform: its marker is never used up, and it
-  asks for no approval.
-- 8.2 adds an enum value to the world state schema and 8.4 an optional field,
-  both compatible ([§11.4](STANDARD-v1.1.0.md#114-schema-evolution)).
-  Renaming the SDK's kinds changes the Python package's anchors. 8.5 can
-  reject bare-string anchors, which the skill template writes.
-- Existing `acs` annotations and SDK metadata stay valid as carriers (2.7).
+- Validators accept what they accept today, and the executor behaves as
+  today: §5.2.2 states its behaviour. No repository catalog is affected and
+  CI's strict validation is unchanged.
+- The terms, sections, class, schemas, fixtures and the codes V110, V111,
+  R407, F506 and W617 are additions: MINOR under
+  [GOVERNANCE](GOVERNANCE.md#versioning). Existing codes gain meanings for
+  bindings and calls with their severities unchanged.
+- The annotation schema accepts every annotation it accepted, and rejects
+  copies inconsistent with the capability, of which the repository has
+  none.
+- Implementations change: the Python adapter uses a checkpoint up when a
+  call is allowed (re-checked atomically), also for a failed call, counts
+  an unresolved hold as used, ends validity when any session it serves
+  ends a turn, caps the maximum age at 30 minutes, refuses a `rollback`
+  with no checkpoint, counts only state-saving calls as checkpoints,
+  refuses gated calls in permission modes that do not reach a person,
+  treats a tool with no capability as unbound, and guards its MCP tools;
+  the plugin hook reads only JSON payloads, uses its marker once and asks
+  for approval; the TypeScript binding reports its lint findings with
+  Standard codes and attributes nested calls by nesting tokens.
 
 ## Conformance test updates
 
-- A JSON Schema for the binding record, with instances that fail (V101) and
-  warn (W602).
-- The fixtures of 9.2, a schema for their format and a runner per reference
-  implementation, generated with a `--check` mode like
-  `scripts/gen_runtime_fixtures.py`.
-- Digest vectors of the 5.2 shape in
+- Binding fixtures (35; the nine that check offered tools and host
+  actions need the `offered_tools` feature) and call-sequence fixtures
+  (30), their schemas, two conformance statements, and runners in Python
+  and TypeScript.
+- Capability output vectors, `tests/conformance/output/vectors.json`, which
+  both reference codecs of §5.18.9 read.
+- Approval digest vectors `tool_call` and `tool_call_unbound` in
   `tests/conformance/approval/digests.json`.
-- Refusal fixtures for decision 6.
-- §10 gains the class and names the fixtures as normative for it.
-- Not testable by fixture: that a host's prompt showed what ran (5.6), and
-  that a layer sees every call it claims to cover. Both go in the conformance
-  statement.
+- Unit tests for the plugin hooks (and a test that their lists are a
+  subset of the SDK mapper's), the adapter (permission modes, the callback's
+  re-check, holds), the mapper, the nesting tokens, V102 with a test
+  ontology in both layers, the output helpers and the annotation schema.
+- §10.3 names the binding and call fixtures normative for class SL.
+- Not testable by fixture, and stated in a conformance statement instead:
+  that a prompt shows what runs, that a layer sees every call it claims to
+  cover, and its host gaps.
 
 ## Alternatives considered
 
 - **Leave tool-calling hosts to each binding's documentation.** Rejected:
-  §5.2.1 already binds safety layers, and this repository's layers diverged.
+  §5.2.1 already binds safety layers, and this repository's layers
+  diverged.
+- **A separate profile and a fifth level L5.** Rejected: §5.2.1's MUST
+  points into the Standard, and a level implies the levels below it.
 - **Treat a call sequence as a workflow built as it runs.** Rejected:
   `precedes`, W608 and other static checks need a closed step list.
-- **Hash `[args]`, the executor's default.** Simpler, but the digest does not
-  say which tool it approves.
+- **Use a checkpoint up after success (the Python adapter's rule).**
+  Rejected: a crash between effect and record leaves it valid for a second
+  change, and a failed call may have changed something.
+- **Let a layer take a checkpoint on a call's behalf, as the executor does
+  for a step.** Rejected: a layer cannot know what the call will change;
+  the executor's host is given the step.
+- **Hash `[args]`, the executor's default.** Simpler, but one decision would
+  fit every tool that takes the same arguments.
 - **Classify an unbound tool as `observe`, or refuse it.** The first fails
-  open. The second makes a layer unusable on a host with many built-in tools;
-  under 2.3 a person can still approve.
-- **New diagnostic codes for calls.** Rejected: the existing codes name the
-  rule that refused.
+  open; the second makes a layer unusable on hosts with many built-in tools.
+- **A new code for every refusal kind (rate limit, undeclared invocation).**
+  Rejected: F504 already names a policy constraint; one new runtime code,
+  R407, covers the layer's own failure.
+- **Check a composite's nested calls on their own.** Rejected where the
+  layer can attribute them: the composite would use the checkpoint and its
+  nested `mutate` call would be refused, so no composite could change
+  anything.
+- **Attribute a nested call to whatever composite runs on the thread (and
+  execution).** Rejected: an endpoint, an effect or a parallel tool call of
+  the same step could call a listed tool at that moment and pass with no
+  checkpoint and no approval. The binding issues a one-shot token per
+  invocation instead.
+- **Waive a nested call's prerequisites too.** Rejected: a composite's
+  prerequisites exclude its invokes', so a nested `rollback` could run
+  with no checkpoint ever taken.
+- **Release a hold that lapses, so the checkpoint can serve another call.**
+  Rejected: the layer does not know the held call did not run.
+- **One scope per session in the Python adapter.** Rejected for now: it
+  would need per-session checkpoints throughout the tracker; the adapter
+  states one scope per instance and treats any session's Stop as a
+  boundary.
+- **A frontmatter key that declares a hook required (ACS-55).** Rejected:
+  §5.18.8 and §5.18.10 already require every host claiming the class to
+  apply each capability check, whatever declares it; a key would add a
+  second, weaker statement of the same rule.
+- **Classify `git restore --source=<sha>` as `rollback`** (asked by the
+  checkpoint/rollback workstream). Rejected: `<sha>` can name any commit
+  (an old one, or one the model made), so a layer cannot tell that it is a
+  restore point, and an ungated `rollback` would then overwrite the working
+  tree with any commit's content. It stays a gated `mutate`; `git stash
+  apply <sha>` is `rollback` only when `<sha>` is a commit a checkpoint of
+  the scope recorded (decision 2.8).
+- **Count `git stash store <sha>` as the checkpoint** (the first
+  revision). Rejected: it names a commit the caller chooses, so it can
+  mint a restore point that is not the current state, and it fails on a
+  clean tree, where a model could then never take a checkpoint. `git stash
+  create` captures the current state (or confirms `HEAD` is it) and is
+  counted instead.
+- **Trust Claude Code's prompt in every permission mode.** Rejected: in
+  `bypassPermissions` the documentation does not say the prompt is shown,
+  and in `auto` a classifier can answer it, so a gated call could run on
+  no person's decision.
 
 ## Open questions
 
-1. **Scope and edges (decision 3, ACS-Q01).** Does history count over the
-   scope's lifetime or one execution? Is a `precedes` violation, visible only
-   at the later call, reported or ignored?
-2. **Checkpoints (decision 4, ACS-Q02).** Is one checkpoint per call
-   normative for every host? Used up before the effect or after success? May
-   a layer take a checkpoint itself in place of refusing? Does the Standard
-   cap the maximum age?
-3. **Approval (decision 5, ACS-Q03).** `[{action, capability, args}]` or
-   `[args]`? One decision per call, or per digest until it expires? Which
-   check comes first?
-4. **Unbound tools (2.3, ACS-Q04).** The strictest case, `observe` at medium
-   risk, or refusal? Does a definition-time report, such as the TypeScript
-   binding's `unclassified`, need a code?
-5. **Anchors (decision 8, ACS-Q05).** May an item be a bare string? Does an
-   empty list satisfy §3.1? How do the SDK's five kinds map to the seven?
-6. **Which capability (decision 2, ACS-Q07).** A write to a remote system
-   through an API: `mutate` or `send`? A write to the host's own durable
-   store: `persist` or `mutate`? A message to an existing delegate:
-   `delegate` or `send`? A tool that only signals control, such as a stop
-   tool?
-7. **Classifiers (2.5, ACS-Q08).** Does "cannot weaken" (§3.3, §5.2.1) extend
-   to a tool's declaration, so that no call is classified below its tool's
-   worst case?
-8. **Placement.** A section of the Standard or a separate profile? A fifth
-   level or a separate class?
+1. **Upstream hook.** The Standard Agent Specification has no hook that can
+   refuse a call before it runs, so a runtime-level layer cannot cover plain
+   `defineTool` tools. Should this project propose one upstream, so the
+   class can cover every tool of a Standard Agents runtime?
+2. **Machine-readable statements.** Statements are JSON files beside the
+   fixtures. Should a later version publish a registry of conformance
+   statements, and require one for any implementation that claims SL?
+3. **Claude Code host gaps.** A command hook that cannot start, or times
+   out, lets Claude Code run the call. If Claude Code offers a fail-closed
+   hook mode, should the plugin's hooks then claim class SL?
+4. **Permission modes.** The SDK adapter and the plugin rely on an `ask`
+   reaching a person in Claude Code's `default`, `acceptEdits` and `plan`
+   modes, on the documentation's word. Should a later version ask Claude
+   Code to state, per mode, whether a hook's `ask` reaches the permission
+   callback, so the list can be tested rather than cited?
+5. **What a checkpoint captured.** A layer counts a successful checkpoint
+   call without verifying what the restore point holds (a stored commit may
+   not be the current state). Should a checkpoint output carry a digest of
+   what it captured, so a layer can check it against the scope before it
+   counts the call?
+6. **Per-session scopes.** Should the Python adapter offer one scope per
+   session, so that one session's turn end does not end another's
+   checkpoints?

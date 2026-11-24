@@ -51,6 +51,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "w",
   "inputs": {
     "labels": [

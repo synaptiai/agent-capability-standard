@@ -1,0 +1,15 @@
+# Standard version: 1.2.0
+# Validated with tests/fixtures/profiles/block_delegate.profile.yaml: the
+# profile raises the delegate step's requires_approval, an effective flag,
+# so W621 (§5.15.2), which reads it, is not reported (§5.21.1). Without the
+# profile the step is W621, as in pass_unbounded_delegation_warn.
+ask_reviewer:
+  goal: Ask an agent for a review.
+  risk: medium
+  steps:
+  - capability: delegate
+    purpose: Ask agent x.
+    store_as: x_out
+    input_bindings:
+      agent: x
+      task: {draft: d}

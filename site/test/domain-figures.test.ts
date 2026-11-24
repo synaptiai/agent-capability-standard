@@ -31,22 +31,23 @@ function block(text: string, name: string): [string, string][] {
   const out: [string, string][] = [];
   for (const l of lines.slice(start + 1)) {
     if (/^\S/.test(l)) break;
-    const m = /^ {2}([a-z_]+):\s*([^#\s]+)/.exec(l);
-    if (m) out.push([m[1]!, m[2]!]);
+    const m = /^ {2}("\*"|[a-z_]+):\s*([^#\s]+)/.exec(l);
+    if (m) out.push([m[1]!.replaceAll('"', ''), m[2]!]);
   }
   return out;
 }
 
-// The F-D2 rule in the spec's words: low < medium < high (< critical); human
-// if require_human <= L, else review if require_review <= L, else auto if
-// auto_approve is not none and L <= auto_approve, else not covered.
-const ORDER = ['low', 'medium', 'high', 'critical'];
+// The F-D2 rule in Standard 1.2.0 §5.21.3's words: a threshold covers a set of
+// levels (none < low < medium < high; critical is read as none). Human if
+// require_human covers L; else review if require_review covers L or L is above
+// auto_approve; else auto if auto_approve is set; else the ontology decides.
+const RANKS: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, critical: 0 };
 function specRule(t: Record<string, string>, level: string): string {
-  const r = (v: string | undefined) => (v === undefined ? -1 : ORDER.indexOf(v));
-  const L = ORDER.indexOf(level);
-  if (t.require_human !== undefined && r(t.require_human) <= L) return 'human';
-  if (t.require_review !== undefined && r(t.require_review) <= L) return 'review';
-  if (t.auto_approve !== undefined && t.auto_approve !== 'none' && L <= r(t.auto_approve)) return 'auto';
+  const L = RANKS[level]!;
+  const covers = (v: string | undefined) => v !== undefined && RANKS[v]! > 0 && RANKS[v]! <= L;
+  if (covers(t.require_human)) return 'human';
+  if (covers(t.require_review) || (t.auto_approve !== undefined && L > RANKS[t.auto_approve]!)) return 'review';
+  if (t.auto_approve !== undefined) return 'auto';
   return 'gap';
 }
 
@@ -72,9 +73,10 @@ describe('approval ladder (F-D2)', () => {
     expect(ladder.blocked).toEqual(blocked);
   });
 
-  it('leaves a level no threshold covers as a gap, and ranks critical above high (fixture)', () => {
+  it('a level above auto_approve needs review; critical covers no level (fixture)', () => {
     const t = { auto_approve: 'none', require_review: 'high', require_human: 'critical' };
-    expect(['low', 'medium', 'high'].map((l) => ladderOutcome(t, l as 'low'))).toEqual(['gap', 'gap', 'review']);
+    expect(['low', 'medium', 'high'].map((l) => ladderOutcome(t, l as 'low'))).toEqual(['review', 'review', 'review']);
+    expect(ladderOutcome({ require_review: 'high' }, 'low')).toBe('gap');
     expect(ladderOutcome({ auto_approve: 'medium', require_review: 'high' }, 'medium')).toBe('auto');
     expect(ladderOutcome({ auto_approve: 'high', require_review: 'medium' }, 'medium')).toBe('review');
   });
@@ -98,11 +100,11 @@ describe('checkpoint policy (F-D3)', () => {
       const rows = block(repoText(`schemas/profiles/${f}`), 'checkpoint_policy');
       const levels = new Set(rows.map(([, v]) => v));
       const p = checkpointPolicy(loadProfiles().find((x) => x.key === pageKey(f))!.profile)!;
-      expect(checkpointHeader(p), f).toBe(levels.size === 1 ? `All ${rows.length} triggers: ${[...levels][0]}` : null);
+      expect(checkpointHeader(p), f).toBe(levels.size === 1 ? `All ${rows.length} rules: ${[...levels][0]}` : null);
     }
-    // Manufacturing has three levels at 824eea1 (spec 3.5): 4 always, 1 high_risk, 1 medium_risk.
+    // Manufacturing's 2.0.0 rules (Standard 1.2.0 §5.21): execute and mutate always, "*" medium_risk.
     const m = checkpointPolicy(loadProfiles().find((x) => x.key === 'manufacturing')!.profile)!;
-    expect(checkpointCaption(m)).toBe('6 triggers: 4 always, 1 high risk and 1 medium risk.');
+    expect(checkpointCaption(m)).toBe('3 rules: 2 always and 1 medium risk.');
   });
 });
 

@@ -1,0 +1,17 @@
+# Standard version: 1.2.0
+# A library catalog for the S3 fixtures whose workflow b invokes the main
+# catalog's a: with fail_qualified_cycle, an invoke cycle across catalogs.
+catalog:
+  id: acs.fixtures.cycle
+  version: 1.0.0
+  exports: [b]
+b:
+  goal: Call back into the main catalog.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the main catalog's a.
+    store_as: a_out
+    workflow_id: acs.fixtures.main/a
+    input_bindings:
+      workflow: acs.fixtures.main/a

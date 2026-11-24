@@ -58,6 +58,11 @@ export function trackedUnder(dir: string, ext?: string): string[] {
     .sort();
 }
 
+/** Tracked files directly in `dir` (not in its subdirectories), optionally only those ending in `ext`, sorted. */
+export function trackedIn(dir: string, ext?: string): string[] {
+  return trackedUnder(dir, ext).filter((p) => !p.slice(dir.length + 1).includes('/'));
+}
+
 /** GitHub URL of a file on the main branch. */
 export function githubBlobUrl(repoPath: string): string {
   return `${GITHUB_BASE}/blob/main/${repoPath}`;

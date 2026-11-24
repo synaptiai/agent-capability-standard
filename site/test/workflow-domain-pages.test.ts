@@ -58,21 +58,23 @@ describe('workflow family map (F-WI2)', () => {
 });
 
 describe('domain guide figures', () => {
-  it('reads the anchor types of each audio "Capability Usage" example from its fence', () => {
+  it('reads the anchor kinds of each audio "Capability Usage" example from its fence', () => {
     const text = repoText('docs/domains/audio/README.md');
     const usage = capabilityUsage(text, 'test');
     const section = text.slice(text.indexOf('## Capability Usage'), text.indexOf('## Available Workflows'));
     const fences = [...section.matchAll(/```yaml\n([\s\S]*?)```/g)].map((m) => m[1]!);
     expect(usage.map((u) => u.capability)).toEqual(fences.map((f) => /^([a-z_]+):/.exec(f)![1]));
     usage.forEach((u, i) => {
-      const types = [...new Set([...fences[i]!.matchAll(/- type: ([a-z_]+)/g)].map((m) => m[1]!))];
-      expect(u.anchors, u.heading).toEqual(types);
+      const kinds = [...new Set([...fences[i]!.matchAll(/- kind: ([a-z_]+)/g)].map((m) => m[1]!))];
+      expect(kinds.length, u.heading).toBeGreaterThan(0);
+      expect(u.anchors, u.heading).toEqual(kinds);
     });
   });
 
   it('checks each required anchor type against the profile file', () => {
     const profile = loadProfiles().find((p) => p.key === 'audio')!;
-    const required = /required_anchor_types:\n((?: {4}- .+\n)+)/.exec(repoText(profile.profileFile))![1]!.match(/- ([a-z_]+)/g)!.map((s) => s.slice(2));
+    // The list's lines, comment lines among them (the 2.0.0 profiles say where each kind comes from).
+    const required = /required_anchor_types:\n((?: {4}(?:- |# ).+\n)+)/.exec(repoText(profile.profileFile))![1]!.match(/^ {4}- ([a-z_-]+)/gm)!.map((s) => s.trim().slice(2));
     const u = capabilityUsage(repoText('docs/domains/audio/README.md'), 'test')[0]!;
     const c = usageCheck(u, profile.profile);
     expect(c.required.map((r) => r.type)).toEqual(required);

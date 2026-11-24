@@ -1,0 +1,81 @@
+{
+  "description": "In record mode actions, every frame's started step gets a cancelled record, root first (\u00a75.19.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ]
+      }
+    },
+    {
+      "cancel": {
+        "reason": "stop"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "action_records": [
+      {
+        "status": "cancelled",
+        "frame": [
+          "w"
+        ],
+        "capability": "invoke"
+      },
+      {
+        "status": "cancelled",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "capability": "retrieve"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

@@ -155,8 +155,8 @@ provenance:
   sources: array[object]  # Source metadata
   integration_timestamp: string
   confidence: number
-confidence: number  # 0.0-1.0 overall
-evidence_anchors: array[string]
+confidence: number  # probability that the integrated result is consistent and correct (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -170,8 +170,8 @@ assumptions: array[string]
 | `integration_report.information_loss` | array | Data that couldn't be integrated |
 | `conflicts` | array | All conflicts found and how each was resolved |
 | `provenance` | object | Source metadata and integration timestamp |
-| `confidence` | number | 0.0-1.0 overall integration confidence |
-| `evidence_anchors` | array | References to each source consulted |
+| `confidence` | number | Probability, 0.0-1.0, that the integrated result is consistent and correct (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to each source consulted |
 | `assumptions` | array | Assumptions made while integrating |
 
 ## Examples
@@ -271,7 +271,7 @@ integration_report:
     warnings:
       - "Service has no APIs defined"
 conflicts:
-  - entity_id: "api-gateway"
+  - entity_id: "svc:acme/platform/prod/api-gateway"
     field: "status"
     values:
       - source: "kubernetes"
@@ -296,9 +296,9 @@ provenance:
   confidence: 0.9
 confidence: 0.9
 evidence_anchors:
-  - "kubernetes_api:deployments/api-gateway-deployment"
-  - "datadog:services/api-gateway"
-  - "package.json:1-20"
+  - {ref: "kubernetes_api:deployments/api-gateway-deployment", kind: api}
+  - {ref: "datadog:services/api-gateway", kind: api}
+  - {ref: "file:package.json:1-20", kind: file}
 assumptions:
   - "All sources refer to the same service"
   - "Datadog health status more accurate than K8s Running state"
@@ -363,7 +363,7 @@ integration_report:
     merged: 1
   information_loss: []
 conflicts:
-  - entity_id: "endpoint_process_order"
+  - entity_id: "endpoint:acme/orders/process_order"
     field: "parameters[0].name"
     values:
       - source: "code_analysis"
@@ -375,8 +375,8 @@ conflicts:
     confidence: 0.95
 confidence: 0.95
 evidence_anchors:
-  - "src/orders.ts:processOrder"
-  - "api_docs:endpoints/process"
+  - {ref: "file:src/orders.ts:processOrder", kind: file}
+  - {ref: "api_docs:endpoints/process", kind: x-doc}
 ```
 
 ## Verification

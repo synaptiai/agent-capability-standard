@@ -1,0 +1,15 @@
+# A profile with an error in each of four rules (Standard v1.2 §5.21.2): an
+# unknown trust class and a value that is not an anchor kind (S303), an
+# unknown capability id and a label as a checkpoint_policy key (V101).
+domain: invalid
+version: "1.0.0"
+trust_weights:
+  "trust_class:robot": 0.2
+risk_thresholds:
+  block_autonomous:
+    - mutatee
+checkpoint_policy:
+  before_send: always
+evidence_policy:
+  required_anchor_types:
+    - timestamp

@@ -75,14 +75,42 @@ python tools/sync_skill_schemas.py --check  # CI: fail on drift
 python scripts/gen_runtime_fixtures.py          # after editing the fixtures there
 python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
+The 1.1 fixtures are defined in that script; each Standard 1.2 workstream
+adds its fixtures in its own `scripts/runtime_fixtures/<workstream>.py`
+(`register(add)`). Every fixture states its catalog's `header` (a version or
+`null`) and is checked against
+`tests/conformance/runtime/schema/fixture.schema.json`.
 
-### Regenerate the Standard Agents binding's generated files
+### Regenerate the call-sequence and binding conformance fixtures
+```bash
+python scripts/gen_call_fixtures.py          # after editing the fixtures there
+python scripts/gen_call_fixtures.py --check  # CI: fail on drift
+```
+These are the safety-layer fixtures of class SL (Standard 1.2.0 §10.4),
+`tests/conformance/bindings/*.json` and `tests/conformance/calls/*.json`;
+the Python runners (`tests/test_binding_fixtures.py`,
+`tests/test_call_fixtures.py`) and the Standard Agents binding's tests read
+them in place.
+
+### Regenerate the trigger vectors
+```bash
+python scripts/gen_trigger_vectors.py          # after editing the cases there
+python scripts/gen_trigger_vectors.py --check  # CI: fail on drift
+```
+The vectors of `tests/conformance/triggers/` (fire times, overlap, attendance,
+event acceptance; STANDARD v1.2 §5.10.2) are computed with Python's zoneinfo,
+independently of the core; `fire_times.json` names its tzdata release, and
+`--check` ignores a different release name when every value agrees.
+
+### Regenerate the TypeScript package's ontology table and the approval digest vectors
 ```bash
 python scripts/gen_standard_agents_binding.py          # after changing the ontology
 python scripts/gen_standard_agents_binding.py --check  # CI: fail on drift
 ```
-It also writes the approval digest vectors, `tests/conformance/approval/digests.json`,
-from the reference executor; the binding's fixture is a copy.
+It writes `packages/acs-core/src/ontology.gen.ts`, the Standard Agents
+annotation schema and the approval digest vectors,
+`tests/conformance/approval/digests.json`, from the reference executor; the
+package's tests read the vectors in place.
 
 ### Regenerate the strict JSON Schema rendering of the capability contracts
 ```bash
@@ -90,13 +118,38 @@ python scripts/gen_capability_json_schemas.py          # after changing a contra
 python scripts/gen_capability_json_schemas.py --check  # CI: fail on drift
 ```
 
+### Check the TypeScript package (in `packages/acs-core/`)
+```bash
+cd packages/acs-core
+npm ci             # install the exact versions in package-lock.json
+npm run build:wasm # build core/ for WebAssembly into dist/acs_core.wasm
+npm run build      # compile to dist/ and bundle dist/documents.json
+npm run check      # type-check
+npm test           # vitest; reads tests/conformance/ in place, and replays the fixtures through the WebAssembly core
+```
+`build:wasm` needs the `wasm32-unknown-unknown` target of the toolchain
+`RUSTUP_TOOLCHAIN` names (`rustup target add wasm32-unknown-unknown
+--toolchain <toolchain>`). The package is published to npm from a tag
+`acs-core-vX.Y.Z` on `main` by `.github/workflows/publish-npm.yml`, when the
+repository variable `NPM_PUBLISH_ENABLED` is `true` and the secret
+`NPM_TOKEN` is set (a dry run otherwise).
+A host-neutral TypeScript module (one that imports nothing from
+`@standardagents/spec`) goes in `packages/acs-core/src/` and its tests in
+`packages/acs-core/test/`; code that reads or describes Standard Agents state
+stays in `examples/standard_agents/src/acs/`. No conformance file is copied
+under `examples/standard_agents/test/fixtures/`.
+
 ### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
 ```bash
+(cd packages/acs-core && npm ci --ignore-scripts && npm run build:ts)
 cd examples/standard_agents
 npm ci          # install the exact versions in package-lock.json
 npm run check   # type-check against the published @standardagents/spec types
 npm test        # vitest
 ```
+The binding depends on the package with `file:../../packages/acs-core` and
+imports its built `dist/` (the plain-TypeScript entry, so `build:ts` is
+enough): the first line builds it.
 
 ### Run conformance tests (optional, local only)
 ```bash
@@ -121,7 +174,9 @@ cd core
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --features python -- -D warnings
+cargo clippy --all-targets --features wasm -- -D warnings
 cargo test
+cargo test --features wasm --test wasm
 ```
 
 CI pins the toolchain that runs these (`RUST_TOOLCHAIN` in
@@ -162,6 +217,16 @@ npm run dev     # local server; search works only on a built site (npm run previ
 names. For a quick run on the pages a change touches:
 `node scripts/check-axe.mjs --paths /guides/standard-agents/`. It fails on any
 axe violation, for example a Markdown table whose header cell is empty.
+
+`check:axe` then runs `scripts/check-runs.mjs`, the figure-gap sweep: a page
+in the enforced scope (`site/src/lib/runs.ts`: every generated template, the
+current Standard and a few guides) fails with a run of text longer than
+1800px at 1440px wide that holds no figure and is not an exempt run there.
+Line breaks differ between Chromium builds, so a run within a few lines of the
+limit can pass with one and fail with another. CI measures with the headless
+shell of the revision the pinned `playwright` names: install it with
+`npx playwright install chromium` and leave `ACS_CHROMIUM` unset to measure as
+CI does, for example `node scripts/check-runs.mjs --paths /spec/1.2.0/ --all`.
 
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in
@@ -269,7 +334,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools` and `agent` type (`layer` is in 13 of the 42 skills; the ontology gives every capability's layer, see `skills/README.md`)
+- YAML frontmatter with `name` (the directory name), `description`, `allowed-tools` and `agent` type; each key's owner (Agent Skills, Claude Code or ACS) is in `skills/README.md`, and no skill declares a `layer` (the ontology gives every capability's layer)
 - Intent and success criteria
 - Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
@@ -288,8 +353,10 @@ The 36-capability model uses **domain parameters** instead of domain-specific va
 ### Hooks
 
 The plugin enforces safety through Claude Code hooks:
-- **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: Requires checkpoint marker before mutations
-- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log`: time, event, tool, the skill name on a `Skill` call, and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain)
+- **PreToolUse (every tool, `onFailure: "block"`, timeout 30 s)**: reads Claude Code's JSON payload; classifies the call (a tool the SDK mapper maps to a capability needing neither a checkpoint nor approval, such as Read, Grep, Skill or Agent, needs nothing; Bash by command, a command over 4096 bytes is gated before it is read, its words dequoted as bash does: read-only commands and `git stash list|show` need nothing, `git stash create` takes a checkpoint, `git stash pop|apply <commit>` restores a checkpoint recorded (an entry in `<git dir>/acs/checkpoints/commits/`, outside the work tree, for a call run in the project's repository) and needs nothing; any other restore is a gated call; any other tool, MCP tools, Monitor and PowerShell included, is unbound: a gated mutate); a gated call that names the layer's records (`checkpoint.ok`, `.claude/checkpoints`, `acs/checkpoints`, in any letter case, with `//`, `./` and `x/../` read as a path reads them) is refused F504; every other gated call uses up the checkpoint marker (one marker per call, untracked by git and within `ACS_CHECKPOINT_MAX_AGE`, filed under `.claude/checkpoints/used/`, F501) and is asked for approval (`ask`, F502) in permission modes default, acceptEdits and plan, and blocked F502 in the others unless `ACS_HOOK_APPROVAL=off`; a failure of the hook blocks with R407
+- **PostToolUse (Bash)**: a successful `git stash create` enters its commit in `<git dir>/acs/checkpoints/commits/` and writes the checkpoint marker (expiry `ACS_CHECKPOINT_MAX_AGE`, at most 30 minutes); a marker it replaces is filed under `.claude/checkpoints/ended/`
+- **Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd**: files the marker under `.claude/checkpoints/ended/` (a turn or a session ended or started: an execution boundary of the hooks' scope, the project directory); a rollback can still restore its commit
+- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log` as an action record (Standard 1.2.0 §6.4): time, status (`executed` or `failed`), tool, call id, and under `details` the event, the skill name on a `Skill` call and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain), and each line names the layer and its configuration (`recorded_by`: version, sha256 of `hooks/hooks.json`, effective settings)
 
 ### Ontology Edge Types
 
@@ -379,6 +446,13 @@ Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push
 python scripts/release_notes.py vX.Y.Z
 ```
 
+The plugin release that carries the renamed skills (`/capability-gap-analysis`,
+`/digital-twin-sync-loop`, ACS-59) changes two slash commands, so under
+SemVer it is a plugin MAJOR version (3.0.0). The TypeScript package has its
+own tag, `acs-core-vX.Y.Z` on `main` (its version in
+`packages/acs-core/package.json`), which `.github/workflows/publish-npm.yml`
+publishes.
+
 ## Claude Agent SDK Integration
 
 The `grounded_agency/` Python package provides SDK integration:
@@ -441,7 +515,8 @@ Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
 - `audit` also has `mutation_overridable: true`, so a step may declare `mutation: false`
 
 A checkpoint must run before `mutate`, `send` and `rollback` (`requires_checkpoint`
-or a `checkpoint` `requires` edge). Safety flags on workflow steps are optional and
+or a `checkpoint` `requires` edge); on a tool-calling host each gated call uses
+up one checkpoint (STANDARD 1.2.0 §5.18). Safety flags on workflow steps are optional and
 inherit from the ontology; a step value weaker than the ontology's is ignored with
 warning W602, and a stricter one takes effect (a step that raises
 `requires_checkpoint` with no checkpoint before it is F501).

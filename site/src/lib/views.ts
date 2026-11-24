@@ -33,7 +33,7 @@ export interface SchemaRow {
   type: string;
   required: boolean;
   description: string;
-  /** enum, minimum, maximum, default and format, in plain words. */
+  /** enum, minimum, maximum, default, format and pattern, in plain words. */
   constraints: string[];
   /** A repository path the field refers to (`ref`), if any. */
   ref?: string;
@@ -41,9 +41,33 @@ export interface SchemaRow {
   nested?: string;
 }
 
+/** The type a `$ref` names: the last segment of its JSON Pointer, e.g. `Uncertainty`. */
+function refName(ref: string): string {
+  const pointer = ref.includes('#') ? ref.slice(ref.indexOf('#') + 1) : ref;
+  return pointer.split('/').filter(Boolean).pop() ?? ref;
+}
+
+const isDeprecated = (s: Obj): boolean => typeof s.description === 'string' && s.description.startsWith('Deprecated');
+
+/** The type of an array's items: one type, a `$ref`'s name, or an `anyOf` whose deprecated branches are named apart. */
+function itemsTypeOf(items: Obj): string | undefined {
+  if (typeof items.type === 'string') return items.type;
+  if (typeof items.$ref === 'string') return refName(items.$ref);
+  const branches = items.anyOf;
+  if (!Array.isArray(branches) || branches.length === 0 || !branches.every(isObj)) return undefined;
+  const current = branches.filter((b) => !isDeprecated(b)).map(typeOf);
+  const deprecated = branches.filter(isDeprecated).map(typeOf);
+  if (current.length === 0) return undefined;
+  return current.join(' or ') + (deprecated.length > 0 ? ` (or deprecated ${deprecated.join(' or ')})` : '');
+}
+
 function typeOf(s: Obj): string {
+  if (typeof s.$ref === 'string') return refName(s.$ref);
   const t = typeof s.type === 'string' ? s.type : 'any';
-  if (t === 'array' && isObj(s.items) && typeof s.items.type === 'string') return `array of ${s.items.type}`;
+  if (t === 'array' && isObj(s.items)) {
+    const items = itemsTypeOf(s.items);
+    if (items !== undefined) return `array of ${items}`;
+  }
   return t;
 }
 
@@ -55,6 +79,7 @@ function constraintsOf(s: Obj): string[] {
   else if (s.maximum !== undefined) c.push(`At most ${String(s.maximum)}`);
   if (s.default !== undefined) c.push(`Default: ${JSON.stringify(s.default)}`);
   if (typeof s.format === 'string') c.push(`Format: ${s.format}`);
+  if (typeof s.pattern === 'string') c.push(`Matches \`${s.pattern}\``);
   return c;
 }
 
@@ -408,7 +433,7 @@ export const PROFILE_SECTION_KEYS: ReadonlySet<string> = new Set([
 export interface SchemaEntry {
   source: string;
   name: string;
-  group: 'required' | 'supporting' | 'ontology' | 'interop' | 'transforms' | 'profiles' | 'other';
+  group: 'required' | 'supporting' | 'ontology' | 'interop' | 'transforms' | 'other';
   description: string;
   /** The Purpose column of the Standard's §6.1 table, for a required schema. */
   purpose?: string;
@@ -504,11 +529,9 @@ export function schemaListing(specText: string): SchemaEntry[] {
           ? 'interop'
           : name.startsWith('transforms/')
             ? 'transforms'
-            : name.startsWith('profiles/')
-              ? 'profiles'
-              : /^(capability_ontology|workflow_catalog)\./.test(name)
-                ? 'ontology'
-                : 'other';
+            : /^(capability_ontology|workflow_catalog)\./.test(name)
+              ? 'ontology'
+              : 'other';
     const entry: SchemaEntry = { source, name, group, description: schemaDescription(source, readRepoFile(source)) };
     const purpose = purposes[name];
     if (purpose !== undefined) entry.purpose = purpose;
@@ -522,7 +545,6 @@ export function schemaGroups(standardVersion: string): { key: SchemaEntry['group
   { key: 'required', label: 'Required by the Standard', intro: `Section 6.1 of Standard ${standardVersion} requires every implementation to provide these schemas.` },
   { key: 'supporting', label: 'Supporting schemas', intro: `Section 6.1 names these schemas as used by specific sections. They are not required of every implementation.` },
   { key: 'ontology', label: 'Ontology and workflow catalog', intro: 'The capability ontology, the reference workflow catalog, and the JSON Schemas that check them.' },
-  { key: 'profiles', label: 'Domain profile format', intro: 'The schema every domain profile follows.' },
   { key: 'interop', label: 'Interoperability', intro: 'Mappings to other agent frameworks.' },
   { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
   { key: 'transforms', label: 'Transforms', intro: 'The coercion registry and the mappings the transform capability uses.' },

@@ -24,6 +24,7 @@
   "dependencies": {
     "@standardagents/openrouter": "0.45.10",
     "@standardagents/spec": "0.45.10",
+    "@synaptiai/acs-core": "file:../../packages/acs-core",
     "zod": "^4.0.0"
   },
   "devDependencies": {

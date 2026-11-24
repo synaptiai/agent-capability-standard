@@ -1,100 +1,158 @@
-# Domain Profile Schema
-# Defines configuration for domain-specific trust weights, risk thresholds,
-# checkpoint policies, and evidence requirements.
+# Domain Profile Schema (Standard v1.2 §5.21)
 #
-# Status: a domain profile is informative data for hosts and workflow authors.
-# Standard 1.1.0 mentions profiles twice: `profile` as a descriptive workflow
-# field (section 5.1) and a `trust_weights` key `trust_class:<class>` that
-# overrides a trust class weight (section 8.3). It does not say how a profile
-# is applied, and no shipped component loads or selects one: the validator,
-# the executor and the plugin hooks do not use a profile, and the Python
-# package applies only a profile's trust_weights, when a caller passes them to
-# grounded_agency/trust.py. tools/validate_profiles.py checks the shape
-# described here (required fields, types, ranges, enumerations) and nothing
-# else. Until the Standard says how a profile is applied, a setting such as
-# block_autonomous, require_human, checkpoint_policy or minimum_confidence
-# takes effect only where a host implements it or a workflow author writes it
-# into the workflow. See "Status of Domain Profiles" in docs/domains/README.md.
+# A domain profile states rules for one domain that tighten flags, checks,
+# evidence, confidence and destinations, and trust weights that replace the
+# trust model's. It has effect
+# where it is applied: by a host to a run (the executor's start option
+# `profiles`), by a safety layer to the calls it covers, or by a validator
+# given it (tools/validate_workflows.py --profile). Standard v1.2 §5.21 says
+# what each member changes and which diagnostics a malformed profile gets;
+# this file gives the members' shape, in the schema dialect (§4.1.2). The
+# profiles beside it are examples. A workflow's `profile` field applies
+# nothing.
+
+schema:
+  name: domain_profile
+  version: 1.0.0
+  description: The shape of a domain profile (Standard v1.2 §5.21).
 
 profile_schema:
   type: object
   required:
     - domain
     - version
-    - trust_weights
-    - risk_thresholds
-    - checkpoint_policy
-    - evidence_policy
   properties:
     domain:
       type: string
-      description: Domain identifier (kebab-case)
+      pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+      description: Domain id (kebab-case). Names the profile in diagnostics.
     version:
       type: string
-      pattern: "^\\d+\\.\\d+\\.\\d+$"
-      description: Semantic version of this profile
+      pattern: '^\d+\.\d+\.\d+$'
+      description: The profile's own semantic version.
+    standard:
+      type: string
+      pattern: '^\d+\.\d+(\.\d+)?$'
+      description: The Standard version the profile is written for (Standard
+        v1.2 §11.6). Not supported by the implementation - V109.
+    ontology:
+      type: string
+      pattern: '^\d+\.\d+(\.\d+)?$'
+      description: The ontology version its capability ids are from (§11.6).
+        Another major than the implementation's - V109.
     description:
       type: string
-      description: Human-readable domain description
+      description: Human-readable domain description.
     trust_weights:
       type: object
       description: |
-        Source-specific trust weights (0.0 to 1.0).
-        Higher values indicate more trusted sources.
-        These weights affect how evidence is evaluated and conflicts resolved.
+        Weight overrides from 0 to 1 (Standard v1.2 §8.3), higher or lower
+        than the trust model's; the lowest across applied profiles. A key
+        trust_class:<class> replaces the weight of a
+        sender trust class (<class> must be one of agent_identity's trust
+        classes, else S303). Any other key is a source key (a lower-case
+        letter, then lower-case letters, digits, '_', '.' or '-'): it replaces
+        the weight of that source type, or gives one to a source type the
+        trust model does not name.
       additionalProperties:
         type: number
         minimum: 0.0
         maximum: 1.0
     risk_thresholds:
       type: object
-      description: Risk tolerance levels for automated actions
+      description: |
+        Which steps and calls need approval, and which a person's (§5.21.3).
+        A threshold covers a set of risk levels; none covers no level. Closed:
+        any other member - S303.
+      additionalProperties: false
       properties:
         auto_approve:
           type: string
           enum: [none, low, medium, high]
-          description: Maximum risk level that can be auto-approved
+          description: Covers this level and the levels below it. A step whose
+            effective risk it does not cover requires approval.
         require_review:
           type: string
-          enum: [low, medium, high]
-          description: Minimum risk level requiring human review
+          enum: [none, low, medium, high, critical]
+          description: Covers this level and the levels above it. A step whose
+            effective risk it covers requires approval. critical is deprecated
+            and read as none (W603).
         require_human:
           type: string
-          enum: [low, medium, high, critical]
-          description: Minimum risk level requiring human execution
+          enum: [none, low, medium, high, critical]
+          description: Covers this level and the levels above it. A step whose
+            effective risk it covers requires approval by a person each time,
+            which no standing mandate covers. critical is deprecated and read as
+            none (W603).
         block_autonomous:
           type: array
           items:
             type: string
-          description: Capability IDs that must never run autonomously
+          description: Capability ids whose steps and calls require approval by a
+            person each time (never autonomous). An unknown id - V101; a repeated
+            one has no further effect.
     checkpoint_policy:
       type: object
-      description: When to create checkpoints
+      description: |
+        Keys are capability ids, or "*" for every capability but checkpoint
+        (quote it in YAML). A step of that capability requires a checkpoint:
+        always; when its effective risk is high (high_risk); when it is medium
+        or high (medium_risk). never adds nothing. A checkpoint step never
+        requires one, so the key checkpoint - S303; a key that is not a
+        capability id - V101.
       additionalProperties:
         type: string
         enum: [always, high_risk, medium_risk, never]
     evidence_policy:
       type: object
-      description: Evidence requirements for claims
+      description: Evidence requirements for outputs (§5.21.3). Closed - any other
+        member, S303.
+      additionalProperties: false
       properties:
         required_anchor_types:
           type: array
+          minItems: 1
+          uniqueItems: true
           items:
             type: string
-          description: Types of evidence anchors expected in this domain
+            pattern: '^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$'
+          description: Distinct anchor kinds (Standard v1.2 §6.5) of which an anchor counts
+            toward grounding; the kinds of the grounding policy require_grounding
+            states (§5.20). Without require_grounding, no effect.
         minimum_confidence:
           type: number
           minimum: 0.0
           maximum: 1.0
-          description: Minimum confidence threshold for actions
+          description: An output whose confidence is below it fails its step with
+            F504 (below_minimum_confidence), and one whose confidence member is not
+            a number from 0 to 1 with F504 (invalid_confidence); the highest across
+            applied profiles.
         require_grounding:
           type: array
+          uniqueItems: true
           items:
             type: string
-          description: Capabilities that require explicit grounding
+          description: Distinct capabilities whose outputs must be grounded or marked
+            inferred; a grounding policy's require (Standard v1.2 §5.20). An
+            unknown id - V101.
+    allowed_destinations:
+      type: array
+      items:
+        type: string
+        minLength: 1
+      description: |
+        A destination policy (Standard v1.2 §4.4.2): the destinations a send
+        may go to under this profile. Each pattern is a destination; a prefix
+        ending in '/', ':', '@', '.', '?' or '#' followed by '*' (a prefix
+        holding '//' must have '/', '?' or '#' after it, as in
+        'https://hooks.example.com/*'); or '*' followed by a suffix that
+        starts with '@' or '.', matching a host or address whose part before
+        the suffix is letters, digits, '.', '-', '_' or '+' only. An empty
+        list allows no send. Applied as the Standard's §5.21.3 says: in force
+        beside the host's own policies.
     domain_sources:
       type: array
-      description: Expected data sources for this domain
+      description: Expected data sources for this domain (informative).
       items:
         type: object
         properties:
@@ -110,16 +168,21 @@ profile_schema:
     trust_model_reviewed:
       type: boolean
       description: |
-        SEC-009: Whether the trust model has been explicitly reviewed and calibrated.
-        When false or absent, the validator emits a warning that trust weights
-        may not reflect intentional calibration decisions.
+        SEC-009: Whether the trust model has been explicitly reviewed and
+        calibrated (informative). tools/validate_profiles.py warns when it is
+        false or absent.
     trust_model_reviewed_at:
       type: string
-      pattern: "^\\d{4}-\\d{2}-\\d{2}$"
-      description: Date when trust model was last reviewed (YYYY-MM-DD format)
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+      description: Date the trust model was last reviewed (informative).
     workflows:
       type: array
-      description: Recommended workflows for this domain
+      description: Recommended workflows for this domain (informative)
       items:
         type: string
-        description: Workflow ID from workflow_catalog.yaml
+        description: A workflow id - a workflow name in the catalogs the profile
+          is used with, or a qualified id <catalog id>/<name> (Standard v1.2
+          §5.1.1)
+    compliance:
+      type: object
+      description: Regulatory markers (informative; no effect).

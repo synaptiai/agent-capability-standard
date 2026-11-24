@@ -12,7 +12,7 @@ The vision domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 2 (Computer Vision)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image segmentation, object detection, image generation, and visual transformations.
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -54,15 +54,33 @@ block_autonomous:
 
 ### Checkpoint Policy
 
-Vision workflows require checkpoints before any action that:
-- Modifies source imagery
-- Produces a final classification output
-- Generates new images
-- Processes large batches
+The profile requires a checkpoint before each step or call that:
+- Modifies source imagery (`mutate`)
+- Writes a final classification or a generated image out (`persist`)
+- Carries medium or high risk, such as a large batch
+
+Classifying or generating an image in memory (`classify`, `generate`) needs
+none until the result is written out. The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_image_modification -> mutate; before_classification_output and
+  # before_generation -> persist; before_batch_processing (high_risk) and
+  # during_pipeline_stages (medium_risk) -> "*": medium_risk.
+  mutate: always
+  persist: always
+  "*": medium_risk
+```
 
 ## Capability Usage
 
-The 36 atomic capabilities apply to vision through domain parameterization:
+The 36 atomic capabilities apply to vision through domain parameterization.
+Each output's `evidence_anchors` are evidence anchors (Standard 1.2.0 §6.5):
+a `kind`, which the profile's `required_anchor_types` count, and a `ref` in
+the forms of the [modality guide](../../guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality);
+an `acs:` ref names a value the step was given, such as its prompt
+(§5.20). Other data stay out of the anchors.
 
 ### Detection
 
@@ -78,10 +96,8 @@ detect:
         bounding_box: [120, 45, 180, 90]
         confidence: 0.92
     evidence_anchors:
-      - type: image_reference
-        ref: "camera://line-4/frame-12847"
-      - type: bounding_box
-        coordinates: [120, 45, 180, 90]
+      - kind: sensor
+        ref: "image:camera://line-4/frame-12847:bbox:120,45,180,90"
 ```
 
 ### Classification
@@ -96,10 +112,8 @@ classify:
     label: "outdoor"
     confidence: 0.89
     evidence_anchors:
-      - type: image_reference
-        ref: "s3://dataset/img_0042.jpg"
-      - type: confidence_score
-        value: 0.89
+      - kind: file
+        ref: "image:s3://dataset/img_0042.jpg:full_frame"
 ```
 
 ### Generation
@@ -115,10 +129,8 @@ generate:
   output:
     image_ref: "generated://uuid-abc123"
     evidence_anchors:
-      - type: source_modality
-        ref: "text prompt"
-      - type: modality_hash
-        value: "sha256:..."
+      - kind: record
+        ref: "acs:prompt"
 ```
 
 ### Transformation
@@ -131,11 +143,10 @@ transform:
     operations: ["denoise", "normalize", "resize"]
   output:
     image_ref: "processed://frame-001.png"
+    operations_applied: ["denoise", "normalize", "resize"]
     evidence_anchors:
-      - type: image_reference
-        ref: "camera://raw/frame-001.raw"
-      - type: pixel_evidence
-        operations_applied: ["denoise", "normalize", "resize"]
+      - kind: sensor
+        ref: "image:camera://raw/frame-001.raw:full_frame"
 ```
 
 ## Available Workflows
@@ -241,9 +252,10 @@ trust_weights:
   lidar_scan: 0.96          # Primary sensor for self-driving
   calibrated_camera: 0.94
   radar_return: 0.92
-checkpoint_policy:
-  before_classification_output: always  # Safety-critical
-  before_image_modification: always
+checkpoint_policy:             # Capability ids or "*" (Standard 1.2.0 §5.21)
+  persist: always               # Classification output written out: safety-critical
+  mutate: always                # Image modification
+  "*": high_risk
 ```
 
 ## Safety Considerations

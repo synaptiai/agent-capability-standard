@@ -1,0 +1,303 @@
+"""
+Capability output over a text-only channel (STANDARD 1.2.0 section 5.18.9).
+
+Where a host carries a capability output as a string (a tool's result, a
+sub-prompt's or a model's reply, the string a host turns into the output of
+an executor's capability call), it travels as the I-JSON text (RFC 7493) of
+the output object, with nothing before or after it. A consumer parses the
+text and checks that it is I-JSON and an object with every field the
+capability's output contract requires, an ``evidence_anchors`` array where
+present, and a ``confidence`` from 0 to 1 where the contract requires one;
+a producer checks the same before it sends. Either failure is R402
+EXECUTION_FAILED.
+
+:func:`encode_capability_output` is the producer's side and
+:func:`decode_capability_output` the consumer's; :func:`tool_result_output`
+reads the output a tool result of the Claude Agent SDK's in-process MCP
+server carries (the safety layer's output-contract check, section 5.18.10).
+The TypeScript package's
+``encodeCapabilityOutput`` and ``decodeCapabilityOutput``
+(``packages/acs-core/src/output.ts``) apply the same rules; both pass the
+shared vectors, ``tests/conformance/output/vectors.json``. The I-JSON limits
+apply to the text: an integer literal beyond ±2^53 is refused, a number in
+exponent form is a double and is not (Python writes a ``float`` such as
+1.8e16 in that form).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from typing import TYPE_CHECKING, Any
+
+from ..errors import ErrorCode, ValidationError, text_form
+
+if TYPE_CHECKING:
+    from .registry import CapabilityRegistry
+
+__all__ = [
+    "CapabilityOutputError",
+    "check_i_json",
+    "decode_capability_output",
+    "encode_capability_output",
+    "tool_result_output",
+]
+
+# I-JSON limits, as the reference executor applies them (core/src/exec):
+# integers of magnitude at most 2^53, values nested at most 100 levels.
+_INT_LIMIT = 2**53
+_MAX_DEPTH = 100
+
+
+class CapabilityOutputError(ValueError):
+    """A capability output that breaks section 5.18.9 (R402).
+
+    ``error`` is the diagnostic; ``str()`` is its text form.
+    """
+
+    def __init__(self, error: ValidationError) -> None:
+        super().__init__(text_form(error))
+        self.error = error
+
+
+def _fail(capability: str, message: str, field: str | None = None) -> None:
+    """Raise R402. ``message`` follows "the '<capability>' output"."""
+    location: dict[str, Any] = {"capability": capability}
+    if field is not None:
+        location["field"] = field
+    joiner = "" if message.startswith("'s ") else " "
+    raise CapabilityOutputError(
+        ValidationError(
+            ErrorCode.EXECUTION_FAILED,
+            f"the '{capability}' output{joiner}{message}",
+            location,
+        )
+    )
+
+
+# A value's place below the root, as a chain of (parent place, step): a
+# member name or an array index. Each value on a walk's stack carries one
+# small link, so the walk's memory grows with the input; the text of a
+# place is built only for the value a message names.
+type Place = tuple[Place, str | int] | None
+
+
+def place_text(root: str, place: Place) -> str:
+    """The text of ``place`` below ``root``: ``$.a[0].b``."""
+    steps: list[str | int] = []
+    while place is not None:
+        place, step = place
+        steps.append(step)
+    return root + "".join(
+        f"[{step}]" if isinstance(step, int) else f".{step}" for step in reversed(steps)
+    )
+
+
+def check_i_json(value: Any, capability: str = "", path: str = "$") -> None:
+    """Check that ``value`` is I-JSON (RFC 7493) within the executor's
+    limits: integers of magnitude at most 2^53, finite numbers, strings
+    without lone surrogates, string object keys, nesting at most 100 levels.
+
+    The walk keeps each value's place as a link to its parent's, so its
+    memory grows with the input, however long the member names above a
+    wide array or object; ``path`` is the text of the root's place.
+
+    Raises:
+        CapabilityOutputError: R402, naming the first value that fails.
+    """
+    stack: list[tuple[Any, Place, int]] = [(value, None, 0)]
+    while stack:
+        v, place, depth = stack.pop()
+        if depth > _MAX_DEPTH:
+            at = place_text(path, place)
+            _fail(capability, f"nests deeper than {_MAX_DEPTH} levels at {at}")
+        if v is None or isinstance(v, bool):
+            continue
+        if isinstance(v, int):
+            if abs(v) > _INT_LIMIT:
+                _fail(
+                    capability,
+                    f"holds the integer {v} at {place_text(path, place)}, outside "
+                    f"±2^53, which has no exact I-JSON form",
+                )
+        elif isinstance(v, float):
+            if not math.isfinite(v):
+                at = place_text(path, place)
+                _fail(capability, f"holds {v} at {at}, which is not a JSON number")
+        elif isinstance(v, str):
+            _check_text(capability, v, path, place)
+        elif isinstance(v, list):
+            stack.extend((x, (place, i), depth + 1) for i, x in enumerate(v))
+        elif isinstance(v, dict):
+            for key, x in v.items():
+                if not isinstance(key, str):
+                    at = place_text(path, place)
+                    _fail(capability, f"has a non-string key {key!r} at {at}")
+                _check_text(capability, key, path, place)
+                stack.append((x, (place, key), depth + 1))
+        else:
+            at = place_text(path, place)
+            _fail(capability, f"holds a {type(v).__name__} at {at}, not JSON")
+
+
+def _check_text(capability: str, text: str, root: str, place: Place) -> None:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        at = place_text(root, place)
+        _fail(capability, f"holds a string with a lone surrogate at {at}")
+
+
+def _required(capability: str, registry: CapabilityRegistry | None) -> list[str]:
+    if registry is None:
+        from .mapper import _get_default_registry
+
+        registry = _get_default_registry()
+    node = registry.get_capability(capability)
+    if node is None:
+        raise CapabilityOutputError(
+            ValidationError(
+                ErrorCode.UNKNOWN_CAPABILITY,
+                f"capability {capability!r} is not in the ontology",
+                {"capability": capability},
+            )
+        )
+    required = node.output_schema.get("required") or []
+    return [f for f in required if isinstance(f, str)]
+
+
+def _check_contract(
+    capability: str, output: Any, registry: CapabilityRegistry | None
+) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        _fail(capability, "is not a JSON object")
+    required = _required(capability, registry)
+    missing = [f for f in required if f not in output]
+    if missing:
+        _fail(capability, f"is missing {', '.join(missing)}", missing[0])
+    if "evidence_anchors" in output and not isinstance(
+        output["evidence_anchors"], list
+    ):
+        _fail(capability, "'s evidence_anchors is not an array", "evidence_anchors")
+    if "confidence" in required:
+        confidence = output.get("confidence")
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not 0 <= confidence <= 1
+        ):
+            _fail(
+                capability,
+                "'s confidence is not a number from 0 to 1",
+                "confidence",
+            )
+    check_i_json(output, capability)
+    checked: dict[str, Any] = output
+    return checked
+
+
+def encode_capability_output(
+    capability: str,
+    output: Any,
+    registry: CapabilityRegistry | None = None,
+) -> str:
+    """The text a capability output travels as on a string channel: the
+    I-JSON text of the object, nothing around it.
+
+    Args:
+        capability: The capability whose output contract applies.
+        output: The output object.
+        registry: The ontology; the packaged one when omitted.
+
+    Raises:
+        CapabilityOutputError: R402 if ``output`` is not an object, lacks a
+            required field, or is not I-JSON.
+    """
+    _check_contract(capability, output, registry)
+    return json.dumps(
+        output, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    )
+
+
+def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate member {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def decode_capability_output(
+    capability: str,
+    text: str,
+    registry: CapabilityRegistry | None = None,
+) -> dict[str, Any]:
+    """Read a capability output carried as a string (section 5.18.9).
+
+    The text must be the I-JSON text of one object and nothing else: no
+    prose, fence or second value around it, no duplicate member, no NaN or
+    Infinity, every field the capability's output contract requires.
+
+    Raises:
+        CapabilityOutputError: R402 otherwise. A host that answers an
+            executor's capability call answers it with an error then.
+    """
+    if not isinstance(text, str):
+        _fail(capability, f"arrived as a {type(text).__name__}, not as text")
+    try:
+        value = json.loads(
+            text, object_pairs_hook=_no_duplicates, parse_constant=_reject_constant
+        )
+    except (ValueError, RecursionError) as e:
+        _fail(capability, f"is not the JSON text of one object and nothing else: {e}")
+    return _check_contract(capability, value, registry)
+
+
+def tool_result_output(
+    capability: str,
+    result: Any,
+    registry: CapabilityRegistry | None = None,
+) -> dict[str, Any]:
+    """The capability output a tool result of the Claude Agent SDK's
+    in-process MCP server carries (sections 5.18.9, 5.18.10): the I-JSON
+    text of the output object as its one content item, of type ``text``,
+    decoded by :func:`decode_capability_output`.
+
+    That server delivers a result's ``content`` and ``is_error`` to the
+    session and drops every other member, so the host carries the output
+    as a string: the text is what the session reads, and what is checked. A
+    ``structuredContent`` member never reaches the session and is not read.
+
+    Raises:
+        CapabilityOutputError: R402 when the result carries no capability
+            output that satisfies the contract: a result that is not a
+            mapping, content that is not exactly one text item, or a text
+            that is not the I-JSON text of an output that satisfies the
+            contract.
+    """
+    if not isinstance(result, dict):
+        _fail(capability, f"arrived as a {type(result).__name__}, not a tool result")
+    content = result.get("content")
+    items = content if isinstance(content, list) else []
+    if (
+        len(items) != 1
+        or not isinstance(items[0], dict)
+        or items[0].get("type") != "text"
+    ):
+        dropped = (
+            "; its structuredContent is not delivered to the session"
+            if result.get("structuredContent") is not None
+            else ""
+        )
+        _fail(
+            capability,
+            f"is not in the result: it carries {len(items)} content item(s), "
+            f"not the JSON text of the output object as its one text "
+            f"item{dropped}",
+        )
+    return decode_capability_output(capability, items[0].get("text"), registry)

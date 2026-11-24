@@ -25,43 +25,233 @@ Example::
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping, MutableSet, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .. import _core
+from ..grounding import Policies, as_policies
+from ..profiles import AppliedProfiles
 from ..state.checkpoint_tracker import CheckpointTracker
+from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
+from ..state.memory import MemoryContext, MemoryError, MemoryStore
+from ..state.redaction import DEFAULT_REDACTOR, Redactor
+from ._responses import redact_anchors
 from .engine import WorkflowEngine
+from .idempotency import IdempotencyLog
+from .protocol import RECORD_MODES
+from .triggers import EventGate, trigger_attendance
 
+logger = logging.getLogger(__name__)
+
+# The trace kinds that say what became of a host's Output for a step: kept
+# (step_completed), refused (step_failed: R402, F505), to be retried
+# (retry), or a waiting delegation's acceptance (delegated).
+_OUTCOME_KINDS = frozenset({"step_completed", "step_failed", "retry", "delegated"})
+
+# An action or a response of the host protocol (STANDARD v1.2 §5.19.1;
+# their typed shapes are in .protocol). At run time both are plain dicts.
 Action = dict[str, Any]
 Response = dict[str, Any]
 
 TERMINAL = frozenset({"Completed", "Failed"})
+
+# The members of a response the core keeps as given, in its trace, its
+# records, a diagnostic or a received item, beside an Error's message and
+# reason, the anchors and not_covered: the runner redacts them before it
+# submits the response (§6.7).
+_KEPT_MEMBERS: dict[str, tuple[str, ...]] = {
+    "Decision": ("decision_id", "decision", "approvers", "approver_identities"),
+    "Event": ("principal", "identity"),
+}
+
+
+class HostCannotServe(Exception):
+    """Raised by :meth:`Host.invoke_capability` or :meth:`Host.await_event`
+    when the host cannot serve the step: the runner answers the action with
+    an ``Error`` R402 carrying ``reason`` (STANDARD v1.2 §5.19.7), such as
+    ``unsupported_capability`` (the host does not perform the capability)
+    or ``unsupported_domain`` (not for the step's ``domain``), or a vendor
+    ``x-`` reason."""
+
+    def __init__(self, reason: str, message: str = "") -> None:
+        super().__init__(message or reason)
+        self.reason = reason
+        self.message = message
 
 
 class Host:
     """What a run asks of its environment.
 
     Override the methods your workflows need; each receives the action (a
-    dict with ``kind``, ``id``, ``frame`` and the action's fields) and
+    dict with ``kind``, ``run_id``, ``id``, ``frame`` and the action's
+    fields, STANDARD v1.2 §5.19.1; ignore any member you do not know) and
     returns a response dict, or ``None`` when there is nothing yet (the
     runner waits a poll interval and asks again, until the action's deadline
     passes). An exception raised by :meth:`invoke_capability` is reported to
     the run as a failed step (R402) — except ``NotImplementedError``, which
-    means the host lacks the capability and stops the runner — and so is a
+    means the host lacks the capability and stops the runner, and
+    :class:`HostCannotServe`, which fails the step with its reason — and so is a
     response from it the run cannot accept (malformed, not JSON data, or
     not an answer to the action). A response to any other action that the
     run cannot accept stops the runner with :class:`HostResponseError`.
     The clock methods default to wall-clock time.
 
     With a :class:`CheckpointTracker`, :meth:`create_checkpoint` records
-    checkpoints in it.
+    checkpoints in it. When the tracker keeps content (a
+    :class:`~grounded_agency.state.snapshots.FileSnapshotStore`), the host
+    also performs ``checkpoint`` and ``rollback`` steps and answers the
+    executor's ``Rollback`` by restoring files (STANDARD v1.2 §4.4.1); with
+    a :class:`~grounded_agency.state.memory.MemoryStore` it performs
+    ``persist`` and ``recall`` (§4.5); with an :class:`IdempotencyLog`,
+    :meth:`send_once` transmits at most once per idempotency key (§4.4.2).
+    A subclass calls ``super().invoke_capability(action)`` for those.
+    The host's own records (the memory and idempotency files, and each of
+    ``protected_paths``, such as where you save runs) are protected in the
+    snapshot store: no checkpoint captures them, no rollback reaches them.
+
+    A run may ask for an action again after it was restored (STANDARD v1.2
+    §5.19.4): make what you do for an action idempotent under its delivery
+    key, ``(action["run_id"], action["id"])``, by keeping the response you
+    gave for each key and giving it again. What you transmit to perform an
+    approval request, a recheck, a wait or the run's end is protocol traffic
+    (§5.19.6), not a ``send``: send only the action's values.
     """
 
-    def __init__(self, checkpoint_tracker: CheckpointTracker | None = None) -> None:
+    def __init__(
+        self,
+        checkpoint_tracker: CheckpointTracker | None = None,
+        *,
+        memory: MemoryStore | None = None,
+        idempotency: IdempotencyLog | None = None,
+        session_id: str | None = None,
+        user: str | None = None,
+        project: str | None = None,
+        protected_paths: Iterable[str | Path] = (),
+    ) -> None:
+        """``session_id``, ``user`` and ``project`` name the instances of
+        the memory scopes this host serves (§4.5); one host is one session
+        (a random ``session_id`` by default)."""
         self.checkpoint_tracker = checkpoint_tracker
+        self.memory = memory
+        self.idempotency = idempotency
+        # Each run's persists this host performed: (at ms, scope, key).
+        self._persisted: dict[str, list[tuple[int, str, str]]] = {}
+        self.session_id = session_id or uuid.uuid4().hex
+        self.user = user
+        self.project = project
+        for path in (
+            memory.path if memory is not None else None,
+            idempotency.path if idempotency is not None else None,
+            *protected_paths,
+        ):
+            if path is not None:
+                self.protect(path)
+
+    def protect(self, path: str | Path) -> None:
+        """Keep ``path`` (a file, or a directory and everything under it)
+        out of every checkpoint's reach (§4.4.1), such as the directory you
+        save runs to. Nothing to do without a snapshot store."""
+        tracker = self.checkpoint_tracker
+        if tracker is not None and tracker.snapshots is not None:
+            tracker.snapshots.protect(path)
+
+    def send_once(self, action: Action, effect: Callable[[], Response]) -> Response:
+        """Perform a ``send`` (or any other effect) at most once per
+        ``action["idempotency_key"]`` (§4.4.2): what a ``send``
+        implementation calls, with ``effect`` doing the transmission. An
+        attempt whose key was transmitted under gets that output again; one
+        that may have transmitted gets ``outcome_unknown``; a key reused for
+        another request gets ``key_conflict``. Without an
+        :class:`IdempotencyLog`, ``effect()``."""
+        log: IdempotencyLog | None = getattr(self, "idempotency", None)
+        if log is None:
+            return effect()
+        return log.perform(action, effect)
+
+    def _transmitted_since(self, since_ms: int, run_id: str) -> list[dict[str, str]]:
+        """This run's transmissions since ``since_ms``: what a rollback
+        lists as ``not_covered`` (``transmitted``, §4.4.1), a send whose
+        outcome is unknown included, since it may have gone out (its
+        ``detail`` says so). Destinations are redacted (§6.7)."""
+        log = getattr(self, "idempotency", None)
+        if log is None:
+            return []
+        redactor = getattr(log, "redactor", DEFAULT_REDACTOR)
+        out = []
+        for entry in log.performed_since(since_ms, run_id=run_id):
+            destination = entry.get("destination")
+            item = (
+                f"send to {redactor.redact_text(destination)[0]} ({entry['key']})"
+                if isinstance(destination, str)
+                else f"send ({entry['key']})"
+            )
+            reported = {"item": item, "reason": "transmitted"}
+            if entry["state"] != "done":
+                reported["detail"] = "outcome unknown"
+            out.append(reported)
+        return out
+
+    def _note_persist(self, run_id: str, output: Mapping[str, Any]) -> None:
+        """Remember a persist this host performed for the run: the memory
+        store is out of every checkpoint's reach, so a rollback lists what
+        it wrote since (§4.4.1)."""
+        scope, key = output.get("scope"), output.get("key")
+        if not isinstance(scope, str) or not isinstance(key, str):
+            return
+        persisted = getattr(self, "_persisted", None)
+        if persisted is None:
+            persisted = self._persisted = {}
+        persisted.setdefault(run_id, []).append(
+            (time.time_ns() // 1_000_000, scope, key)
+        )
+
+    def _persisted_since(self, since_ms: int, run_id: str) -> list[dict[str, str]]:
+        """This run's persists since ``since_ms``, each entry once: what a
+        rollback lists as ``not_covered`` (``outside_scope``, §4.4.1), since
+        no checkpoint captures the memory store and no rollback restores
+        it. Keys are redacted (§6.7)."""
+        seen: set[tuple[str, str]] = set()
+        out = []
+        for at, scope, key in getattr(self, "_persisted", {}).get(run_id, ()):
+            if at < since_ms or (scope, key) in seen:
+                continue
+            seen.add((scope, key))
+            item = f"memory {scope}:{DEFAULT_REDACTOR.redact_text(key)[0]}"
+            out.append({"item": item, "reason": "outside_scope"})
+        return out
+
+    def _forget_run(self, run_id: str) -> None:
+        """The run ended: its persists are no longer listed."""
+        getattr(self, "_persisted", {}).pop(run_id, None)
+
+    def _restore(
+        self, checkpoint_id: str, scope: Sequence[str] | None, run_id: str
+    ) -> tuple[Any, list[dict[str, str]]] | None:
+        """Restore a checkpoint with the tracker's snapshot store: the
+        restore and what the run changed since the checkpoint that no
+        checkpoint covers (its transmissions and its persists), or None
+        when the tracker never took it."""
+        tracker = self.checkpoint_tracker
+        assert tracker is not None
+        checkpoint = tracker.find_checkpoint(checkpoint_id)
+        if checkpoint is None:
+            return None
+        restored = tracker.restore_checkpoint(checkpoint_id, scope)
+        since = int(checkpoint.created_at.timestamp() * 1000)
+        return restored, [
+            *self._transmitted_since(since, run_id),
+            *self._persisted_since(since, run_id),
+        ]
+
+    def _snapshots(self) -> bool:
+        tracker = getattr(self, "checkpoint_tracker", None)
+        return tracker is not None and tracker.snapshots is not None
 
     def now_ms(self) -> int:
         """The current time in milliseconds since the Unix epoch."""
@@ -74,14 +264,88 @@ class Host:
             time.sleep(delay / 1000)
 
     def invoke_capability(self, action: Action) -> Response:
-        """Run ``action["capability"]`` with ``action["inputs"]``; return
-        ``{"kind": "Output", "value": {...}}`` or ``{"kind": "Error", "code":
-        "R401" | "R402", "message": ...}``."""
-        raise NotImplementedError(f"no implementation for {action['capability']}")
+        """Run ``action["capability"]`` with ``action["inputs"]``, for
+        ``action["domain"]`` when it is not None; return ``{"kind":
+        "Output", "value": {...}}`` or ``{"kind": "Error", "code": "R401" |
+        "R402", "message": ..., "reason": ...}``. ``reason`` is optional
+        (STANDARD v1.2 §5.19.7): ``unsupported_capability`` or
+        ``unsupported_domain`` when you cannot serve the step (or raise
+        :class:`HostCannotServe`), or an ``x-`` vendor reason. Neither the
+        message nor the reason holds a secret (§6.7); the runner redacts the
+        message.
+
+        An ``Output`` may carry ``evidence_seen`` (§3.1, §5.20): the refs of
+        the evidence its producer had for this answer, and nothing else:
+        what you put in the request a model answered, the anchors inside
+        the step's inputs, what the step's tool calls returned. Not a stored
+        trace or history: a ref there was seen by some earlier request, not
+        necessarily by this one. Leave it out when you do not know the
+        request: absent attests nothing, while an empty list attests that
+        the producer saw no evidence.
+
+        The default performs ``checkpoint`` and ``rollback`` with a tracker
+        that keeps content, and ``persist`` and ``recall`` with a memory
+        store (see the class); anything else raises ``NotImplementedError``.
+        """
+        capability = action["capability"]
+        inputs = action.get("inputs") or {}
+        tracker = getattr(self, "checkpoint_tracker", None)
+        memory = getattr(self, "memory", None)
+        if capability == "checkpoint" and tracker is not None and self._snapshots():
+            scope = str(inputs.get("scope") or "*").split() or ["*"]
+            checkpoint_id = tracker.create_checkpoint(
+                scope=scope,
+                reason=f"checkpoint step {action['step']} of {'/'.join(action['frame'])}",
+            )
+            return {"kind": "Output", "value": tracker.checkpoint_output(checkpoint_id)}
+        if capability == "rollback" and self._snapshots():
+            given = inputs.get("scope")
+            part = str(given).split() if given else None
+            done = self._restore(
+                str(inputs.get("checkpoint_id")), part, action["run_id"]
+            )
+            if done is None:
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": "unknown checkpoint: this host never took it",
+                }
+            restored, not_covered = done
+            return {"kind": "Output", "value": restored.output(not_covered=not_covered)}
+        if capability in ("persist", "recall") and memory is not None:
+            ctx = MemoryContext(
+                run=action.get("run_id"),
+                session=self.session_id,
+                user=self.user,
+                project=self.project,
+            )
+            key = action.get("idempotency_key")
+            if capability == "persist" and inputs.get("key") is None and key:
+                # The key a persist without one is given is the same for
+                # every attempt and delivery of the pass (§4.4.2, §5.19.4),
+                # so a retry or a re-delivery replaces its entry and leaves
+                # no orphan under another key.
+                inputs = {**inputs, "key": _persist_key(str(key))}
+            try:
+                operation = memory.persist if capability == "persist" else memory.recall
+                value = operation(inputs, ctx)
+                if capability == "persist":
+                    self._note_persist(str(action["run_id"]), value)
+                return {"kind": "Output", "value": value}
+            except MemoryError as e:
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "reason": e.reason,
+                    "message": e.message,
+                }
+        raise NotImplementedError(f"no implementation for {capability}")
 
     def create_checkpoint(self, action: Action) -> Response:
         """Take a checkpoint before ``action["step"]``; return ``{"kind":
-        "Checkpoint", "checkpoint_id": ...}``."""
+        "Checkpoint", "checkpoint_id": ...}``. The run's trace and records
+        name the id, so it holds no secret: the runner refuses one that
+        holds a secret its redactor recognises (F501)."""
         if self.checkpoint_tracker is None:
             raise NotImplementedError("no checkpoint store")
         checkpoint_id = self.checkpoint_tracker.create_checkpoint(
@@ -92,8 +356,34 @@ class Host:
 
     def rollback(self, action: Action) -> Response:
         """Restore ``action["checkpoint_id"]``; return ``{"kind":
-        "RolledBack"}``, or an ``Error`` (the run fails with F503)."""
-        raise NotImplementedError("no rollback")
+        "RolledBack"}`` only when everything the checkpoint captured is
+        restored, optionally with ``not_covered`` (changes it never covered,
+        such as this run's transmissions and persists, §4.4.1), or an
+        ``Error`` (the run fails with F503). The default restores with a
+        tracker that keeps content."""
+        if not self._snapshots():
+            raise NotImplementedError("no rollback")
+        done = self._restore(action["checkpoint_id"], None, action["run_id"])
+        if done is None:
+            return {
+                "kind": "Error",
+                "code": "F503",
+                "message": "unknown checkpoint: this host never took it",
+            }
+        restored, not_covered = done
+        if not restored.restored:
+            items = ", ".join(
+                f"{u['item']} ({u['reason']})" for u in restored.unrestored[:10]
+            )
+            return {
+                "kind": "Error",
+                "code": "F503",
+                "message": f"{len(restored.unrestored)} items not restored: {items}",
+            }
+        response: Response = {"kind": "RolledBack"}
+        if not_covered:
+            response["not_covered"] = not_covered
+        return response
 
     def request_approval(self, action: Action) -> Response:
         """Ask ``action["approver"]`` to approve ``action["shown"]``; return
@@ -102,6 +392,24 @@ class Host:
         action["digest"]}``. ``unavailable`` means no one could decide (no
         standing mandate covers the action): an unattended run then follows
         the step's ``when_unattended``.
+
+        ``action["mode"]`` says where to ask (STANDARD v1.2 §5.14):
+        ``in_session``, whoever attends the run, in its session;
+        ``out_of_band``, through a channel separate from the session, whose
+        approvers need not attend the run (keep the run's snapshot while
+        you wait). A request for a queued action that a resumed run
+        re-entered names it in ``queued_action_id``, the ``action_id`` of
+        the record its deferral left, on every request of that step until
+        the action is carried out: a re-ask after a recheck and a retry
+        included (§5.14.1). With ``identity@1``, the decision
+        may attest who decided: ``approver_identities``, one
+        ``agent_identity`` per principal, with ``approvers`` empty or
+        exactly their principals (§5.17); approvers are then counted by
+        principal, and only those whose identity meets the request count.
+        The run's trace and records keep the decision's strings: none
+        holds a secret, and the runner redacts them (two that redaction
+        makes one count as one; a ``decision_id`` that redaction makes one
+        used before is refused as used, F502).
 
         By default a standing mandate is unavailable (this host holds no
         mandates), and any other approver raises ``NotImplementedError``."""
@@ -127,8 +435,16 @@ class Host:
         ``identity@1`` inputs (STANDARD v1.1 §5.17),
         ``{"kind": "LivenessLost"}`` when the source stopped answering (the
         step fails with R406), or ``None`` when nothing arrived (the run then
-        times out, R401, once the deadline has passed)."""
+        times out, R401, once the deadline has passed). Liveness is yours to
+        watch (STANDARD v1.2 §5.19.3): answer ``LivenessLost`` once the
+        source has missed ``failure_threshold`` heartbeats or probes."""
         raise NotImplementedError("no event source")
+
+    def withdraw(self, action: Action, why: str) -> None:
+        """The run no longer waits for ``action``: it timed out (``why`` is
+        ``"timed out"``) or the run was cancelled (``"cancelled"``). Stop
+        performing it: a response to it would be refused (STANDARD v1.2
+        §5.19.3, §5.19.5). The default does nothing."""
 
 
 @dataclass(frozen=True)
@@ -143,6 +459,8 @@ class RunResult:
     message: str
     outputs: dict[str, Any] = field(default_factory=dict)
     action_records: list[dict[str, Any]] = field(default_factory=list)
+    """The run's action records that were not taken out before it ended
+    (``run.take_records()``): with those taken, all its records."""
     trace: list[dict[str, Any]] = field(default_factory=list)
     cause: str | None = None
     """The code that caused an escalation."""
@@ -153,10 +471,35 @@ class RunResult:
     ended: dict[str, Any] | None = None
     """When a gate with ``action: end`` ended the run early: the ``step``
     it ended at and the gate's ``message``."""
+    run_id: str | None = None
+    """The run's identifier (STANDARD v1.2 §5.19.2)."""
+    reason: str | None = None
+    """Why the step that failed the run failed, as a token (§5.19.7), when
+    the failure came with one."""
+    checkpoint_id: str | None = None
+    """For a cancelled run (R408): the latest checkpoint the run knew of,
+    which the host may restore itself (§5.19.5)."""
+    run_record: dict[str, Any] | None = None
+    """The run's record (§5.19.8): an action record derived from how it
+    ended, which every host keeps with :attr:`action_records`."""
 
     @property
     def ok(self) -> bool:
         return self.outcome == "completed"
+
+    @property
+    def cancelled(self) -> bool:
+        """The host cancelled the run (R408, §5.19.5)."""
+        return self.code == "R408"
+
+    @property
+    def resumable(self) -> bool:
+        """The run ended ``deferred``: it can be resumed once
+        (:meth:`WorkflowRunner.resume`), which carries out its queued
+        actions (STANDARD v1.2 §5.14.1). The queued actions of a run with
+        any other outcome are never carried out: their ``planned`` records
+        are abandoned."""
+        return self.outcome == "deferred"
 
 
 class RunIncomplete(RuntimeError):
@@ -184,11 +527,38 @@ class HostResponseError(RunIncomplete):
         self.response = response
 
 
+class RunArchiveError(RunIncomplete):
+    """The archive the runner hands each ended run to raised: the run's
+    record and records were not kept (STANDARD v1.2 §5.19.8). The run's
+    state was not discarded: ``run`` is the live run, ``result`` the result
+    to archive again."""
+
+    def __init__(self, message: str, run: _core.Run, result: RunResult) -> None:
+        super().__init__(message, run)
+        self.result = result
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One turn of an event-driven host (:meth:`WorkflowRunner.advance`):
+    the run's ``result`` when it ended; else the ``pending`` action the host
+    could not answer yet (a ``Sleep``, or one whose handler returned
+    ``None``) and the run's ``wake_at`` time, when it has one (STANDARD v1.2
+    §5.19.3): call ``advance`` again then, or when a response may have
+    arrived."""
+
+    result: RunResult | None
+    wake_at: int | None
+    pending: Action | None
+
+
 class RunStartError(ValueError):
-    """The run did not start or could not be restored: the catalog does not
-    validate, the inputs do not match the workflow's or are not JSON data,
-    or the snapshot is malformed or fails its HMAC check. ``diagnostics``
-    lists the catalog's errors (empty for the other causes)."""
+    """The run did not start, could not be restored or could not be
+    resumed: the catalog does not validate, the inputs do not match the
+    workflow's or are not JSON data, the snapshot is malformed or fails its
+    HMAC check, the actor is not the run's, or the run did not end
+    deferred. ``diagnostics`` lists the catalog's errors (empty for the
+    other causes)."""
 
     def __init__(self, message: str, diagnostics: list[dict[str, Any]]) -> None:
         super().__init__(message)
@@ -206,10 +576,28 @@ class WorkflowRunner:
         max_actions: int = 100_000,
         poll_interval_ms: int = 1_000,
         max_polls: int = 100_000,
+        profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = (),
+        archive: Callable[[RunResult], None] | None = None,
+        run_ids: MutableSet[str] | None = None,
+        event_seen: Callable[[str, int], MutableSet[str]] | None = None,
+        evidence_store: EvidenceStoreProtocol | None = None,
+        redactor: Redactor | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         """
         Args:
             engine: Holds the catalog to run.
+            profiles: Domain profiles the host applies to every run it
+                starts (STANDARD v1.2 §5.21), each a loaded profile or a
+                path: they raise the steps' flags, require a person for the
+                steps ``require_human`` and ``block_autonomous`` cover, apply
+                their grounding policies (``require_grounding``, F505) and
+                fail an output below ``minimum_confidence`` with F504, and
+                put their ``allowed_destinations`` in force beside the
+                host's own destination policies (a ``send`` they do not
+                allow fails F504 before approval, §4.4.2). They are checked
+                here (:class:`~grounded_agency.profiles.ProfileError`) and
+                saved with each run.
             max_actions: Most actions to answer in one :meth:`drive` before
                 giving up on a run (:class:`RunIncomplete`). Polls that got
                 no answer do not count.
@@ -222,11 +610,82 @@ class WorkflowRunner:
                 the default ``poll_interval_ms``. Each new action starts
                 its count afresh. Raise it, or poll less often, for actions
                 that wait longer, or drive the run again.
+            archive: Called with the result of every run the runner sees
+                end (:meth:`run`, :meth:`drive`, :meth:`advance`,
+                :meth:`cancel`), before it returns: the host keeps the run's
+                record and its action records there (STANDARD v1.2 §5.19.8).
+                Without it, keep ``result.run_record`` and
+                ``result.action_records`` yourself. ``action_records`` are
+                the records not taken out before the end: keep those you
+                took with ``run.take_records()`` yourself. A run restored
+                after it ended and driven again is archived again, under
+                the same ``run_record["action_id"]``.
+            run_ids: The ``run_id``s already used, which :meth:`start`
+                refuses and adds to. A ``run_id`` must differ from those of
+                the runs whose records and keys the host keeps (§5.19.2),
+                across restarts and processes too: that is the host's duty.
+                Pass a store you persist, and prune as you drop runs'
+                records and keys; the default is an in-memory set of the
+                runs this runner started, which grows by one per run.
+            event_seen: Called with a workflow and the index of one of its
+                event triggers, it gives the store of the ``event_id``s that
+                started runs of that trigger (:class:`EventGate`'s
+                ``seen``), which :meth:`start` checks and adds to. Pass
+                stores you persist, so an event delivered again after a
+                restart starts no other run (§5.10.2); the default is an
+                in-memory set per trigger.
+            evidence_store: Where the runner records the evidence anchors
+                of each host ``Output`` the core kept (STANDARD v1.2 §6.6),
+                with the run's ``run_id`` and the step's ``frame``,
+                ``step`` and ``capability``: only once the core accepted the
+                output (its next trace event for the step is
+                ``step_completed``), so an output refused (R402, F505), to
+                be retried, or a waiting delegation's acceptance records
+                nothing. Items that are not evidence anchors are skipped
+                (and logged). A store that raises never stops the run: the
+                failure is logged and counted (``record_capture_failure``).
+                A store kept in a file (its ``path``) is protected in the
+                snapshot store of each host the runner drives a run with
+                (:meth:`Host.protect`): no rollback reaches evidence
+                (§4.4.1).
+            redactor: Applied to the ``Error`` messages the runner builds
+                from a host's exceptions, to the message and reason of every
+                ``Error`` it submits, to the evidence anchors of every
+                ``Output`` and ``Event`` it submits (§6.5, §6.7): an anchor
+                that held a secret is submitted with it replaced and without
+                its digest, so the run's state, outputs, trace and snapshots
+                never hold it; to a ``Decision``'s ``decision_id``,
+                ``decision``, ``approvers`` and ``approver_identities``, an
+                ``Event``'s ``principal`` and ``identity``, a
+                ``RolledBack``'s ``not_covered`` and a cancel's reason. A
+                checkpoint the host names by an id that holds a secret is
+                refused (F501, or R402 for a ``checkpoint`` step's output):
+                the run's records name it, and a redacted id would name
+                none the host could restore. The default patterns when
+                None.
+            memory: The memory store whose ``run`` scope instance the
+                runner ends when a run ends (§4.5), whether or not a host
+                is at hand, as when :meth:`cancel` is called without one.
+                The ``run`` scope also ends in the memory of the host the
+                run ends with. Pass the store your hosts persist to.
         """
         self._engine = engine
+        self._profiles = AppliedProfiles(
+            profiles, validator=engine.core_validator() if profiles else None
+        )
         self._max_actions = max_actions
         self._poll_ms = poll_interval_ms
         self._max_polls = max_polls
+        self._archive = archive
+        # The run_ids used (§5.19.2: a run_id is unique).
+        self._run_ids: MutableSet[str] = set() if run_ids is None else run_ids
+        self._event_seen = event_seen
+        # One gate per event trigger, (workflow, trigger index): it starts
+        # at most one run per event_id (§5.10.2).
+        self._event_gates: dict[tuple[str, int], EventGate] = {}
+        self._evidence_store = evidence_store
+        self._redactor: Redactor = redactor or DEFAULT_REDACTOR
+        self._memory = memory
 
     def catalog(self) -> dict[str, Any]:
         """The catalog the engine holds, as the executor sees it."""
@@ -237,56 +696,284 @@ class WorkflowRunner:
         workflow: str,
         inputs: Mapping[str, Any] | None = None,
         *,
-        attendance: str = "attended",
+        attendance: str | None = None,
         run_id: str | None = None,
         now_ms: int | None = None,
         actor_identity: Mapping[str, Any] | None = None,
+        records: str = "approvals",
+        trigger: int | None = None,
+        event: Mapping[str, Any] | None = None,
+        grounding: Policies = None,
+        destinations: Sequence[Sequence[str]] | None = None,
     ) -> _core.Run:
         """Start a run without driving it (drive it with :meth:`drive`, or
-        step it yourself). ``actor_identity`` (an ``agent_identity``, STANDARD
-        v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who runs the
-        workflow; every action record carries it.
+        step it yourself; save it before you act on its first action,
+        STANDARD v1.2 §5.19.4). ``actor_identity`` (an ``agent_identity``,
+        STANDARD v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who
+        runs the workflow; every action record carries it.
+
+        ``run_id`` must be fresh: it keys the run's records, its run record
+        and the host's delivery and idempotency keys (§5.19.2), so the
+        runner refuses one in its ``run_ids`` (the default is a random
+        one). ``records`` is the record mode (§6.4): ``approvals`` (the
+        records of approval steps, as in 1.1) or ``actions`` (a record of
+        every step that runs).
+
+        ``trigger`` starts the run from the workflow's trigger of that index
+        (§5.10.2): its attendance applies (an ``attendance`` that differs is
+        refused); an ``event`` trigger takes the ``event`` (a canonical
+        event), which must match it and must not have started a run of it
+        before (its ``event_id``), and is given as the input its
+        ``delivers_to`` names. The runner applies no sender policy: apply
+        yours before you start the run. Without ``trigger`` the run is
+        attended unless ``attendance`` says otherwise.
+
+        ``grounding`` is one :class:`GroundingPolicy` or a list of them
+        (STANDARD v1.2 §5.20): the core checks each host ``Output`` of a
+        step whose capability one requires, in the run and its nested runs,
+        and fails the step with F505 when it is neither grounded nor marked
+        inferred. Each policy was checked against the ontology when it was
+        made, and the core checks it again.
+
+        ``destinations`` is the host's destination policies (§4.4.2), each a
+        list of patterns: with the applied profiles' ``allowed_destinations``
+        they are in force for every ``send`` step of the run and its nested
+        runs, which fails F504 (``destination_not_allowed``) before approval
+        when one does not allow its destination. A pattern that is not one
+        refuses the start; a policy given as a string, not a list of
+        patterns, raises TypeError (``[["https://hooks.example.com/*"]]``
+        is one policy of one pattern).
+
+        The executor is given no catalog header (``header=None``, STANDARD
+        v1.2 §11.5) unless the catalog carries a manifest (§5.1.1; then its
+        file's header), and loses nothing by it: the engine writes the
+        header of each file it loads into that file's workflows as their
+        ``spec_version`` (:meth:`WorkflowEngine.load_catalog`), which takes
+        precedence over a header. One engine may hold workflows from files
+        with different headers, which one ``header`` could not state.
+
+        The run is given the engine's libraries (other catalogs of the
+        catalog set, :meth:`WorkflowEngine.load_library`) and agent manifests
+        (:meth:`WorkflowEngine.load_agents`): a workflow that declares
+        ``agents`` delegates only where the host gave their manifests
+        (§5.15.2), and a snapshot restores only against the same catalogs
+        and manifests.
 
         Raises:
-            RunStartError: the catalog does not validate, or ``inputs`` or
+            RunStartError: the catalog does not validate, ``inputs`` or
                 ``actor_identity`` do not fit the workflow or are not JSON
-                data.
+                data, ``run_id`` was used before, or the trigger or the
+                event does not start a run.
         """
         now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
         _check_ms(now)
+        policies = _destination_policies(destinations)
+        if records not in RECORD_MODES:
+            raise RunStartError(
+                f"records must be one of {RECORD_MODES}, not {records!r}", []
+            )
+        values = dict(inputs or {})
+        gate: EventGate | None = None
+        if trigger is not None:
+            attendance, gate = self._from_trigger(
+                workflow, trigger, attendance, event, values
+            )
+        elif event is not None:
+            raise RunStartError(
+                "an event starts a run only through an event trigger", []
+            )
+        rid = run_id or uuid.uuid4().hex
+        if rid in self._run_ids:
+            raise RunStartError(
+                f"run_id {rid!r} was already used; a run_id must be "
+                "unique among the runs whose records or idempotency keys the host "
+                "keeps (STANDARD §5.19.2)",
+                [],
+            )
         try:
-            return _core.Run.start(
+            run = _core.Run.start(
                 self._engine.core_validator(),
                 self.catalog(),
                 workflow,
-                dict(inputs or {}),
+                values,
+                header=self._engine.catalog_header(),
+                attendance=attendance or "attended",
+                run_id=rid,
+                now_ms=now,
+                actor_identity=None if actor_identity is None else dict(actor_identity),
+                profiles=self._profiles.documents or None,
+                records=records,
+                grounding=[p.to_dict() for p in as_policies(grounding)] or None,
+                destinations=policies,
+                catalogs=self._engine.libraries() or None,
+                agents=self._engine.agent_manifests() or None,
+            )
+        except (TypeError, ValueError) as e:
+            raise _start_error(e) from None
+        self._run_ids.add(rid)
+        if gate is not None and event is not None:
+            gate.commit(event)
+        return run
+
+    def _from_trigger(
+        self,
+        workflow: str,
+        index: int,
+        attendance: str | None,
+        event: Mapping[str, Any] | None,
+        inputs: dict[str, Any],
+    ) -> tuple[str, EventGate | None]:
+        """The attendance of a run trigger ``index`` starts, and the event
+        gate that admits ``event`` (put into ``inputs``), for an event
+        trigger (STANDARD v1.2 §5.10.2)."""
+        triggers = self.catalog().get(workflow, {}).get("triggers")
+        if not isinstance(triggers, list) or not 0 <= index < len(triggers):
+            raise RunStartError(f"workflow {workflow!r} has no trigger {index}", [])
+        t = triggers[index]
+        if t.get("kind") == "invoke":
+            raise RunStartError("an invoke trigger starts nested runs only", [])
+        effective = trigger_attendance(t)
+        if attendance is not None and attendance != effective:
+            raise RunStartError(
+                f"the trigger's attendance is {effective}, not {attendance}: a host "
+                "applies the trigger's attendance (STANDARD §5.10.2)",
+                [],
+            )
+        if t.get("kind") != "event":
+            if event is not None:
+                raise RunStartError("only an event trigger takes an event", [])
+            return effective, None
+        if event is None:
+            raise RunStartError(
+                "an event trigger starts a run for an event: pass it", []
+            )
+        gate = self._event_gates.get((workflow, index))
+        if gate is None:
+            seen = (
+                None if self._event_seen is None else self._event_seen(workflow, index)
+            )
+            gate = self._event_gates[(workflow, index)] = EventGate(
+                t["event"], seen=seen
+            )
+        decision = gate.check(event)
+        if decision == "no_match":
+            raise RunStartError("the event does not match the trigger", [])
+        if decision == "duplicate":
+            raise RunStartError(
+                f"event {event['event_id']!r} already started a run of this trigger "
+                "(STANDARD §5.10.2)",
+                [],
+            )
+        target = t["event"]["delivers_to"]
+        if target in inputs:
+            raise RunStartError(
+                f"input {target!r} is the trigger's event (delivers_to); do not give it",
+                [],
+            )
+        inputs[target] = dict(event)
+        return effective, gate
+
+    def restore(
+        self,
+        snapshot: Mapping[str, Any],
+        key: bytes | None = None,
+        *,
+        actor_identity: Mapping[str, Any] | None = None,
+    ) -> _core.Run:
+        """Continue a run from ``run.snapshot(key)``, against the same
+        catalog.
+
+        A run keeps its actor while it continues (STANDARD v1.2 §5.17):
+        name the actor you continue it for with ``actor_identity``, and a
+        principal other than the run's, or any actor for a run started
+        without one, is refused. When another agent takes over the
+        conversation the run belongs to (a handoff), do not continue the run
+        under it: cancel the run if it has not ended and start a new one
+        under the new agent's identity; a run that ended ``deferred`` may
+        instead be resumed under it (:meth:`resume`).
+
+        Raises:
+            RunStartError: the snapshot is malformed, has an unsupported
+                version, fails its digest or HMAC check, or was taken
+                against another catalog, the catalog does not validate, or
+                ``actor_identity`` is not the run's actor.
+            TypeError: ``key`` is not bytes.
+        """
+        _check_key(key)
+        try:
+            return _core.Run.restore(
+                self._engine.core_validator(),
+                self.catalog(),
+                dict(snapshot),
+                key,
+                actor_identity=None if actor_identity is None else dict(actor_identity),
+                catalogs=self._engine.libraries() or None,
+                agents=self._engine.agent_manifests() or None,
+            )
+        except (TypeError, ValueError) as e:
+            raise _start_error(e) from None
+
+    def resume(
+        self,
+        snapshot: Mapping[str, Any],
+        key: bytes | None = None,
+        *,
+        attendance: str = "attended",
+        now_ms: int | None = None,
+        actor_identity: Mapping[str, Any] | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
+    ) -> _core.Run:
+        """Resume a run that ended ``deferred`` from its saved state
+        (STANDARD v1.2 §5.14.1), and return it to drive with :meth:`drive`.
+        With ``save``, the resumed state (``run.snapshot(key)``) is saved
+        before this returns, so no action of the resumption is performed
+        unsaved (§5.19.4); else save it yourself before you drive it.
+
+        The run continues as the same run: its deferred steps run again,
+        each asked afresh (of a person when ``attendance`` is attended, even
+        where the approver is a standing mandate), with the steps that ran
+        ahead of them and that they read; a nested run that ended deferred
+        continues; checkpoints taken before are asked for again; and each
+        queued action's ``planned`` record is updated in place, under the
+        same ``action_id``, with every decision of its step until the action
+        is carried out. A recovery loop runs again only the steps from its
+        target to the step that looped, so nothing that ran ahead is
+        repeated. ``actor_identity`` names a new actor, which the trace, the
+        later records and the queued records the resumption decides or
+        supersedes show.
+
+        Resume one saved state once: each resumption could carry out the
+        same queued action. A state saved by an executor before this
+        release cannot be resumed (it did not keep the nested runs of
+        deferred ``invoke`` steps or which steps ran ahead): cancel that run
+        and start a new one.
+
+        Raises:
+            RunStartError: the snapshot cannot be restored, the run did not
+                end ``deferred`` (a run that failed, escalated, needs a
+                replan or was cancelled cannot be resumed, and its queued
+                actions are abandoned), ``actor_identity`` is not an
+                ``agent_identity``, or the state does not keep what resuming
+                needs.
+            TypeError: ``key`` is not bytes, or ``now_ms`` is not an int.
+        """
+        _check_key(key)
+        now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
+        _check_ms(now)
+        # The resumer may be another party than the one that ran the run:
+        # the actor is checked when it is named here, not on restore.
+        run = self.restore(snapshot, key)
+        try:
+            run.resume(
                 attendance=attendance,
-                run_id=run_id or uuid.uuid4().hex,
                 now_ms=now,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
-
-    def restore(
-        self, snapshot: Mapping[str, Any], key: bytes | None = None
-    ) -> _core.Run:
-        """Resume a run from ``run.snapshot(key)``, against the same catalog.
-
-        Raises:
-            RunStartError: the snapshot is malformed, has an unsupported
-                version, fails its digest or HMAC check, or was taken
-                against another catalog, or the catalog does not validate.
-            TypeError: ``key`` is not bytes.
-        """
-        if key is not None and not isinstance(key, (bytes, bytearray)):
-            raise TypeError(f"key must be bytes, not {type(key).__name__}")
-        try:
-            return _core.Run.restore(
-                self._engine.core_validator(), self.catalog(), dict(snapshot), key
-            )
-        except (TypeError, ValueError) as e:
-            raise _start_error(e) from None
+        if save is not None:
+            save(run.snapshot(key))
+        return run
 
     def run(
         self,
@@ -294,11 +981,24 @@ class WorkflowRunner:
         inputs: Mapping[str, Any] | None,
         host: Host,
         *,
-        attendance: str = "attended",
+        attendance: str | None = None,
         run_id: str | None = None,
         actor_identity: Mapping[str, Any] | None = None,
+        records: str = "approvals",
+        trigger: int | None = None,
+        event: Mapping[str, Any] | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+        grounding: Policies = None,
+        destinations: Sequence[Sequence[str]] | None = None,
     ) -> RunResult:
-        """Start ``workflow`` and drive it to its end with ``host``."""
+        """Start ``workflow`` (as :meth:`start`) and drive it to its end with
+        ``host``. With ``save``, the run's state is saved after it starts and
+        after every change (:meth:`drive`). Without ``archive``, keep the
+        result's ``run_record`` and ``action_records`` yourself (STANDARD
+        v1.2 §5.19.8)."""
+        if save is not None:
+            _check_durable(host)
         run = self.start(
             workflow,
             inputs,
@@ -306,11 +1006,104 @@ class WorkflowRunner:
             run_id=run_id,
             now_ms=host.now_ms(),
             actor_identity=actor_identity,
+            records=records,
+            trigger=trigger,
+            event=event,
+            grounding=grounding,
+            destinations=destinations,
         )
-        return self.drive(run, host)
+        if save is not None:
+            save(run.snapshot(key))
+        return self.drive(run, host, save=save, key=key)
 
-    def drive(self, run: _core.Run, host: Host) -> RunResult:
-        """Drive a started or restored run to its end.
+    def advance(
+        self,
+        run: _core.Run,
+        host: Host,
+        *,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+    ) -> Turn:
+        """One turn of an event-driven host (STANDARD v1.2 §5.19.3): give the
+        run the time, then perform every action the host can answer now,
+        until the run ends or waits. Returns the result when it ended, else
+        the action it waits on and its wake-up time: set a timer for it, and
+        call ``advance`` again when it fires or a response may have arrived
+        (an approval decision, an event).
+
+        A tick that times out the action the host was performing withdraws
+        it (:meth:`Host.withdraw`). With ``save``, the state
+        (``run.snapshot(key)``) is saved after every change, before the host
+        acts on the next action (§5.19.4).
+
+        Raises:
+            RunIncomplete: after ``max_actions`` answered actions in this
+                turn.
+            HostResponseError: as :meth:`drive`.
+            RunArchiveError: the archive raised.
+        """
+        turn, _ = self._turn(run, host, save, key, self._max_actions)
+        if turn.result is None and turn.pending is None:
+            raise RunIncomplete(
+                f"the run did not finish within {self._max_actions} actions", run
+            )
+        return turn
+
+    def _turn(
+        self,
+        run: _core.Run,
+        host: Host,
+        save: Callable[[dict[str, Any]], None] | None,
+        key: bytes | None,
+        budget: int,
+    ) -> tuple[Turn, int]:
+        """A turn and the actions it answered; an empty turn when it ran
+        out of ``budget``."""
+        _check_key(key)
+        if save is not None:
+            _check_durable(host)
+        self._protect_records(host)
+        self._share_redactor(host)
+        now = host.now_ms()
+        _check_ms(now)
+        before = run.next()
+        if run.tick(now):
+            if before["kind"] not in TERMINAL | {"Sleep"}:
+                host.withdraw(before, "timed out")
+            if save is not None:
+                save(run.snapshot(key))
+        answered = 0
+        while answered < budget:
+            action = run.next()
+            if action["kind"] in TERMINAL:
+                return Turn(self._ended(run, action, host), None, None), answered
+            if action["kind"] == "Sleep":
+                return Turn(None, run.wake_at(), action), answered
+            response = self._dispatch(host, action)
+            if response is None:
+                return Turn(None, run.wake_at(), action), answered
+            seq = run.trace_seq
+            response = self._redacted(action, response)
+            self._submit(run, action, response, host.now_ms())
+            self._record_evidence(run, action, response, seq)
+            answered += 1
+            if save is not None:
+                save(run.snapshot(key))
+        return Turn(None, None, None), answered
+
+    def drive(
+        self,
+        run: _core.Run,
+        host: Host,
+        *,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+    ) -> RunResult:
+        """Drive a started or restored run to its end: turns of
+        :meth:`advance`, sleeping between them until the run's wake-up time
+        or the next poll. With ``save``, the state is saved after every
+        change, before the host acts on the next action (STANDARD v1.2
+        §5.19.4).
 
         Raises:
             RunIncomplete: after ``max_actions`` answered actions, or
@@ -319,56 +1112,355 @@ class WorkflowRunner:
             HostResponseError: (a :class:`RunIncomplete`) the host answered
                 an action other than ``InvokeCapability`` with a response
                 the run cannot accept.
+            RunArchiveError: (a :class:`RunIncomplete`) the archive raised.
         """
         answered = 0
         # Unanswered polls of the current action; a new action resets it.
         polls = 0
         polled: Any = None
-        while answered < self._max_actions:
-            action = run.next()
-            kind = action["kind"]
-            if action.get("id") != polled:
-                polled, polls = action.get("id"), 0
-            if kind in TERMINAL:
-                return self._result(run, action)
-            if kind == "Sleep":
+        while True:
+            turn, n = self._turn(run, host, save, key, self._max_actions - answered)
+            answered += n
+            if turn.result is not None:
+                return turn.result
+            action = turn.pending
+            if action is None or answered >= self._max_actions:
+                raise RunIncomplete(
+                    f"the run did not finish within {self._max_actions} actions", run
+                )
+            if action["id"] != polled:
+                polled, polls = action["id"], 0
+            if action["kind"] == "Sleep":
+                # A Sleep counts as an answered action.
                 host.sleep_until(action["until"])
-                run.tick(host.now_ms())
                 answered += 1
                 continue
-            response = self._dispatch(host, action)
-            if response is None:
-                if polls >= self._max_polls:
-                    raise RunIncomplete(
-                        f"no answer to action {action['id']} ({kind}) after "
-                        f"{self._max_polls} polls",
-                        run,
-                    )
-                polls += 1
-                # Nothing yet: wait a poll interval (or until the action's
-                # deadline, if sooner), then let the run time it out.
-                now = host.now_ms()
-                until = now + self._poll_ms
-                deadline = action.get("deadline")
-                if deadline is None:
-                    deadline = action.get("expires_at")
-                if deadline is not None:
-                    until = min(until, deadline + 1)
-                host.sleep_until(until)
-                run.tick(host.now_ms())
-                continue
-            self._submit(run, action, response, host.now_ms())
-            answered += 1
-        raise RunIncomplete(
-            f"the run did not finish within {self._max_actions} actions", run
-        )
+            if polls >= self._max_polls:
+                raise RunIncomplete(
+                    f"no answer to action {action['id']} ({action['kind']}) after "
+                    f"{self._max_polls} polls",
+                    run,
+                )
+            polls += 1
+            # Nothing yet: wait a poll interval, or until the run's wake-up
+            # time if sooner, when the next turn's tick times the action out.
+            until = host.now_ms() + self._poll_ms
+            if turn.wake_at is not None:
+                until = min(until, turn.wake_at)
+            host.sleep_until(until)
 
-    @staticmethod
-    def _submit(run: _core.Run, action: Action, response: Any, now: int) -> None:
+    def cancel(
+        self,
+        run: _core.Run,
+        reason: str,
+        *,
+        now_ms: int | None = None,
+        host: Host | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+    ) -> RunResult:
+        """Cancel ``run`` (STANDARD v1.2 §5.19.5): it ends at once with
+        ``Failed`` R408, ``reason`` as its message (redacted with the
+        runner's ``redactor``, §6.7); no retry, failure mode,
+        recovery or rollback runs, and the result's ``checkpoint_id`` names
+        the latest checkpoint, which you may restore yourself. A run that
+        ended ``deferred`` can be cancelled too. With ``save``, the
+        cancelled state (``run.snapshot(key)``) is saved first (§5.19.4);
+        else save it yourself. With ``host``, the action it was performing
+        is then withdrawn (:meth:`Host.withdraw`). The run's ``run`` memory
+        scope ends (§4.5) in the runner's ``memory`` and in ``host``'s: a
+        deferred run cancelled with neither keeps its entries. The result
+        is archived as any end.
+
+        Raises:
+            ValueError: the run ended otherwise than ``deferred``.
+            RunArchiveError: the archive raised.
+        """
+        now = (
+            (host.now_ms() if host else time.time_ns() // 1_000_000)
+            if now_ms is None
+            else now_ms
+        )
+        _check_ms(now)
+        _check_key(key)
+        before = run.next()
+        # The core makes the reason the R408 message and writes it into the
+        # trace, the cancelled records and the run record: host text, so it
+        # is redacted as an Error's message is (§6.7).
+        run.cancel(
+            self._redactor.redact_text(reason)[0]
+            if isinstance(reason, str)
+            else reason,
+            now,
+        )
+        if save is not None:
+            save(run.snapshot(key))
+        if host is not None and before["kind"] not in TERMINAL | {"Sleep"}:
+            host.withdraw(before, "cancelled")
+        return self._ended(run, run.next(), host)
+
+    def _protect_records(self, host: Host) -> None:
+        """Keep the runner's evidence store, when it is a file, out of the
+        host's checkpoints (§4.4.1): evidence is the record of what
+        happened, which no rollback reaches. A restore would otherwise
+        rewind it and swap the file under the store's open descriptor."""
+        path = getattr(self._evidence_store, "path", None)
+        protect = getattr(host, "protect", None)
+        if isinstance(path, (str, os.PathLike)) and callable(protect):
+            protect(os.fspath(path))
+
+    def _share_redactor(self, host: Host) -> None:
+        """Give the stores that write records for the run what the runner's
+        ``redactor`` recognises (§6.7): the host's idempotency log, which
+        keeps each ``send``'s destination and output, its checkpoint
+        tracker, which keeps each checkpoint's reason and scope (a
+        ``checkpoint`` step's scope is the step's input), and its memory
+        store and the runner's, which refuse a ``persist`` of a secret. A
+        store on the shared default redactor gets one of its own (the
+        default patterns and the runner's), so the runner's values never
+        reach a redactor other runners share; any other takes them in."""
+        if self._redactor is DEFAULT_REDACTOR:
+            return
+        for store in (
+            getattr(host, "idempotency", None),
+            getattr(host, "checkpoint_tracker", None),
+            getattr(host, "memory", None),
+            self._memory,
+        ):
+            redactor = getattr(store, "redactor", None)
+            if not isinstance(redactor, Redactor) or redactor is self._redactor:
+                continue
+            if redactor is DEFAULT_REDACTOR:
+                own = Redactor()
+                own.include(self._redactor)
+                store.redactor = own  # type: ignore[union-attr]
+            else:
+                redactor.include(self._redactor)
+
+    def _ended(
+        self, run: _core.Run, action: Action, host: Host | None = None
+    ) -> RunResult:
+        """The result of an ended run, handed to the archive (§5.19.8). The
+        run's ``run`` memory scope ends with it, in the runner's memory and
+        the host's, unless it ended ``deferred``, whose entries last until
+        it is resumed and ends, or is cancelled (§4.5)."""
+        if not (action["kind"] == "Completed" and action.get("outcome") == "deferred"):
+            stores = [self._memory, getattr(host, "memory", None)]
+            for i, memory in enumerate(stores):
+                if memory is not None and all(memory is not s for s in stores[:i]):
+                    memory.end_scope("run", run.run_id)
+            if isinstance(host, Host):
+                host._forget_run(run.run_id)
+        result = self._result(run, action)
+        if self._archive is not None:
+            try:
+                self._archive(result)
+            except Exception as e:
+                raise RunArchiveError(
+                    f"the run ended, but its record could not be archived: {e}",
+                    run,
+                    result,
+                ) from e
+        return result
+
+    def _redacted(self, action: Action, response: Any) -> Any:
+        """``response`` as the run may keep it (§6.7): every string of it
+        that the core writes into the trace, the records, a diagnostic or a
+        received item redacted, and a checkpoint named by an id that holds
+        a secret refused. The core has no redactor: what it is given, it
+        keeps."""
+        response = self._refuse_secret_checkpoint(action, response)
+        response = self._redact_members(response)
+        response = self._redact_error(response)
+        response = self._redact_anchors(response)
+        return self._redact_not_covered(response)
+
+    def _redact_members(self, response: Any) -> Any:
+        """A ``Decision`` or an ``Event`` with every string of the members
+        the core keeps redacted (§6.4, §6.7): a decision's ``decision_id``,
+        ``decision``, ``approvers`` and ``approver_identities``, which reach
+        the trace's ``approval_decided``, the record's ``approval`` and an
+        F502's reason (a refused approver's principal and role), and an
+        event's ``principal`` and ``identity``, which the core writes into
+        the received item as ``sender`` and ``sender_identity`` (a canonical
+        event, §6.2). A principal is redacted alike wherever it is given, so
+        ``approvers`` still lists the principals of ``approver_identities``.
+
+        Redaction can make two values one: two approvers that differ only
+        in a secret count once, and a ``decision_id`` that differs from one
+        used before only in a secret is refused as used (F502). Both fail
+        closed; give ids and principals that hold no secret. Any other
+        response as it is."""
+        if not isinstance(response, dict):
+            return response
+        kind = response.get("kind")
+        members = _KEPT_MEMBERS.get(kind) if isinstance(kind, str) else None
+        if members is None:
+            return response
+        out = response
+        for name in members:
+            if name not in response:
+                continue
+            kept, pointers = self._redactor.redact(response[name])
+            if pointers:
+                out = {**out, name: kept}
+        return out
+
+    def _refuse_secret_checkpoint(self, action: Action, response: Any) -> Any:
+        """An ``Error`` in place of a response that names a checkpoint by an
+        id holding a secret the redactor recognises (§6.7): a
+        ``CreateCheckpoint``'s ``Checkpoint``, and a ``checkpoint`` step's
+        ``Output`` (its ``checkpoint_id``). The core writes the id into the
+        trace and the records of the steps that use the checkpoint, and
+        gives it back to the host to roll back to, so a redacted id would
+        name a checkpoint the host cannot restore: the checkpoint is
+        refused instead, and no step runs under it (F501 for an action's,
+        R402 for a step's). Any other response as it is."""
+        if not isinstance(response, dict):
+            return response
+        given: Any = None
+        if (
+            action["kind"] == "CreateCheckpoint"
+            and response.get("kind") == "Checkpoint"
+        ):
+            given = response.get("checkpoint_id")
+        elif (
+            action["kind"] == "InvokeCapability"
+            and action.get("capability") == "checkpoint"
+            and response.get("kind") == "Output"
+            and isinstance(response.get("value"), dict)
+        ):
+            given = response["value"].get("checkpoint_id")
+        if not isinstance(given, str) or not self._redactor.redact_text(given)[1]:
+            return response
+        return {
+            "kind": "Error",
+            "code": "R402",
+            "message": (
+                "the host named the checkpoint by an id that holds a secret, "
+                "which the run's trace and records would keep (STANDARD v1.2 "
+                "§6.7): the checkpoint is refused"
+            ),
+        }
+
+    def _redact_error(self, response: Any) -> Any:
+        """An ``Error`` response with its ``message`` and ``reason`` redacted
+        (§6.7); any other response as it is. A ``reason`` outside the token
+        grammar is free text or any JSON value (``HostCannotServe``'s first
+        argument, say), which the core keeps in the trace and the snapshot
+        as ``reason_ignored``: a string is redacted as text, any other value
+        as JSON."""
+        if not (isinstance(response, dict) and response.get("kind") == "Error"):
+            return response
+        out = response
+        message = response.get("message")
+        if isinstance(message, str):
+            text, changed = self._redactor.redact_text(message)
+            if changed:
+                out = {**out, "message": text}
+        if "reason" in response:
+            reason = response["reason"]
+            if isinstance(reason, str):
+                kept, changed = self._redactor.redact_text(reason)
+            else:
+                kept, pointers = self._redactor.redact(reason)
+                changed = bool(pointers)
+            if changed:
+                out = {**out, "reason": kept}
+        return out
+
+    def _redact_anchors(self, response: Any) -> Any:
+        """``response`` with the evidence anchors it carries redacted
+        (:func:`~grounded_agency.workflows._responses.redact_anchors`): an
+        ``Output``'s, with its ``evidence_seen`` rewritten to match, and an
+        ``Event``'s, which the core copies into a ``receive`` or ``wait``
+        step's output (§6.5, §6.7: each anchor's secrets replaced, its digest
+        gone). The core keeps them in the run's state and outputs, so they
+        are redacted before it sees them; an array of anchors given as a
+        tuple is redacted, and given as a list, too."""
+        return redact_anchors(self._redactor, response)
+
+    def _redact_not_covered(self, response: Any) -> Any:
+        """A ``RolledBack`` response with every string of its
+        ``not_covered`` items redacted (§6.7): the core writes them into the
+        trace and the rollback's record, and a host builds them from what it
+        did (a ``send``'s destination). Any other response as it is."""
+        if not (isinstance(response, dict) and response.get("kind") == "RolledBack"):
+            return response
+        items = response.get("not_covered")
+        if not isinstance(items, (list, tuple)):
+            return response
+        kept, pointers = self._redactor.redact(items)
+        return {**response, "not_covered": kept} if pointers else response
+
+    def _record_evidence(
+        self, run: _core.Run, action: Action, response: Any, seq: int
+    ) -> None:
+        """Record the evidence anchors of an ``Output`` the core kept
+        (§6.6): its next trace event for the step is ``step_completed``."""
+        store = self._evidence_store
+        if (
+            store is None
+            or action["kind"] != "InvokeCapability"
+            or not isinstance(response, dict)
+            or response.get("kind") != "Output"
+            or not isinstance(response.get("value"), dict)
+        ):
+            return
+        outcome = next(
+            (
+                e["kind"]
+                for e in run.trace(since=seq)
+                if e.get("kind") in _OUTCOME_KINDS
+                and e.get("frame") == action["frame"]
+                and e.get("step") == action["step"]
+            ),
+            None,
+        )
+        if outcome != "step_completed":
+            return
+        items = response["value"].get("evidence_anchors")
+        anchors: list[EvidenceAnchor] = []
+        skipped = 0
+        for item in items if isinstance(items, list) else []:
+            try:
+                anchors.append(EvidenceAnchor.from_dict(item))
+            except ValueError:
+                skipped += 1
+        if skipped:
+            logger.info(
+                "run %s, step %s of %s: %d evidence_anchors items are not evidence "
+                "anchors (STANDARD v1.2 §6.5) and were not recorded",
+                run.run_id,
+                action["step"],
+                "/".join(action["frame"]),
+                skipped,
+            )
+        if not anchors:
+            return
+        try:
+            store.append_many(
+                anchors,
+                run_id=run.run_id,
+                frame=list(action["frame"]),
+                step=action["step"],
+                capability=action["capability"],
+            )
+        except Exception as e:  # noqa: BLE001 - a store never stops the run
+            logger.warning("could not record the evidence of a step: %s", e)
+            try:
+                store.record_capture_failure(None, str(e))
+            except Exception:  # noqa: BLE001
+                logger.warning("could not count the capture failure", exc_info=True)
+
+    def _submit(self, run: _core.Run, action: Action, response: Any, now: int) -> None:
         """Submit ``response`` at ``now``. One the run refuses (it changes
         nothing then) fails the step for a capability, as a host exception
         does, and stops the runner for anything else. ``now`` is read
-        before, so a faulty clock is not mistaken for a refused response."""
+        before, so a faulty clock is not mistaken for a refused response.
+        The ``Error`` that fails the step is redacted as a host's is (§6.7):
+        the core's account of a malformed response repeats the value it
+        refused."""
         _check_ms(now)
         try:
             run.submit(action["id"], response, now)
@@ -385,11 +1477,13 @@ class WorkflowRunner:
             ) from error
         run.submit(
             action["id"],
-            {
-                "kind": "Error",
-                "code": "R402",
-                "message": f"the host's response was refused: {error}",
-            },
+            self._redact_error(
+                {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": f"the host's response was refused: {error}",
+                }
+            ),
             now,
         )
 
@@ -401,12 +1495,20 @@ class WorkflowRunner:
                 return host.invoke_capability(action)
             except NotImplementedError:
                 raise
+            except HostCannotServe as e:
+                return _cannot_serve(e)
             except Exception as e:  # the step failed, not the runner
+                # Its message is redacted before it is submitted (§6.7).
                 return {
                     "kind": "Error",
                     "code": "R402",
                     "message": f"{type(e).__name__}: {e}",
                 }
+        if kind == "AwaitEvent":
+            try:
+                return host.await_event(action)
+            except HostCannotServe as e:
+                return _cannot_serve(e)
         handlers = {
             "CreateCheckpoint": host.create_checkpoint,
             "Rollback": host.rollback,
@@ -432,6 +1534,8 @@ class WorkflowRunner:
                 cause=action.get("cause"),
                 deferred=action.get("deferred", []),
                 ended=action.get("ended"),
+                run_id=run.run_id,
+                run_record=run.run_record(),
             )
         return RunResult(
             outcome=None,
@@ -440,7 +1544,39 @@ class WorkflowRunner:
             action_records=action["action_records"],
             trace=trace,
             deferred=action.get("deferred", []),
+            run_id=run.run_id,
+            reason=action.get("reason"),
+            checkpoint_id=action.get("checkpoint_id"),
+            run_record=run.run_record(),
         )
+
+
+def _persist_key(idempotency_key: str) -> str:
+    """The key :meth:`Host.invoke_capability` gives a ``persist`` without
+    one: a name-based UUID of the pass's idempotency key, the same for every
+    attempt and delivery of the pass."""
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"acs:persist:{idempotency_key}").hex
+
+
+def _check_durable(host: Host) -> None:
+    """A host that saves runs re-delivers a pending attempt after a
+    restart (§5.19.4), so its idempotency keys must last as long (§4.4.2)."""
+    log = getattr(host, "idempotency", None)
+    if log is not None and not log.durable:
+        raise ValueError(
+            "a host that saves runs keeps its idempotency keys as durably as "
+            "the runs (STANDARD §4.4.2): give IdempotencyLog a path"
+        )
+
+
+def _cannot_serve(e: HostCannotServe) -> Response:
+    """The ``Error`` that says why a host cannot serve a step (§5.19.7)."""
+    return {
+        "kind": "Error",
+        "code": "R402",
+        "reason": e.reason,
+        "message": e.message or f"the host cannot serve the step ({e.reason})",
+    }
 
 
 def _start_error(e: TypeError | ValueError) -> RunStartError:
@@ -450,6 +1586,37 @@ def _start_error(e: TypeError | ValueError) -> RunStartError:
     if isinstance(e, ValueError) and len(e.args) > 1:
         return RunStartError(str(e.args[0]), list(e.args[1] or []))
     return RunStartError(str(e.args[0]) if e.args else str(e), [])
+
+
+def _check_key(key: Any) -> None:
+    """A snapshot key must be bytes."""
+    if key is not None and not isinstance(key, (bytes, bytearray)):
+        raise TypeError(f"key must be bytes, not {type(key).__name__}")
+
+
+def _destination_policies(
+    destinations: Sequence[Sequence[str]] | None,
+) -> list[list[str]] | None:
+    """The host's destination policies as the core takes them (§4.4.2). A
+    string is a sequence of strings too, so a flat list of patterns would
+    silently become one-character patterns: it is refused as the host's
+    bug, as is a pattern that is not a string."""
+    if destinations is None:
+        return None
+    if isinstance(destinations, str):
+        raise TypeError(
+            "destinations must be a list of policies, each a list of patterns, "
+            "not a string"
+        )
+    policies = []
+    for policy in destinations:
+        if isinstance(policy, str) or not all(isinstance(p, str) for p in policy):
+            raise TypeError(
+                "each policy is a list of patterns (destinations=[[pattern, ...], "
+                f"...]), not {policy!r}"
+            )
+        policies.append(list(policy))
+    return policies or None
 
 
 def _check_ms(now: Any) -> None:

@@ -114,8 +114,8 @@ validation:
   postconditions: array[string]  # Must be true after execution
   invariants: array[string]  # Must remain true throughout
 alternatives_considered: array[string]  # Other approaches evaluated
-confidence: 0..1  # Confidence in plan correctness
-evidence_anchors: ["file:line", "url"]
+confidence: number  # probability that the plan achieves its goal (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "https://...", kind: url}]
 assumptions: []  # Explicit assumptions made
 ```
 
@@ -132,8 +132,8 @@ assumptions: []  # Explicit assumptions made
 | `risks` | array | Identified risks, each with severity and mitigation |
 | `validation` | object | Pre/post conditions and invariants |
 | `alternatives_considered` | array | Other approaches evaluated |
-| `confidence` | number | 0.0-1.0 based on analysis completeness |
-| `evidence_anchors` | array | References supporting the plan |
+| `confidence` | number | Probability, 0.0-1.0, that the plan achieves its goal (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References supporting the plan |
 | `assumptions` | array | Explicit assumptions requiring validation |
 
 ## Examples
@@ -209,8 +209,8 @@ alternatives_considered:
   - "Add null check at caller sites - rejected as defensive coding in service is preferred"
 confidence: 0.9
 evidence_anchors:
-  - "src/services/UserService.ts:42"
-  - "tool:grep:null-access-pattern"
+  - {ref: "file:src/services/UserService.ts:42", kind: file}
+  - {ref: "tool:grep:null-access-pattern", kind: tool}
 assumptions:
   - "Error only occurs when user object is null, not when email property is missing"
   - "Test suite covers the getEmail() method adequately"
@@ -301,7 +301,7 @@ alternatives_considered:
   - "Create new table and migrate - rejected due to downtime constraints"
 confidence: 0.75
 evidence_anchors:
-  - "tool:psql:schema-inspection"
+  - {ref: "tool:psql:schema-inspection", kind: tool}
 assumptions:
   - "Database has sufficient resources for ALTER TABLE on 1M rows"
   - "No concurrent writes during migration window"

@@ -1,0 +1,35 @@
+{
+  "description": "A host action tied to a control-only tool is allowed.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    }
+  ],
+  "offered": {
+    "done": "done"
+  },
+  "host_actions": [
+    {
+      "action": "stop",
+      "tool": "done"
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "done": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

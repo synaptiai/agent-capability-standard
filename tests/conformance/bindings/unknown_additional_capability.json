@@ -1,0 +1,24 @@
+{
+  "description": "An additional capability the ontology does not define is V101, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "x",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "no_such"
+      ]
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V101",
+        "tool": "x"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

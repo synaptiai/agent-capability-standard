@@ -18,6 +18,7 @@ from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 from .audit import CoordinationAuditLog
+from .manifest import check_task
 from .registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,10 @@ class DelegationProtocol:
     ) -> EvidenceAnchor:
         """Create and store an evidence anchor for a delegation attempt."""
         metadata: dict[str, Any] = {
-            "description": description[:100],
+            # Whole: the store redacts it, and the anchor's size limit
+            # replaces it whole when too large; a cut could keep part of a
+            # secret no redactor then recognises (STANDARD v1.2 §6.7).
+            "description": description,
             "target_agent": target_agent_id,
             "accepted": accepted,
         }
@@ -143,7 +147,7 @@ class DelegationProtocol:
             metadata["rejection_reason"] = rejection_reason
         anchor = EvidenceAnchor(
             ref=f"delegation:{task_id}",
-            kind="coordination",
+            kind="record",
             timestamp=datetime.now(UTC).isoformat(),
             metadata=metadata,
         )
@@ -239,6 +243,23 @@ class DelegationProtocol:
                 agent_id=target_agent_id,
                 accepted=False,
                 rejection_reason=(f"Agent lacks capabilities: {sorted(missing)}"),
+                status="rejected",
+            )
+        elif agent.task_inputs is not None and any(
+            problems := check_task({"task": dict(agent.task_inputs)}, input_data or {})
+        ):
+            # The agent's manifest declares its task (STANDARD v1.2 §5.15.2):
+            # an undeclared or missing input is refused, as the executor
+            # refuses it (R402) and Standard Agents does with
+            # subagent_arguments_required.
+            undeclared, missing_inputs = problems
+            result = DelegationResult(
+                task_id=task_id,
+                agent_id=target_agent_id,
+                accepted=False,
+                rejection_reason=(
+                    f"task inputs: undeclared {undeclared}, missing {missing_inputs}"
+                ),
                 status="rejected",
             )
         else:

@@ -28,12 +28,13 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `task` | Yes | object | The overall task to delegate |
-| `agent` | Yes | string | Target agent |
+| `agent` | Yes | string | Target agent, by the name its agent manifest and the workflow's `agents` use: a target name, not a principal (Standard v1.2 §5.15.1, §5.15.2) |
 | `constraints` | No | object | Global constraints (timeout, resource limits) |
 | `fresh_context` | No | boolean | Start the delegate without this agent's context, e.g. for an independent review (Standard v1.1 `delegation@1`) |
-| `model_family` | No | string | Model family the delegate should run on (`delegation@1`) |
+| `model_family` | No | string | Model family the delegate should run on, lowercase, compared exactly (`delegation@1`, Standard v1.2 §5.15) |
 | `role` | No | string | Role the delegate takes, e.g. `reviewer` (`delegation@1`) |
-| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only` |
+| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only`, and a host that cannot enforce it refuses the delegation |
+| `continues` | No | string | The `task_id` of an earlier delegation whose delegate the host continues; never with `fresh_context: true`, and null delegates anew (Standard v1.2 §5.15.3) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
@@ -41,6 +42,16 @@ The host reports the settings it actually used as `effective` in the
 output; a review quorum (`quorum@1`, on `constrain`) relies on them. With
 `wait` (`wait@1`) the step delegates, then waits for that delegate's
 result, which the output carries as `result`; a `retry` delegates again.
+
+A delegate is another party (STANDARD v1.2 §5.15.4): the delegator's
+checkpoints never authorise what it changes, and a rollback to the
+delegator's checkpoint restores only what that checkpoint captured. A change
+the delegate makes elsewhere is not undone by it (a host lists it as
+`not_covered`, reason `delegated`). Before each change, the delegate needs a
+checkpoint valid in the scope where the change is checked; its host attests
+that as `effective.checkpointed`. To keep a delegation from leaving changes
+no rollback reaches, bind `read_only: true`, or undo its changes in a step of
+their own.
 
 ## Procedure
 
@@ -99,6 +110,7 @@ effective:  # Delegation settings actually used, as attested by the host
   model_family: string
   role: string
   read_only: boolean
+  checkpointed: boolean  # Before each change, the delegate had a checkpoint valid where that change is checked (§5.15.4)
 result: object | null  # The delegate's result (with its sender) when the step waits for it (wait@1)
 delegation:
   task: string  # Original task description
@@ -131,8 +143,8 @@ failure_handling:
 handoff_context:
   - key: string  # Context key
     value: object  # Shared context data
-confidence: 0..1
-evidence_anchors: ["task:analysis", "agent:capability"]
+confidence: number  # probability that the delegation was accepted as reported (§4.1.1)
+evidence_anchors: [{ref: "task:analysis", kind: record}, {ref: "agent:capability", kind: record}]
 assumptions: []
 ```
 
@@ -141,9 +153,9 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `accepted` | boolean | Whether the target agent accepted the task |
-| `task_id` | string | Identifier of the delegated task |
+| `task_id` | string | Identifier of this delegation call, its own also when it continues another (Standard v1.2 §5.15.3) |
 | `agent` | string | The agent the task was assigned to |
-| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `role`, `read_only`); a review quorum relies on them |
+| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `model_id`, `role`, `read_only`), and `checkpointed`, which attests the delegate's checkpoint before each change (§5.15.4); a review quorum relies on them. `model_family` is derived from `model_id` by the rule of Standard v1.2 §5.15 |
 | `result` | object | The delegate's result, with its `sender` (and `sender_identity` under identity@1), when the step waits for it; otherwise null |
 | `delegation` | object | Overall delegation summary |
 | `subtasks` | array | Individual subtask definitions with contracts |
@@ -151,8 +163,8 @@ assumptions: []
 | `merge_plan` | object | Strategy for combining results |
 | `failure_handling` | object | Recovery policies |
 | `handoff_context` | array | Shared context for all subtasks |
-| `confidence` | number | 0.0-1.0 based on delegation clarity |
-| `evidence_anchors` | array | References supporting delegation design |
+| `confidence` | number | Probability, 0.0-1.0, that the delegation was accepted as reported (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References supporting delegation design |
 | `assumptions` | array | Explicit assumptions about agents/capabilities |
 
 ## Examples
@@ -272,8 +284,8 @@ handoff_context:
     value: "main"
 confidence: 0.9
 evidence_anchors:
-  - "task:pr-review-decomposition"
-  - "agent:security-agent:has-security-analysis"
+  - {ref: "task:pr-review-decomposition", kind: record}
+  - {ref: "agent:security-agent:has-security-analysis", kind: record}
 assumptions:
   - "All agents have access to repository"
   - "PR #123 exists and is accessible"
@@ -379,7 +391,7 @@ handoff_context:
     value: "batch-2024-01-15"
 confidence: 0.85
 evidence_anchors:
-  - "task:pipeline-stages"
+  - {ref: "task:pipeline-stages", kind: record}
 assumptions:
   - "Enrichment service is available"
   - "Database has capacity for new records"
@@ -408,6 +420,12 @@ assumptions:
 - Define failure handling before delegation
 - Validate interface compatibility
 - Do not delegate tasks requiring approval without noting it
+- In a workflow that declares `agents` (Standard v1.2 §5.15.2), the step
+  takes its target's flags from the agent's manifest: a delegation to an
+  agent that may mutate needs a checkpoint before it and an approval, and
+  without the manifest it is not delegated
+- In a 1.2 workflow, a `read_only` delegation the host does not attest
+  fails the step, not retried
 
 ## Composition Patterns
 

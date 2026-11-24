@@ -1,0 +1,53 @@
+{
+  "description": "In a 1.1 workflow, only the required fields are checked, as in 1.1: an Output whose evidence_anchors is a string and whose confidence is 2 completes the step (\u00a75.19.1, \u00a711.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "q"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "evidence_anchors": "file:a",
+          "confidence": 2
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "s": {
+        "results": [],
+        "evidence_anchors": "file:a",
+        "confidence": 2
+      }
+    }
+  },
+  "trace_kinds": []
+}

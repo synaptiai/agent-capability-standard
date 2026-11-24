@@ -1,0 +1,111 @@
+{
+  "description": "A delegation to a read-only agent needs no checkpoint by its maxima, but a profile's checkpoint policy for delegate raises it: the step needs the checkpoint before it, and its action record names it (\u00a75.15.2, \u00a75.21.3, \u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "review",
+          "input_bindings": {
+            "agent": "reviewer",
+            "task": {
+              "draft": "d"
+            }
+          }
+        }
+      ],
+      "agents": [
+        "reviewer"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "c1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "inputs": {
+          "agent": "reviewer"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {},
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "capability": "checkpoint",
+        "checkpoint_id": "c1"
+      },
+      {
+        "capability": "delegate",
+        "status": "executed",
+        "checkpoint_id": "c1"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "agents": [
+    {
+      "agent": "reviewer",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "critique"
+      ]
+    }
+  ],
+  "records": "actions",
+  "profiles": [
+    {
+      "domain": "checkpoint-delegate",
+      "version": "1.0.0",
+      "checkpoint_policy": {
+        "delegate": "always"
+      }
+    }
+  ]
+}

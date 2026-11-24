@@ -55,7 +55,7 @@ Beyond existing telemetry, the following data points should be collected at the 
 | Error and exception rate | Capability execution failures, timeout events | Continuous | SDK error handling |
 | Human escalation rate | % of actions requiring human intervention vs. automated | Daily | Audit log (inquire events) |
 
-The trust weight drift and profile override rows presuppose a host that applies a domain profile. No shipped component loads or selects a profile, applies its risk thresholds or records an override; `grounded_agency/trust.py` applies a profile's `trust_weights` only when the host passes them. A profile is informative data ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)).
+The trust weight drift and profile override rows presuppose a host that applies a domain profile (Standard 1.2.0 §5.21): the reference executor, the validator, the Python adapter and the Standard Agents binding apply a profile they are given, and `grounded_agency/trust.py` applies its `trust_weights` (`merge_trust_weights`, `resolve`) when the host passes them. No shipped component records a profile override ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)).
 
 ## 4. Monitoring Cadence
 
@@ -128,7 +128,7 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 
 | Profile | L1 → L2 Threshold | L2 → L3 Threshold | L3 → L4 Threshold |
 |---------|-------------------|-------------------|-------------------|
-| Healthcare | Any confidence < 0.90 | Checkpoint failure; missing clinician_verification | Patient safety risk; regulatory non-compliance |
+| Healthcare | Any confidence < 0.90 | Checkpoint failure; a clinical output with no `human_note` anchor (a clinician's verification) | Patient safety risk; regulatory non-compliance |
 | Manufacturing | Confidence drift > 5% | Actuator command without checkpoint | Equipment safety risk; process control failure |
 | Vision/Audio/Multimodal | Confidence drift > 10% | Evidence anchor missing for classification output | Biometric misidentification; rights violation |
 | Data Analysis | Error rate > 2% | Data lineage gap; unauthorized mutation | Decision impact on rights (credit, employment) |

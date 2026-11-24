@@ -76,6 +76,272 @@ standard, write the integration document, and prepare upstream issues.
   needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
   Fixed in round 2 (ACS-07).
 
+## Round 3: implement every remaining ACS finding (Standard 1.2.0)
+
+Request: implement and fix all findings; the RFC process must not stop the
+changes. Scope: the 38 open findings, what remains of the 14 partly fixed
+ones, and the 7 proposed in RFC-0005 (59, plus ACS-07's binding profile).
+
+Approach, following the 1.1.0 precedent (a draft Standard text and the RFCs
+that accept it, implemented in the same change):
+- `spec/STANDARD-v1.2.0.md` (MINOR): every change backward compatible; a
+  change that would break a valid 1.1 workflow is phased in as a warning.
+- Ontology 2.2.0 and the canonical schemas: additive only.
+- RFC-0005 and RFC-0006 to RFC-0010 record the decisions (Accepted, by the
+  maintainer's instruction), with the sections GOVERNANCE requires.
+- The reference validator, executor, Python SDK, TypeScript binding and hooks
+  implement each rule, with conformance fixtures.
+
+Workstreams:
+- [x] S1 Tool-calling hosts and the hook layer (RFC-0005): ACS-01, 02, 03,
+      07, 08, 36, 38, 39, 41, 55, 57
+- [x] S2a Approval, deferral and run identity (RFC-0006): ACS-10, 11, 12,
+      13, 35, 44
+- [x] S2b Host protocol and executor conformance (RFC-0006): ACS-14, 15, 20,
+      30, 31, 32, 33, 34, 37, 45, 62
+- [x] S3 Validator, delegation and catalogs (RFC-0007): ACS-04, 09, 16, 17,
+      24, 29, 46, 47, 49, 50, 54
+- [x] S4 Evidence, grounding and secrets (RFC-0008): ACS-06, 21, 22, 23, 40,
+      51, 53, 58
+- [x] S5 Checkpoint, rollback, send and memory (RFC-0009): ACS-18, 19, 26,
+      27, 48, 52
+- [x] S6 Profiles, trust, versioning, schema dialect and packaging
+      (RFC-0010): ACS-05, 25, 28, 42, 56, 59, 64
+
+Phases:
+- [x] 1. Design: one design per workstream, an adversarial review, a
+      revision; then a cross-stream consistency pass that fixes shared shapes
+      and allocates the new diagnostic codes
+- [x] 2. Foundation: STANDARD-v1.2.0.md base, ontology and canonical schema
+      deltas, new codes, version lines, validator support for 1.2
+- [x] 3. Implementation: S1, S3, S5, S6 in parallel worktrees; S2a, S2b, S4
+      in one chain (they share the executor); merge
+- [x] 4. Verification: every CI check, site checks, adversarial review of the
+      whole change, fixes
+- [x] 5. Findings file, CHANGELOG, Appendix D, RFC statuses
+
+**Round 3 review.**
+
+*Done.* Standard 1.2.0 (Candidate) and ontology 2.2.0, with RFC-0005 to
+RFC-0010 Accepted by the maintainer's instruction (RFC-0002 stays a Draft).
+The seven workstreams (designs in `tasks/standard-1.2/designs/`, records in
+`tasks/standard-1.2/progress/`) were each implemented, reviewed twice and
+fixed, then merged in order; a finishing step gave the Python adapter the
+output-contract row so that both reference layers claim class SL. All 64 ACS
+findings are `fixed`, each resolution naming what implements it (the counts
+in `index.yaml`, the integration guide and the CHANGELOG say so). Phase 4
+reviewed the whole change by area: 59 issues in round 1 (34 in the
+Standard text, findings, site and documents; 2 in the Rust core; 20 in the
+SDK, hooks and skills, 19 of them distinct and 18 real, one, the `header`
+keyword, already documented; 3 in the TypeScript package): every real one
+fixed, with a test where code changed, and the other recorded with its
+evidence (`progress/PHASE4.md`). Phase 5 merged
+the streams' CHANGELOG entries into one [Unreleased] entry (an intro,
+Upgrading grouped by component and naming every behaviour change, then
+Added, Changed and Fixed; checked mechanically that no entry's text was
+lost), completed Appendix D (§11.7's two JSON Schemas), rewrote the
+integration guide's ACS section (accepted, what stays open) and its stale
+"no JavaScript build" rows, added "What Standard 1.2.0 Adds" to the README
+and corrected its skill counts, and corrected two resolutions (ACS-01's call
+fixture count, 30; ACS-49's last sentence, which named an optional
+follow-up as if it were pending).
+
+*Follow-ups of the round* (scratch list, each checked): the CLAUDE.md hooks
+bullet, the adapter's output-contract row, the `index.yaml` counts, the
+§10.3 digest-vectors slot, chrono, `agents` below 1.2 as W616 (RFC-0010 and
+S6's resolution) and `identity_error`'s version argument were done. The
+timing test `edge_checks_scale_linearly` was not only load: the validator
+took twice main's time (3.0 s against 1.5 s in debug, 1.7x margin to its
+5 s bound) because every step deep-copied its capability's resolved output
+schema into the scope, and ontology 2.2.0 made those schemas about four
+times larger (callgrind, both trees). The scope now borrows the schemas
+from the context (`core/src/validate/{mod,exprs,bindings,recovery}.rs`):
+1.75 s, every timing test within 0.25 s of main's. The npm audit advisory
+(astro 7.4.5, moderate) is in `site/package-lock.json` unchanged from
+main, and concerns `@astrojs/node`'s image endpoint, which the static site
+does not use: not ours, not fixed here. The figure-gap run in §5.14 that sat
+at 1799.98px was restructured by 09a0574 (1644px); the page's longest
+enforced run is now 1795px, and seven others are within 40px of the 1800px
+limit, by construction (figures were added until each run fit). The sweep
+here measures exactly as CI does: Playwright 1.64.1's headless shell 1248
+gives, on a page this phase did not touch, the same runs to the pixel as
+CI's last Site run on main (4178, 2045, 3369 and 2906px on
+/rfcs/proposals/oasf-safety-extensions/). So no rendering difference
+separates CI from a local sweep, and an edit that lengthens one of those
+runs fails both; giving each several lines of margin needs new figures in
+eight sections, a design task left open.
+
+*Checked.* See `progress/PHASE4.md` for each area's checks. Phase 5, on
+the final tree: Rust as CI runs it (fmt; clippy plain, `python` and `wasm`;
+`cargo test --locked`, 257 unit tests and the integration tests; the
+WebAssembly interface tests; MSRV 1.88 `check`); the extension rebuilt;
+every `tools/validate_*.py`, `validate_workflows.py --strict` and every
+domain catalog and example `--strict`; the generators' `--check`
+(`sync_skill_schemas`, `gen_runtime_fixtures` 353, `gen_call_fixtures` 33
+and 30, `gen_trigger_vectors`, `gen_standard_agents_binding`,
+`gen_capability_json_schemas`); `pytest tests/` (4498 passed, 18 skipped),
+`benchmarks/tests/` (69) and `scripts/run_conformance.py`; the TypeScript
+package rebuilt with its WebAssembly core (1817 tests) and the binding (191
+passed, 2 skipped); the site's check, tests (1172) and build, axe and the
+figure-gap sweep (CI's headless shell) on the five pages this phase changed
+(/spec/1.2.0/, /start/overview/, /guides/standard-agents/,
+/community/release-notes/, /community/roadmap/): no violations, no
+enforced run over 1800px (/start/overview/ 1503px).
+
+*Not done.* Versions change only at a release: `plugin.json` stays 2.0.0
+(the release that carries this is 3.0.0), `pyproject.toml` and
+`grounded_agency.__version__` 0.1.0, and Standard 1.2.0 stays a Candidate
+dated unreleased in the ROADMAP. `@synaptiai/acs-core` is not on npm until
+the repository enables publishing. SA 0.2.0 does not say that definition
+code may load WebAssembly, so no ACS workflow has run inside an SA thread,
+and the binding has still not run in an SA runtime. Outside the findings:
+`examples/digital_twin_sync_loop.workflow_catalog.yaml` still copies three
+reference workflows, which a qualified invoke could replace once the
+reference catalog (1.1.0) carries a manifest. The RFCs' open questions
+stay open for later versions, among them RFC-0007's dependencies between
+catalogs (question 1) and a `name:tag` whose tag starts with a letter and
+holds a digit (question 8).
+
+## Security review loop on the safety layers (after round 3)
+
+*What.* An adversarial loop on the layers that must fail closed (the
+plugin's hooks, the skills' command hooks, the Python Bash classifier and
+adapter, the TypeScript binding, the redactors). Each round: six finders
+with distinct lenses, a deduplication against every finding seen before, an
+independent verifier per finding that tried to refute it by reproducing it
+on a clean copy, then fix batches (root cause, every implementation sharing
+the rule, a test that fails on the old code). It was to stop after two
+rounds in a row with nothing new of medium severity or worse, or after five
+rounds. Every defect, fix and test is recorded in
+`progress/SECURITY-LOOP.md`.
+
+| Round | Reported | New | Confirmed | High | Medium | Low |
+|---|---|---|---|---|---|---|
+| 1 | 47 | 47 | 37 | 1 | 30 | 6 |
+| 2 | 32 | 26 | 25 | 4 | 17 | 4 |
+| 3 | 28 | 22 | 20 | 2 | 15 | 3 |
+| 4 | 32 | 26 | 24 | 2 | 18 | 4 |
+| 5 | 28 | 26 | 24 | 0 | 21 | 3 |
+| **All** | 167 | 147 | 130 | 9 | 101 | 20 |
+
+All 130 are fixed. Every fix batch ended done, and no finding was lost or
+left unverified.
+
+*Not converged.* The loop stopped at its five-round cap, not because it ran
+dry. Each round still confirmed about 20 medium defects, mostly in reading
+shell text the way bash or zsh reads it: quoting, expansions, locales,
+program lookup and the programs' own configuration files. Round 5 was the
+first with no high defect after verification. The pattern says the
+text-reading layers (the hooks and the Bash classifier) will keep yielding
+edge cases. The structural answer is to classify fewer forms: refuse or
+take the worst case for anything outside a small grammar, rather than model
+more of bash. That is a design task, left open.
+
+*Checked.* After the last batch, every step of every job in `ci.yml` and
+`site.yml`, from a clean state with the extension rebuilt (Rust 1.99.1):
+- **Rust:** fmt; clippy plain, `python` and `wasm`; `cargo test --locked`;
+  the wasm tests; MSRV 1.88 `check`.
+- **CEL differential** (Go 1.26.0) and **lint** (ruff, mypy).
+- **Python:** `pytest tests/` on 3.14 and 3.15b4 (8296 passed, 19 skipped
+  each); benchmarks; conformance.
+- **TypeScript:** the package (2169 tests) and the binding (293 passed, 2
+  skipped).
+- **Site:** check, test (1173) and build; axe with no violations; the
+  figure-gap sweep with CI's headless shell, nothing over 1800px.
+
+Two steps failed at first and were fixed: a 1 s evidence-store timing test
+(the redactor now remembers short clean texts, 9912af4) and two figure
+gaps (the SDK guide and the audit skill's page, cbf19b9).
+
+*Push protection.* The first push of the merge was refused because three
+made-up tokens in the secrets vectors were in a provider's own format. The
+loop's unpushed commits were rewritten with those tokens' raw text escaped:
+every changed file decodes to the same JSON in each commit. A test now
+keeps such shapes out of the raw files; the lesson is in `lessons.md`.
+
+*Not done.* The medium-severity stream above. Proposals for a smaller
+shell grammar are not written.
+
+## Pull request #132: code scanning, the newer runner, PVC review
+
+*Done.*
+- **Code scanning:** each alert was fixed where it stood.
+  - Site: tag and comment stripping on built HTML now uses indexOf
+    scanners (`site/test/html-text.ts`, `withoutComments` in
+    `runs.test.ts`). Incomplete escaping was fixed in
+    `site/src/data/versions.ts` and `site/test/data.test.ts`. Eight of
+    these alerts were on lines already on main.
+  - Python tests: a URL substring check became a comparison with the
+    whole command as the layer keeps it; six asserts with side effects
+    were split; implicit string joins were made explicit.
+  - Rust tests: a per-run random snapshot key replaces the hard-coded
+    ones.
+- **The newer CI runner** (bash 5.3, jq 1.8, and a larger C stack, on which
+  Python's json decoder returns 100 000-deep lists instead of raising
+  RecursionError) failed 9 Python tests. The fixes:
+  - A line or file that parses to anything but what its reader writes is
+    read as one that does not parse: the checkpoint archive, the
+    idempotency log, snapshot manifests and memory rows.
+  - The jq depth test follows the installed jq.
+  - The hooks' brace readers give the union of the words of bash 5.2 and
+    of two candidate bash 5.3 readings (5.3a and 5.3c). The 5.3 rule was
+    inferred from one word seen on the runner, without bash 5.3's source.
+    `test_the_installed_bash_reads_as_one_reading` checks that the bash on
+    `PATH` gives one of them.
+  - Separately, as a precaution, the log hook digests only input that
+    parses again as JSON.
+  - The fix then failed mypy, which had not been run (lesson added), and
+    code scanning flagged two adjacent bytes literals. Both are fixed.
+- **PVC review:** `docs/reviews/pvc/2026-11-24_standard-1-2-0.pvc.yaml`
+  holds 15 perspective checks, all PARTIAL, and 58 actions (33 P1,
+  25 P2).
+
+*Open after this pull request.* This list gathers the "Not done"
+paragraphs above, the progress records, the open questions in the
+findings file and the PVC review, checked against the tree.
+1. **Upstream issues.**
+   - Check that the passages they quote from SA 0.2.0 are unchanged since
+     `78fa54c`: upstream edits 0.2.0 in place.
+   - Run `tasks/standard-agents-upstream/file-issues.sh --file` (it files
+     06 first, then 01).
+   - Add the links to the folder's README and to the integration guide.
+   - Eleven candidate findings are not drafted, and SA-Q01 to SA-Q30 have
+     no answer.
+2. **Release 3.0.0.**
+   - Versions: `plugin.json`, `pyproject.toml` and `__version__` (0.1.0;
+     the foundation design planned 0.2.0), and both `CITATION.cff` files
+     (still 1.1.0).
+   - Standard 1.2.0 out of Candidate; the ROADMAP; CHANGELOG [Unreleased]
+     becomes `[v3.0.0]`, which `release.yml` requires; then the tag.
+   - The release notes must warn about the hooks' behaviour changes and
+     the 1.1 runs that end differently (two F503 fixtures, an approved
+     step that fails, a version-1 restore), which are already in Upgrading.
+   - Close issue #77, which the Candidate delivers; #83 stays open for Go
+     and Java.
+3. **ACS-Q15** (is `acs` the final annotation key?) needs an answer before
+   anything annotated is published; ACS-Q10 (attendance of a thread no
+   trigger started) is also open.
+4. **npm:** a tag `acs-core-v0.1.0` on main, with `NPM_PUBLISH_ENABLED` and
+   `NPM_TOKEN` set; otherwise the job is a dry run. The site's deploy has
+   the same kind of gate (`SITE_DEPLOY_ENABLED` and the Cloudflare
+   secrets).
+5. **The binding** has not run in a Standard Agents runtime.
+6. **Safety layers.**
+   - The medium stream and the smaller shell grammar (design not written).
+   - The plugin hooks do not claim class SL; their host gaps are in
+     SECURITY.md §5.5.
+   - Audit-log integrity needs a witness kept out of the agent's reach
+     (`verify_audit_log.py --witness`), which a deployment must set up.
+7. **The PVC review's actions:** 33 P1 and 25 P2.
+8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer implements them.
+9. **Smaller items.**
+   - The Astro advisory in `site/package-lock.json`.
+   - The margins of the figure-gap runs.
+   - The three workflows the digital-twin example copies.
+   - The RFCs' open questions; RFC-0002 is still a Draft.
+   - The 319-row mapping is dated against 1.1.0.
+   - Default redaction leaves an S3 presigned URL's `X-Amz-Signature`.
+
 ## Round 2: fix our side, pull request, merge
 
 Request: fix the issues identified on our end, file the upstream issues, open

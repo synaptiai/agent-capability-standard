@@ -14,7 +14,8 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import type { Json } from './canonical.js';
+import { redactAnchor, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
+import { layerSecrets } from './layer.js';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */
@@ -41,27 +42,62 @@ export const KEYS = {
   pendingApprovals: 'acs:approvals:pending',
 } as const;
 
-/** The ACS safety codes a grounded tool reports (STANDARD v1.1.0 §9.6). */
-export type RefusalCode = 'F501' | 'F502' | 'F503';
+/**
+ * The codes a grounded tool refuses or fails a call with (STANDARD 1.2.0
+ * §5.18.8, §9): a missing checkpoint (F501), approval (F502), rollback
+ * history (F503) or other prerequisite (V102); a binding it does not list
+ * (F504) or `persist` data or an `audit` record that holds a secret
+ * (F504, §6.7); an output that breaks its contract (R402) or a grounding
+ * policy (F505, §5.20); a failure of the layer itself (R407).
+ */
+export type RefusalCode = 'F501' | 'F502' | 'F503' | 'F504' | 'F505' | 'R402' | 'R407' | 'V102';
 
 export const CODE_NAMES: Record<RefusalCode, string> = {
   F501: 'CHECKPOINT_REQUIRED',
   F502: 'APPROVAL_REQUIRED',
   F503: 'ROLLBACK_FAILED',
+  F504: 'CONSTRAINT_VIOLATED',
+  F505: 'PROVENANCE_MISSING',
+  R402: 'EXECUTION_FAILED',
+  R407: 'SAFETY_CHECK_FAILED',
+  V102: 'MISSING_PREREQUISITE',
 };
 
-/** A diagnostic in the format of STANDARD v1.1.0 §9.8. */
+/**
+ * A diagnostic in the format of STANDARD 1.2.0 §9.8: a refusal of a call
+ * names the tool, its capability (absent for an unbound or control-only
+ * tool) and, where the runtime gives calls an id, the call; never a
+ * workflow or a step.
+ */
 export interface Diagnostic {
   code: RefusalCode;
   name: string;
   severity: 'error';
   message: string;
-  location: { tool: string; capability: CapabilityId };
+  location: { tool: string; capability?: CapabilityId; call?: string };
   suggestion?: string;
+}
+
+/**
+ * The layer and the configuration that decided a call (STANDARD 1.2.0
+ * §5.18.8): the binding, its version, and the SHA-256 of the canonical JSON
+ * of what decides the tool's calls: `{annotation, settings:
+ * {checkpoint_max_age_ms}}` for a grounded tool, the annotation for a
+ * control tool.
+ */
+export interface RecordedBy {
+  name: string;
+  version: string;
+  config_sha256: string;
 }
 
 /** One checkpoint. `valid` turns false when a step that requires one uses it. */
 export interface CheckpointRecord {
+  /**
+   * The id the `checkpoint` call's output gave (`checkpoint-<seq>` when it
+   * gave none), with every secret replaced (§6.7, `addCheckpoint`): a value
+   * the call returned, which may repeat what the model wrote.
+   */
   id: string;
   valid: boolean;
   /** The trace entry of the `checkpoint` call that took it. */
@@ -93,12 +129,35 @@ export function stepOf(state: { execution: { stepCount: number } | null }): numb
   return state.execution?.stepCount ?? null;
 }
 
+/**
+ * Who a party is, as the host authenticated it: an `agent_identity`
+ * (STANDARD v1.2.0 §5.17, `schemas/agent_identity_schema.yaml`).
+ */
+export interface AgentIdentity {
+  principal: string;
+  kind: 'agent' | 'human' | 'service';
+  role?: string;
+  /** The family of the model it ran on, compared exactly (§5.15); a host derives it with `modelFamily`. */
+  model_family?: string;
+  /** The identifier of the model it ran on (§5.17). */
+  model_id?: string;
+  owner?: string;
+  authenticated_by?: string;
+  trust_class?: (typeof TRUST_CLASSES)[number];
+}
+
 /** One person's answer to an approval request. */
 export interface ApprovalDecision {
   decision_id: string;
   decision: 'approved' | 'rejected';
   /** `ThreadUser.id` of the authenticated caller who decided. */
   approver: string;
+  /**
+   * The caller as an approver identity (§5.17), per the interop identity
+   * map's `endpoint_caller`: see `approverIdentity`. Absent on a decision
+   * an earlier version of the binding stored.
+   */
+  approver_identity?: AgentIdentity;
   at: number;
 }
 
@@ -143,10 +202,15 @@ export interface TraceEntry {
   flow_id?: string;
   /** The model step of that execution (`state.execution.stepCount`). */
   step?: number;
-  /** The tool's name. */
+  /** The tool's name, with every secret replaced (§6.7, `redactedName`). */
   action: string;
-  /** `null` for a tool call the audit hook saw that no grounded tool recorded. */
+  /**
+   * `null` for a tool call the audit hook saw that no grounded tool
+   * recorded, and for a control-only tool's call (`control`).
+   */
   capability: CapabilityId | null;
+  /** A call of a control-only tool (`controlTool`): never refused. */
+  control?: true;
   domain?: string;
   /**
    * `started` is written before the tool's own code runs and replaced when
@@ -161,10 +225,38 @@ export interface TraceEntry {
   args_digest?: string;
   /** Why the call was refused. */
   code?: RefusalCode;
+  /** The failure's reason token (STANDARD 1.2.0 §5.19.7), when it has one. */
+  reason_code?: 'below_minimum_confidence' | 'invalid_confidence';
+  /** An applied domain profile required a person for the call (§5.21.3). */
+  person_required?: true;
+  /**
+   * The `seq` of the composite whose invocation covered this call
+   * (STANDARD 1.2.0 §5.18.4): a nested call skips the approval and the
+   * checkpoint, which the composite's call used.
+   */
+  covered_by?: number;
+  /**
+   * The layer and configuration that decided the call (§5.18.8): on every
+   * entry a grounded or control tool writes, refusals and failures of the
+   * layer's own checks included. Absent only on an entry the audit hook
+   * writes for a call no grounded tool recorded, which the layer did not
+   * decide.
+   */
+  recorded_by?: RecordedBy;
   /** The checkpoint this call used (`requires_checkpoint`) or took (`checkpoint`). */
   checkpoint_id?: string;
-  approval?: { digest: string; approvers: string[]; decision_ids: string[] };
-  evidence_anchors?: Json[];
+  /**
+   * The approval the call used. `approvers` are the approvers' principals
+   * (`sa-user:<id>`), and `approver_identities` their identities, as the
+   * deployment attests them (STANDARD v1.2.0 §5.17); the identities are
+   * absent when a decision was stored without one.
+   */
+  approval?: { digest: string; approvers: string[]; approver_identities?: AgentIdentity[]; decision_ids: string[] };
+  /**
+   * The output's evidence anchors (§6.5), redacted (§6.7); a bare string or
+   * another object is a deprecated legacy form, kept as given.
+   */
+  evidence_anchors?: Array<EvidenceAnchor | string | Json>;
   /** Filled in by the `tool_call_done` hook: a tool cannot see its own call id. */
   tool_call_id?: string;
   error?: string;
@@ -173,6 +265,7 @@ export interface TraceEntry {
 /** A trace entry waiting for the audit hook to supply its tool call id. */
 export interface Unlinked {
   seq: number;
+  /** The entry's `action`, redacted as the entry's is (§6.7). */
   action: string;
   /** The execution and model step the call was made in: only a hook of the same step may link it. */
   flow_id: string | null;
@@ -197,17 +290,63 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 }
 
 /**
+ * A tool's name with every secret replaced (STANDARD v1.2.0 §6.7), as
+ * {@link appendTrace} writes it into an entry's `action`: the default
+ * patterns, the secrets registered layer-wide and `secrets`. The name is the
+ * one the model called (the audit hook's) or the one a composite's code
+ * invoked, either of which the call's arguments or a prompt can choose.
+ */
+export function redactedName(name: string, secrets: readonly string[] = []): string {
+  return redactText(name, [...secrets, ...layerSecrets()]);
+}
+
+/**
+ * An entry's `action`, `error`, `evidence_anchors` and `checkpoint_id` with
+ * every secret replaced (STANDARD v1.2.0 §6.7): always the default patterns
+ * and the secrets registered layer-wide (`configureLayer({ secrets })`),
+ * plus `secrets`. An anchor that held a secret loses its `digest`
+ * (`redactAnchor`). Nothing else in an entry holds a value a call received
+ * or a model chose: the tool's name is the one the model called, or the one
+ * a composite's code invoked, and a checkpoint's id is what a `checkpoint`
+ * call returned. The audit record exported from an entry (`actionRecord`)
+ * takes its `tool` and `intent` from the redacted `action`.
+ */
+function redacted<T extends Partial<Pick<TraceEntry, 'action' | 'error' | 'evidence_anchors' | 'checkpoint_id'>>>(
+  entry: T,
+  secrets: readonly string[],
+): T {
+  const values = [...secrets, ...layerSecrets()];
+  const out = { ...entry };
+  if (typeof out.action === 'string') out.action = redactText(out.action, values);
+  if (typeof out.error === 'string') out.error = redactText(out.error, values);
+  if (typeof out.checkpoint_id === 'string') out.checkpoint_id = redactText(out.checkpoint_id, values);
+  // An anchor that held a secret keeps no digest of what it cites
+  // (`redactAnchor`): a digest of content that may be no more than the
+  // secret could be inverted by guessing.
+  if (Array.isArray(out.evidence_anchors)) {
+    out.evidence_anchors = (out.evidence_anchors as Json[]).map((a) => redactAnchor(a, values).value);
+  }
+  return out;
+}
+
+/**
  * Append an entry to the thread's trace and return it with its sequence
  * number. The count is advanced before the entry is written, so a write that
  * fails part-way leaves a gap in the numbering, never an entry that the next
- * one overwrites.
+ * one overwrites. The entry is redacted first (§6.7), always: `secrets` adds
+ * the host's own values to the default patterns and the layer's.
  */
-export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>): Promise<TraceEntry> {
+export async function appendTrace(
+  store: Store,
+  entry: Omit<TraceEntry, 'seq'>,
+  secrets: readonly string[] = [],
+): Promise<TraceEntry> {
   const seq = ((await store.getValue<number>(KEYS.traceCount)) ?? 0) + 1;
-  const stored: TraceEntry = { seq, ...entry };
+  const stored: TraceEntry = { seq, ...redacted(entry, secrets) };
   await store.setValue(KEYS.traceCount, seq);
   await store.setValue(KEYS.trace(seq), stored);
-  if (stored.capability !== null && stored.tool_call_id === undefined) {
+  if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
+    // The redacted name: the list is a record of the layer's too (§6.7).
     const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
     // An entry of an earlier step can no longer be linked (see audit.ts).
     const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(
@@ -219,13 +358,14 @@ export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>):
   return stored;
 }
 
-/** Replace a `started` entry with what became of the call. */
+/** Replace a `started` entry with what became of the call, redacted as {@link appendTrace} redacts. */
 export async function completeTrace(
   store: Store,
   started: TraceEntry,
-  outcome: Pick<TraceEntry, 'at' | 'status'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>,
+  outcome: Pick<TraceEntry, 'at' | 'status' | 'code'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors' | 'reason_code'>>,
+  secrets: readonly string[] = [],
 ): Promise<TraceEntry> {
-  const stored: TraceEntry = { ...started, ...outcome };
+  const stored: TraceEntry = { ...started, ...redacted(outcome, secrets) };
   await store.setValue(KEYS.trace(stored.seq), stored);
   await countExecuted(store, stored);
   return stored;
@@ -257,4 +397,108 @@ export async function readTrace(store: Store): Promise<TraceEntry[]> {
 
 export async function readCheckpoints(store: Store): Promise<CheckpointRecord[]> {
   return (await store.getValue<CheckpointRecord[]>(KEYS.checkpoints)) ?? [];
+}
+
+/**
+ * Record a checkpoint taken, its id redacted as {@link appendTrace} redacts
+ * (§6.7): the id is what the `checkpoint` call returned, and the record is
+ * the layer's. Two ids that are one after redaction name one checkpoint, so
+ * a call that uses one uses both (the safe side).
+ */
+export async function addCheckpoint(
+  store: Store,
+  record: CheckpointRecord,
+  secrets: readonly string[] = [],
+): Promise<void> {
+  const id = redactText(record.id, [...secrets, ...layerSecrets()]);
+  await store.setValue(KEYS.checkpoints, [...(await readCheckpoints(store)), { ...record, id }]);
+}
+
+/**
+ * An audit record (STANDARD v1.2.0 §6.4): an action record of
+ * `schemas/world_state_schema.yaml`, with the members the binding fills.
+ */
+export interface ActionRecord {
+  action_id: string;
+  run_id: string;
+  timestamp: string;
+  actor: 'agent';
+  intent: string;
+  status: 'approved' | 'executed' | 'failed' | 'rejected';
+  tool: string;
+  capability?: string;
+  call_id?: string;
+  checkpoint_id?: string;
+  code?: string;
+  reason_code?: string;
+  person_required?: true;
+  approval?: {
+    digest: string;
+    decision: 'approved';
+    approvers: string[];
+    decision_id?: string;
+    approver_identities?: AgentIdentity[];
+  };
+  details?: { args_digest?: string; flow_id?: string; step?: number; error?: string; covered_by?: string };
+  recorded_by: { name: string; version?: string; config_sha256?: string };
+}
+
+/**
+ * Who writes the binding's audit records (§6.4 `recorded_by`) when the entry
+ * names no layer configuration: an entry the audit hook wrote for a call no
+ * grounded tool recorded. Every other entry carries its own `recorded_by`
+ * (§5.18.8), which the record keeps.
+ */
+export const RECORDED_BY = { name: '@acs/standard-agents-binding' } as const;
+
+const STATUS: Record<TraceEntry['status'], ActionRecord['status']> = {
+  executed: 'executed',
+  failed: 'failed',
+  // §6.4: `rejected` covers a refusal by a safety layer, with its code.
+  refused: 'rejected',
+  // Allowed, with no outcome yet: an entry that stays so was cut off.
+  started: 'approved',
+};
+
+/**
+ * A trace entry as an audit record (STANDARD v1.2.0 §6.4). The binding keeps
+ * `TraceEntry` in the thread's store; this is the export the Standard allows
+ * ("written in, or exported as"). `scope` names the records' scope, the
+ * thread, as `run_id`, and prefixes `action_id`. `recorded_by` is the
+ * entry's own (the layer, its version and `config_sha256`, §5.18.8), else
+ * `RECORDED_BY`; a nested call's `details.covered_by` is the `action_id` of
+ * the composite call that covered it (§5.18.4).
+ */
+export function actionRecord(entry: TraceEntry, scope: string): ActionRecord {
+  const recordedBy: ActionRecord['recorded_by'] = entry.recorded_by ?? RECORDED_BY;
+  const record: ActionRecord = {
+    action_id: `${scope}/${entry.seq}`,
+    run_id: scope,
+    timestamp: new Date(entry.at).toISOString(),
+    actor: 'agent',
+    intent: `${entry.action} call`,
+    status: STATUS[entry.status],
+    tool: entry.action,
+    recorded_by: { ...recordedBy },
+  };
+  if (entry.capability !== null) record.capability = entry.capability;
+  if (entry.tool_call_id !== undefined) record.call_id = entry.tool_call_id;
+  if (entry.checkpoint_id !== undefined) record.checkpoint_id = entry.checkpoint_id;
+  if (entry.code !== undefined) record.code = entry.code;
+  if (entry.reason_code !== undefined) record.reason_code = entry.reason_code;
+  if (entry.person_required) record.person_required = true;
+  if (entry.approval !== undefined) {
+    const { digest, approvers, approver_identities, decision_ids } = entry.approval;
+    record.approval = { digest, decision: 'approved', approvers: [...approvers] };
+    if (decision_ids[0] !== undefined) record.approval.decision_id = decision_ids[0];
+    if (approver_identities !== undefined) record.approval.approver_identities = approver_identities;
+  }
+  const details: NonNullable<ActionRecord['details']> = {};
+  if (entry.args_digest !== undefined) details.args_digest = entry.args_digest;
+  if (entry.flow_id !== undefined) details.flow_id = entry.flow_id;
+  if (entry.step !== undefined) details.step = entry.step;
+  if (entry.error !== undefined) details.error = entry.error;
+  if (entry.covered_by !== undefined) details.covered_by = `${scope}/${entry.covered_by}`;
+  if (Object.keys(details).length > 0) record.details = details;
+  return record;
 }

@@ -1,0 +1,185 @@
+{
+  "description": "Record mode actions: one record for every step that runs, each with its run_id, frame, step and capability; the checkpoint step's and the step that used it name the checkpoint; the approval names its decision (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        },
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "run_id": "run-1",
+        "frame": [
+          "w"
+        ],
+        "step": 0,
+        "capability": "retrieve",
+        "status": "executed"
+      },
+      {
+        "run_id": "run-1",
+        "frame": [
+          "w"
+        ],
+        "step": 1,
+        "capability": "checkpoint",
+        "status": "executed",
+        "checkpoint_id": "cp1"
+      },
+      {
+        "run_id": "run-1",
+        "frame": [
+          "w"
+        ],
+        "step": 2,
+        "capability": "constrain",
+        "status": "executed"
+      },
+      {
+        "run_id": "run-1",
+        "frame": [
+          "w"
+        ],
+        "step": 3,
+        "capability": "mutate",
+        "status": "executed",
+        "checkpoint_id": "cp1",
+        "approval": {
+          "decision": "approved",
+          "decision_id": "d1"
+        }
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions",
+  "run_record": {
+    "status": "executed",
+    "details": {
+      "kind": "Completed",
+      "outcome": "completed",
+      "records": 4
+    }
+  }
+}

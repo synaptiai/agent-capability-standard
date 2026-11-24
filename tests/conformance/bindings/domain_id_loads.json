@@ -1,0 +1,24 @@
+{
+  "description": "A domain id of several segments, such as image.object, is a valid domain: the record loads.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "detect",
+      "domain": "image.object"
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "look": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

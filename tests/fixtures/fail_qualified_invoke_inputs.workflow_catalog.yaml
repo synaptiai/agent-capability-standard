@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# A literal input against another catalog's workflow (STANDARD v1.2 §5.1.1,
+# §5.12): extra is undeclared (S303) and target is missing (S304).
+check:
+  goal: Check with the library, badly.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's check.
+    store_as: checked
+    workflow_id: acs.fixtures.lib/shared_check
+    input_bindings:
+      workflow: acs.fixtures.lib/shared_check
+      input: {extra: y}

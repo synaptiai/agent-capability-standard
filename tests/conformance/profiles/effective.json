@@ -1,0 +1,841 @@
+{
+  "description": "Domain profile effect vectors (Agent Capability Standard 1.2.0, section 5.21.3). Normative. `flags`: the effective flags (section 5.2.1) of a step or call of `capability`, with its own `declared` flags, under the profiles given, and whether a person must decide. `calls`: the same for a call of a tool `binding` (section 5.18.1) that performs several capabilities: each applied profile raises for each of them, at the call's effective risk (section 5.18.3). `policy`: the rules the profiles put in force besides flags. The profiles load without error.",
+  "standard": "1.2.0",
+  "ontology": "2.2.0",
+  "section": "5.21.3",
+  "status": "normative",
+  "fields": {
+    "name": "The vector's id.",
+    "about": "The rule it pins.",
+    "profiles": "The profiles applied, in order.",
+    "capability": "flags: the step's capability.",
+    "declared": "flags: the step's own risk and flags, if any.",
+    "binding": "calls: the tool binding record's `capability`, `additional_capabilities` and `flags` (section 5.18.1).",
+    "expect": "flags and calls: {risk, mutation, requires_checkpoint, requires_approval, person}. policy: {minimum_confidence (the highest, or null), grounding ([{require, kinds}], one per profile with require_grounding, kinds null for any kind), destinations (one list per profile that sets allowed_destinations), trust_weights (the lowest per key)}."
+  },
+  "flags": [
+    {
+      "name": "no_profile_mutate",
+      "about": "no profile: the ontology's flags",
+      "profiles": [],
+      "capability": "mutate",
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "review_low_retrieve",
+      "about": "require_review: low covers low and above",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_review": "low"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "review_high_retrieve",
+      "about": "require_review: high does not cover low",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_review": "high"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "auto_approve_none",
+      "about": "auto_approve: none covers no level: every step needs approval",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "auto_approve": "none"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "auto_approve_low_delegate",
+      "about": "a medium-risk step above auto_approve: low needs approval",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "auto_approve": "low"
+          }
+        }
+      ],
+      "capability": "delegate",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "auto_approve_high_execute",
+      "about": "auto_approve never lowers the ontology's approval",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "auto_approve": "high"
+          }
+        }
+      ],
+      "capability": "execute",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "human_high_mutate",
+      "about": "require_human: high covers mutate (high): a person",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "high"
+          }
+        }
+      ],
+      "capability": "mutate",
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "human_high_execute",
+      "about": "require_human: high does not cover execute (medium)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "high"
+          }
+        }
+      ],
+      "capability": "execute",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "human_none",
+      "about": "require_human: none covers no level",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "none"
+          }
+        }
+      ],
+      "capability": "mutate",
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "critical_reads_none",
+      "about": "critical is read as none",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "critical"
+          }
+        }
+      ],
+      "capability": "mutate",
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "block_delegate",
+      "about": "block_autonomous: a person for the listed capability",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "delegate"
+            ]
+          }
+        }
+      ],
+      "capability": "delegate",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "checkpoint_always_execute",
+      "about": "always raises requires_checkpoint",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "execute": "always"
+          }
+        }
+      ],
+      "capability": "execute",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_star_medium_invoke",
+      "about": "* at medium_risk covers a medium-risk invoke",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "medium_risk"
+          }
+        }
+      ],
+      "capability": "invoke",
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_star_medium_retrieve",
+      "about": "* at medium_risk does not cover a low-risk retrieve",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "medium_risk"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_declared_high_risk",
+      "about": "the step's declared risk is its effective risk",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "high_risk"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "declared": {
+        "risk": "high"
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_never_mutate",
+      "about": "never lowers nothing",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "mutate": "never"
+          }
+        }
+      ],
+      "capability": "mutate",
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "capability_key_and_star",
+      "about": "the key and * each apply; never adds nothing",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "retrieve": "never",
+            "*": "always"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_exempt_from_star",
+      "about": "a checkpoint step is never given requires_checkpoint",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "always"
+          }
+        }
+      ],
+      "capability": "checkpoint",
+      "expect": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "checkpoint_exempt_high_risk_declared",
+      "about": "not even when it declares risk: high",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "high_risk"
+          }
+        }
+      ],
+      "capability": "checkpoint",
+      "declared": {
+        "risk": "high"
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "star_always_rollback",
+      "about": "* covers rollback",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "always"
+          }
+        }
+      ],
+      "capability": "rollback",
+      "expect": {
+        "risk": "medium",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "two_profiles_strictest",
+      "about": "each profile applies on its own; the strictest holds",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_review": "medium"
+          }
+        },
+        {
+          "domain": "d2",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "low"
+          }
+        }
+      ],
+      "capability": "retrieve",
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "declared_kept",
+      "about": "a step's own stricter flag stays",
+      "profiles": [],
+      "capability": "retrieve",
+      "declared": {
+        "requires_approval": true
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "risk_mutation_unchanged",
+      "about": "a profile never changes risk or mutation",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "low"
+          }
+        }
+      ],
+      "capability": "audit",
+      "declared": {
+        "mutation": false
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    }
+  ],
+  "calls": [
+    {
+      "name": "call_block_autonomous_lists_an_additional_capability",
+      "about": "block_autonomous lists a capability the call performs besides its own: a person decides",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "send"
+            ]
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "send"
+        ]
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "call_without_profiles",
+      "about": "the same binding with no profile: the strictest of its capabilities' flags, no person",
+      "profiles": [],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "send"
+        ]
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "call_checkpoint_policy_names_an_additional_capability",
+      "about": "checkpoint_policy names a capability the call performs besides its own",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "persist": "always"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "persist"
+        ]
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "call_block_autonomous_lists_the_primary_capability_only",
+      "about": "block_autonomous lists the call's capability, not the additional one: a person decides",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "retrieve"
+            ]
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "persist"
+        ]
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "call_policy_value_at_the_calls_risk",
+      "about": "a capability's medium_risk policy reads the call's effective risk, which its other capability raises to medium",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "retrieve": "medium_risk"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "delegate"
+        ]
+      },
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "call_threshold_at_the_calls_risk",
+      "about": "require_human: medium covers the call's effective risk, though not its low-risk capability's own",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "medium"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "delegate"
+        ]
+      },
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    }
+  ],
+  "policy": [
+    {
+      "name": "policy_none",
+      "about": "a profile without rules puts none in force",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "minimum_confidence": null,
+        "grounding": [],
+        "destinations": [],
+        "trust_weights": {}
+      }
+    },
+    {
+      "name": "policy_minimum_highest",
+      "about": "the highest minimum_confidence applies",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "minimum_confidence": 0.8
+          }
+        },
+        {
+          "domain": "d2",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "minimum_confidence": 0.9
+          }
+        }
+      ],
+      "expect": {
+        "minimum_confidence": 0.9,
+        "grounding": [],
+        "destinations": [],
+        "trust_weights": {}
+      }
+    },
+    {
+      "name": "policy_grounding_one_per_profile",
+      "about": "one grounding policy per profile with require_grounding, in profile order; its kinds are required_anchor_types",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "require_grounding": [
+              "predict"
+            ],
+            "required_anchor_types": [
+              "file"
+            ]
+          }
+        },
+        {
+          "domain": "d2",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "require_grounding": [
+              "classify",
+              "measure"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "minimum_confidence": null,
+        "grounding": [
+          {
+            "require": [
+              "predict"
+            ],
+            "kinds": [
+              "file"
+            ]
+          },
+          {
+            "require": [
+              "classify",
+              "measure"
+            ],
+            "kinds": null
+          }
+        ],
+        "destinations": [],
+        "trust_weights": {}
+      }
+    },
+    {
+      "name": "policy_kinds_without_require",
+      "about": "required_anchor_types without require_grounding has no effect",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "required_anchor_types": [
+              "file"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "minimum_confidence": null,
+        "grounding": [],
+        "destinations": [],
+        "trust_weights": {}
+      }
+    },
+    {
+      "name": "policy_destinations_each",
+      "about": "each profile's destination policy is in force",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "allowed_destinations": [
+            "https://hooks.acme.example/*"
+          ]
+        },
+        {
+          "domain": "d2",
+          "version": "1.0.0",
+          "allowed_destinations": [
+            "*@acme.example"
+          ]
+        }
+      ],
+      "expect": {
+        "minimum_confidence": null,
+        "grounding": [],
+        "destinations": [
+          [
+            "https://hooks.acme.example/*"
+          ],
+          [
+            "*@acme.example"
+          ]
+        ],
+        "trust_weights": {}
+      }
+    },
+    {
+      "name": "policy_trust_lowest",
+      "about": "the lowest weight per key; trust_class:<c> is kept apart from a source key <c>",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "plc": 0.9,
+            "trust_class:peer_agent": 0.2
+          }
+        },
+        {
+          "domain": "d2",
+          "version": "1.0.0",
+          "trust_weights": {
+            "plc": 0.7,
+            "peer_agent": 0.6
+          }
+        }
+      ],
+      "expect": {
+        "minimum_confidence": null,
+        "grounding": [],
+        "destinations": [],
+        "trust_weights": {
+          "peer_agent": 0.6,
+          "plc": 0.7,
+          "trust_class:peer_agent": 0.2
+        }
+      }
+    }
+  ]
+}

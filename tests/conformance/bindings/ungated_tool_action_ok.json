@@ -1,0 +1,35 @@
+{
+  "description": "A host action may be tied to a bound tool with no prerequisite, checkpoint or approval.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe"
+    }
+  ],
+  "offered": {
+    "look": "look"
+  },
+  "host_actions": [
+    {
+      "action": "status",
+      "tool": "look"
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "look": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "description": "A composite's approval covers its nested calls, so it takes the approval of the bindings it invokes: one approver is not the two an invoked binding's approval.min_approvers asks for.",
+  "ontology": "2.2.0",
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "approval": {
+        "min_approvers": 2
+      }
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "batch",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F502"
+      }
+    },
+    {
+      "call": "write",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F502"
+      }
+    }
+  ]
+}

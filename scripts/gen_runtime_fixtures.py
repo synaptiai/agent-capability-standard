@@ -11,78 +11,60 @@ trace. Edit the fixtures here, not the JSON, then regenerate:
 Writing also deletes any JSON file in the directory that this script does
 not generate, so the directory holds exactly the fixtures defined here.
 Contributed fixtures (tests/conformance/contrib/*.json) are copied as they
-are, after a check of their keys.
+are, after a check of their keys. Every fixture is checked against
+tests/conformance/runtime/schema/fixture.schema.json before anything is
+written.
+
+The fixtures of Standard 1.1 are defined in this file. Each 1.2 workstream
+adds its own in scripts/runtime_fixtures/<workstream>.py, whose
+register(add) this script calls with the add() below, so the workstreams do
+not edit one file; the shared building blocks (st, wf, out, ...) are in
+scripts/runtime_fixtures/helpers.py.
 """
 
 import argparse
 import copy
+import importlib
 import json
 import sys
 from functools import cache
 from pathlib import Path
 
+import jsonschema
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tests" / "conformance" / "runtime"
+SCHEMA = OUT / "schema" / "fixture.schema.json"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-def st(cap, store, **kw):
-    s = {"capability": cap, "purpose": f"{cap} step", "store_as": store}
-    s.update(kw)
-    return s
-
-
-def wf(steps, inputs=None, requires=None, **kw):
-    w = {"goal": "g", "risk": "high", "spec_version": "1.1", "steps": steps}
-    if inputs is not None:
-        w["inputs"] = inputs
-    if requires:
-        w["workflow_extensions"] = {"requires": requires}
-    w.update(kw)
-    return w
-
-
-def out(**v):
-    v.setdefault("evidence_anchors", [])
-    return {"kind": "Output", "value": v}
-
-
-def inv(cap, **kw):
-    e = {"kind": "InvokeCapability", "capability": cap}
-    e.update(kw)
-    return e
-
-
-def approve(d, who=("alice",), digest="{{digest}}"):
-    return {
-        "kind": "Decision",
-        "decision_id": d,
-        "decision": "approved",
-        "approvers": list(who),
-        "digest": digest,
-    }
-
-
-CP = st("checkpoint", "cp", input_bindings={"scope": "repo"})
-
-
-def mutate(store="m", **kw):
-    return st(
-        "mutate",
-        store,
-        input_bindings={"target": "config", "operation": {"set": 1}},
-        **kw,
-    )
-
-
-POLICY = st(
-    "constrain",
-    "policy",
-    input_bindings={"target": "config", "constraints": ["policy"]},
+from runtime_fixtures import WORKSTREAMS  # noqa: E402
+from runtime_fixtures.helpers import (  # noqa: E402
+    CP,
+    POLICY,
+    approve,
+    inv,
+    mutate,
+    out,
+    st,
+    wf,
 )
 
 fixtures = {}
+
+# Optional members of a fixture, in the order a fixture writes them (after
+# the required ones). Each is passed to the run's start as it is.
+OPTIONAL = (
+    "actor_identity",
+    "catalogs",
+    "agents",
+    "records",
+    "destinations",
+    "grounding",
+    "profiles",
+    "run_record",
+)
 
 
 def add(
@@ -95,13 +77,22 @@ def add(
     workflow="w",
     inputs=None,
     attendance="attended",
-    actor_identity=None,
+    header=None,
+    **optional,
 ):
+    """Define fixture `name`. `header` is the version the catalog's
+    '# Standard version:' header declares, or None for none (a fixture
+    always states it, STANDARD v1.2 §11.5); `optional` takes the members of
+    OPTIONAL, each written when it is not None."""
     if name in fixtures:
         raise ValueError(f"two fixtures are named {name!r}")
+    unknown = sorted(set(optional) - set(OPTIONAL))
+    if unknown:
+        raise TypeError(f"{name}: add() takes no member {unknown}")
     fixtures[name] = {
         "description": description,
         "catalog": catalog,
+        "header": header,
         "workflow": workflow,
         "inputs": inputs or {},
         "attendance": attendance,
@@ -110,8 +101,9 @@ def add(
         "end": end,
         "trace_kinds": list(trace),
     }
-    if actor_identity is not None:
-        fixtures[name]["actor_identity"] = actor_identity
+    for key in OPTIONAL:
+        if optional.get(key) is not None:
+            fixtures[name][key] = optional[key]
 
 
 add(
@@ -385,7 +377,9 @@ add(
 )
 
 
-def approval_case(name, description, decision, end, trace=(), approval=None, extra=()):
+def approval_case(
+    name, description, decision, end, trace=(), approval=None, extra=(), tail=()
+):
     m = mutate()
     requires = None
     if approval is not None:
@@ -400,6 +394,7 @@ def approval_case(name, description, decision, end, trace=(), approval=None, ext
             {"expect": inv("constrain"), "respond": out(compliant=True)},
             *extra,
             decision,
+            *tail,
         ],
         end,
         trace,
@@ -451,6 +446,37 @@ approval_case(
     ["approval_expired"],
     approval={"approver": {"kind": "human"}, "expires": "1h"},
     extra=[{"expect": {"kind": "RequestApproval", "expires_at": 3600000}}],
+)
+
+approval_case(
+    "approval_decided_after_expiry",
+    "An approved decision that arrives after the request's expires_at, with no tick before it, is F502 with an expired record: a decision must arrive no later than expires_at.",
+    {
+        "expect": {"kind": "RequestApproval", "expires_at": 3600000},
+        "respond": approve("d1"),
+        "at": 3600001,
+    },
+    {"kind": "Failed", "code": "F502", "action_records": [{"status": "expired"}]},
+    ["approval_decided"],
+    approval={"approver": {"kind": "human"}, "expires": "1h"},
+)
+
+approval_case(
+    "approval_decided_at_expiry",
+    "An approved decision that arrives at the request's expires_at is in time: the step runs.",
+    {
+        "expect": {"kind": "RequestApproval", "expires_at": 3600000},
+        "respond": approve("d1"),
+        "at": 3600000,
+    },
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "action_records": [{"status": "executed"}],
+    },
+    ["approval_decided"],
+    approval={"approver": {"kind": "human"}, "expires": "1h"},
+    tail=[{"expect": inv("mutate", step=2), "respond": out(success=True)}],
 )
 
 
@@ -519,10 +545,14 @@ def recheck(name, description, on_change, script_tail, end, trace=()):
             {"expect": inv("plan"), "respond": out(steps=[1], confidence=1)},
             {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
             {"expect": inv("constrain"), "respond": out(compliant=True)},
-            {"expect": {"kind": "RequestApproval"}, "respond": approve("d1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 3},
+                "respond": approve("d1"),
+            },
             {
                 "expect": {
                     "kind": "RecheckSource",
+                    "step": 3,
                     "source": "${p.steps}",
                     "compare": "digest",
                 },
@@ -543,6 +573,7 @@ recheck(
         {
             "expect": {
                 "kind": "RequestApproval",
+                "step": 3,
                 "shown": [
                     {"target": "config", "operation": {"set": 1}},
                     {"recheck": {"previous": [1], "current": [2]}},
@@ -551,7 +582,7 @@ recheck(
             "respond": approve("d2"),
         },
         {
-            "expect": {"kind": "RecheckSource"},
+            "expect": {"kind": "RecheckSource", "step": 3},
             "respond": {"kind": "Current", "value": [2]},
         },
         {"expect": inv("mutate"), "respond": out(success=True)},
@@ -6534,6 +6565,144 @@ orchestrator(
 
 
 # ---------------------------------------------------------------------------
+# The output contract (§5.19.1): in a workflow that targets 1.2 or later, an
+# Output's value is checked as §5.18.9's consumer checks an output, as a
+# safety layer checks a call's (§5.18.10); below 1.2, only the required
+# fields, as in 1.1.
+# ---------------------------------------------------------------------------
+def searching(spec_version="1.2", retry=None, **kw):
+    """A workflow `w` of one `search` step `s`, targeting `spec_version`."""
+    extra = {"retry": retry} if retry else {}
+    return {
+        "w": wf(
+            [st("search", "s", input_bindings={"query": "q"}, **extra)],
+            spec_version=spec_version,
+            **kw,
+        )
+    }
+
+
+def found_by_search(**v):
+    return out(**{"results": [], **v})
+
+
+add(
+    "output_contract_anchors_not_an_array",
+    "In a 1.2 workflow, an Output whose evidence_anchors is not an array breaks the contract: R402 (§5.19.1, §5.18.9).",
+    searching(),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=0.5),
+        }
+    ],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_confidence_out_of_range",
+    "In a 1.2 workflow, a confidence the contract requires that is outside 0 to 1 breaks the contract: R402 (§5.19.1, §4.1.1).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence=2)}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_confidence_not_a_number",
+    "In a 1.2 workflow, a required confidence that is a boolean is not a number: R402 (§5.19.1).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence=True)}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_v11_unchecked",
+    "In a 1.1 workflow, only the required fields are checked, as in 1.1: an Output whose evidence_anchors is a string and whose confidence is 2 completes the step (§5.19.1, §11.5).",
+    searching("1.1"),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=2),
+        }
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "s": {"results": [], "evidence_anchors": "file:a", "confidence": 2}
+        },
+    },
+)
+
+add(
+    "output_contract_retried",
+    "An Output that breaks the contract is R402, retried as any R402: the second attempt's output passes (§5.19.1, §5.2).",
+    searching(retry={"max": 1, "backoff": "none"}),
+    [
+        {
+            "expect": inv("search", attempt=1),
+            "respond": found_by_search(confidence=1.5),
+        },
+        {
+            "expect": inv("search", attempt=2),
+            "respond": found_by_search(confidence=0.5),
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["retry"],
+)
+
+add(
+    "output_contract_before_grounding",
+    "Under a grounding policy in a 1.2 workflow, an evidence_anchors that is not an array fails the contract check first: R402, not F505 (§5.19.1, §5.20).",
+    searching(
+        requires=["grounding@1"],
+        grounding={"require": ["search"]},
+    ),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=0.5),
+        }
+    ],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_before_minimum_confidence",
+    "Under a profile's minimum confidence in a 1.2 workflow, a required confidence that is not a number from 0 to 1 fails the contract check first: R402, not F504 invalid_confidence (§5.19.1, §5.21.3).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence="0.95")}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+    profiles=[
+        {
+            "domain": "confident",
+            "version": "1.0.0",
+            "evidence_policy": {"minimum_confidence": 0.9},
+        }
+    ],
+)
+
+add(
+    "output_contract_unrequired_confidence",
+    "In a 1.2 workflow, a confidence the contract does not require is not checked by the contract (audit's): the step completes; a minimum confidence would check it (F504, §5.21.3).",
+    {
+        "w": wf(
+            [st("audit", "a", input_bindings={"event": {"what": "deploy"}})],
+            spec_version="1.2",
+        )
+    },
+    [{"expect": inv("audit"), "respond": out(recorded=True, confidence=5)}],
+    {"kind": "Completed", "outcome": "completed"},
+)
+
+
+# ---------------------------------------------------------------------------
 # Reference domain workflows: scripted runs of a path that a gate shapes.
 # ---------------------------------------------------------------------------
 PERSONAL_ASSISTANT = (
@@ -6608,10 +6777,18 @@ add(
 # Contributed runtime fixtures (tests/conformance/contrib/*.json), kept as
 # their authors wrote them: each is checked for the fixture keys and copied.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The 1.2 workstreams' fixtures (scripts/runtime_fixtures/*.py).
+# ---------------------------------------------------------------------------
+for workstream in WORKSTREAMS:
+    importlib.import_module(f"runtime_fixtures.{workstream}").register(add)
+
+
 CONTRIB = ROOT / "tests" / "conformance" / "contrib"
 FIXTURE_KEYS = {
     "description",
     "catalog",
+    "header",
     "workflow",
     "inputs",
     "attendance",
@@ -6638,7 +6815,7 @@ def contributed():
             raise ValueError(f"{path}: a fixture is a JSON object")
         keys = set(fixture)
         missing = FIXTURE_KEYS - keys
-        unknown = keys - FIXTURE_KEYS - {"actor_identity"}
+        unknown = keys - FIXTURE_KEYS - set(OPTIONAL)
         if missing or unknown:
             raise ValueError(
                 f"{path}: missing {sorted(missing)}, unknown {sorted(unknown)}"
@@ -6649,12 +6826,200 @@ def contributed():
 contributed()
 
 
+def check_format():
+    """Every fixture conforms to the fixture schema."""
+    schema = json.loads(SCHEMA.read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    for name, fixture in fixtures.items():
+        errors = sorted(validator.iter_errors(fixture), key=lambda e: list(e.path))
+        if errors:
+            where = "/".join(str(p) for p in errors[0].path)
+            raise ValueError(f"{name}: {where}: {errors[0].message}")
+
+
+# The members a fixture may pin (STANDARD v1.2 §10.5): those the Standard
+# defines, each with the section that defines it (S2b design 6.1a). Below the
+# members of OPEN, whose contents the Standard defines by reference (a
+# capability's output, a step's bindings, an event, ...), any member is
+# allowed. A fixture that pins a member outside this table is refused: the
+# table is edited deliberately, with the section that defines the member.
+ACTION = {"kind": "5.19.1", "run_id": "5.19.1", "id": "5.19.1", "frame": "5.19.1"}
+RECORD = {
+    "action_id": "5.19.1",
+    "run_id": "6.4",
+    "frame": "6.4",
+    "step": "6.4",
+    "capability": "6.4",
+    "tool": "5.18",
+    "call_id": "5.18",
+    "timestamp": "6.4",
+    "actor": "5.17",
+    "actor_identity": "5.17",
+    "intent": "6.4",
+    "status": "6.4",
+    "always_ask": "5.17",
+    "person_required": "5.21.3",
+    "approval": "5.14",
+    "reason": "6.3",
+    "reason_code": "5.19.7",
+    "code": "6.4",
+    "checkpoint_id": "6.4",
+    "idempotency_key": "4.4.2",
+    "details": "6.4",
+    "recorded_by": "6.4",
+    "anchors": "6.5",
+}
+NORMATIVE_MEMBERS = {
+    "InvokeCapability": {
+        **ACTION,
+        "step": "5.19.1",
+        "capability": "5.19.1",
+        "store_as": "5.19.1",
+        "domain": "5.2",
+        "inputs": "5.19.1",
+        "deadline": "5.19.1",
+        "attempt": "5.2",
+        "replaces": "5.13",
+        "idempotency_key": "4.4.2",
+    },
+    "CreateCheckpoint": {**ACTION, "step": "5.19.1"},
+    "Rollback": {**ACTION, "step": "5.19.1", "checkpoint_id": "5.12"},
+    "RequestApproval": {
+        **ACTION,
+        "step": "5.19.1",
+        "approver": "5.14",
+        "mode": "5.14",
+        "shown": "5.14",
+        "digest": "5.14",
+        "expires_at": "5.19.1",
+        "queued_action_id": "5.14.1",
+    },
+    "RecheckSource": {
+        **ACTION,
+        "step": "5.19.1",
+        "source": "5.19.1",
+        "compare": "5.14",
+    },
+    "AwaitEvent": {
+        **ACTION,
+        "step": "5.19.1",
+        "event_type": "5.13",
+        "source_kind": "5.13",
+        "correlate": "5.19.1",
+        "accept_from": "5.15",
+        "sender_check": "5.17",
+        "accept_trust_classes": "5.17",
+        "delegate_principal": "5.17",
+        "liveness": "5.13",
+        "deadline": "5.19.1",
+    },
+    "Sleep": {**ACTION, "until": "5.19.1"},
+    "Completed": {
+        **ACTION,
+        "outcome": "5.19.1",
+        "cause": "5.19.1",
+        "ended": "5.6",
+        "outputs": "5.19.1",
+        "action_records": "5.19.1",
+        "deferred": "5.14",
+    },
+    "Failed": {
+        **ACTION,
+        "code": "9",
+        "step": "5.19.1",
+        "message": "5.19.1",
+        "reason": "5.19.7",
+        "checkpoint_id": "5.19.5",
+        "action_records": "5.19.1",
+        "deferred": "5.14",
+    },
+    "ended": {"step": "5.6", "message": "5.6"},
+    "action_records[]": RECORD,
+    "run_record": RECORD,
+    "approval": {
+        "digest": "5.14",
+        "decision": "5.14",
+        "decision_id": "5.19.1",
+        "approvers": "5.14",
+        "approver_identities": "5.17",
+        "mode": "5.14",
+        "mandate_ref": "5.14",
+        "decided_at": "5.14",
+        "expires_at": "5.14",
+    },
+    "deferred[]": {
+        "frame": "5.14",
+        "step": "5.14",
+        "store_as": "5.14",
+        "reason": "5.14",
+        "action_id": "5.14",
+    },
+}
+OPEN = {
+    "outputs",
+    "inputs",
+    "shown",
+    "correlate",
+    "event",
+    "details",
+    "approver",
+    "liveness",
+    "actor_identity",
+    "approver_identities",
+}
+
+
+def pinned_problems(name, value, table):
+    """The members `value` pins that `table` (a NORMATIVE_MEMBERS entry)
+    does not list."""
+    problems = []
+    for key, sub in value.items():
+        if key not in NORMATIVE_MEMBERS[table]:
+            problems.append(
+                f"{name}: {table}.{key} is not a member §10.5 lets a fixture pin"
+            )
+            continue
+        if key in OPEN:
+            continue
+        items = sub if isinstance(sub, list) else [sub]
+        nested = {
+            "action_records": "action_records[]",
+            "deferred": "deferred[]",
+            "approval": "approval",
+            "ended": "ended",
+        }.get(key)
+        for item in items:
+            if nested and isinstance(item, dict):
+                problems += pinned_problems(name, item, nested)
+    return problems
+
+
+def check_pinned():
+    """Every member a fixture pins in an `expect`, its `end` or its
+    `run_record` is one the Standard defines (NORMATIVE_MEMBERS)."""
+    problems = []
+    for name, f in fixtures.items():
+        pinned = [e["expect"] for e in f["script"] if "expect" in e] + [f["end"]]
+        for value in pinned:
+            kind = value.get("kind")
+            if kind not in NORMATIVE_MEMBERS:
+                problems.append(f"{name}: an action of kind {kind!r}")
+                continue
+            problems += pinned_problems(name, value, kind)
+        if "run_record" in f:
+            problems += pinned_problems(name, f["run_record"], "run_record")
+    if problems:
+        raise ValueError("\n".join(problems))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--check", action="store_true", help="fail if the fixtures on disk differ"
     )
     check = parser.parse_args(argv).check
+    check_format()
+    check_pinned()
     rendered = {
         f"{name}.json": json.dumps(f, indent=2) + "\n" for name, f in fixtures.items()
     }

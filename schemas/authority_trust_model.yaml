@@ -1,9 +1,10 @@
 schema:
   name: authority_trust_model
-  version: 1.1.0
+  version: 1.2.0
   generated_at: '2026-01-24T02:55:14.291642Z'
   description: First-class source trust model for conflict resolution, identity resolution,
-    and world-state updates.
+    and world-state updates. Standard v1.2 §8 gives its arithmetic (score, static
+    weight, conflict strategies).
   principles:
   - Trust is contextual (by domain + entity type + field).
   - Trust decays over time unless refreshed.
@@ -39,6 +40,24 @@ trust_classes:
     peer_agent: 0.55
     external: 0.35
 field_authority:
+  description: For a field, the source types authoritative for it. Not a factor
+    of the score; prefer_authoritative_sources and the tie-breaker
+    prefer_authoritative_source rank them first (Standard v1.2 §8.2). fields is
+    what they read; examples is illustrative (kept from 1.1) and not read.
+  # The model's field authorities (Standard v1.2 §8.2). Each authority is a
+  # source type of source_ranking.weights; a field appears once.
+  fields:
+  - field: serial_number
+    authorities:
+    - hardware_sensor
+    - system_of_record
+  - field: deployment_version
+    authorities:
+    - primary_api
+    - system_of_record
+  - field: error_rate_5m
+    authorities:
+    - observability_pipeline
   examples:
   - field: serial_number
     authorities:
@@ -66,16 +85,27 @@ decay_model:
   - healthcheck
   - authoritative_update
 conflict_resolution_function:
+  # Standard v1.2 §8.1: score = weight × confidence × decay, in that order;
+  # confidence 1 when the source reports none; an age below zero counts as 0.
   formula: score = trust_weight(source) * confidence * recency_factor
   # True half-life decay, floored at decay_model.min_trust:
   #   recency_factor(age = half_life) == 0.5
   #   recency_factor(age -> inf)      == min_trust
   recency_factor: max(0.5 ** (age/half_life), min_trust)
+  # Applied in order to candidates the strategy leaves tied (§8.2). Allowed:
+  # prefer_authoritative_source, prefer_high_confidence, prefer_recent,
+  # escalate_to_human. Still tied after the list: escalated.
   tie_breakers:
   - prefer_authoritative_source
   - prefer_high_confidence
   - escalate_to_human
+# Manual overrides (Standard v1.2 §8.4): a person or agent replacing a trust
+# score or a conflict's winner by hand.
 overrides:
+  # When false, every override is refused.
   allow_manual_override: true
+  # An override cites at least one evidence anchor for the value it sets.
   requires_anchors: true
+  # An override is recorded as an audit record (§6.4) before it takes
+  # effect; one whose record cannot be written does not take effect.
   audit_required: true

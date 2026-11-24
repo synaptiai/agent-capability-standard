@@ -32,16 +32,26 @@ findings:
     and hooks/hooks.json in full; grounded_agency/adapter.py lines 525-706 and 737-844; core/src/exec/machine.rs
     lines 644-677; docs/guides/RUNNING_WORKFLOWS.md lines 145-148; spec/SECURITY.md §2.2.7 (lines 165-172);
     spec/CONFORMANCE.md lines 71-82. Ran the greps listed under searched.
-  status: proposed
-  resolution: 'RFC-0005 (Draft, target Standard 1.2.0) proposes the missing rules. Decision 1 defines
-    tool-calling host, tool binding and safety layer. Decision 3 fixes the scope in which history counts,
-    applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102), keeps `soft_requires`
-    a warning and leaves `precedes` and `conflicts_with` unenforced, with reasons. Rule 4.6 makes a layer
-    fail closed. Decision 9 proposes a conformance class whose statement names the calls a layer covers,
-    a call-sequence fixture format and six sequences. Remaining: Nothing is normative until the maintainers
-    accept the Draft and a Standard version carries the text (§2, a section or profile, §10). The fixtures
-    under tests/conformance/calls/ and a runner per reference binding do not exist yet. Open questions
-    1 (scope lifetime, reporting a `precedes` violation) and 8 (placement) are undecided.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18 (Tool-Calling Hosts), accepted from RFC-0005. §2 defines
+    tool-calling host, call, tool binding, safety layer, layer scope and execution boundary. §5.18.5
+    fixes the scope, applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102),
+    leaves `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and
+    unreported, with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407).
+    §10.4 adds the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the
+    calls a layer covers, those whose results carry no capability output (`calls_without_output`) and
+    any §5.18.10 check it does not apply; both reference layers apply every
+    row (the secret checks and redaction of §6.7, the destination policies of §4.4.2, and the output
+    contract of each result they receive as a capability output, which in the Python adapter is a
+    result of an MCP tool bound to a capability, R402: a tool create_grounded_mcp_server serves
+    checks its own, and PostToolUse checks another server''s) and claim the class. A call whose
+    output is refused has failed: it takes no checkpoint and is no prerequisite that ran. Fixtures:
+    tests/conformance/bindings/ (33) and tests/conformance/calls/ (30, five of them on refused
+    outputs), from scripts/gen_call_fixtures.py, with the statements in
+    tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
+    and tests/test_call_fixtures.py, the Standard Agents binding in
+    packages/acs-core/test/bindings.test.ts and examples/standard_agents/test/calls.test.ts, which read
+    the fixture text exactly (parseJsonExact).'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -79,17 +89,24 @@ findings:
     only), core/src/exec/machine.rs lines 644-677, 865-884 and 1375-1396, grounded_agency/state/checkpoint_tracker.py
     lines 40-64, 343-392 and 529-598, grounded_agency/adapter.py lines 660-704, the hook script, tests/conformance/runtime/checkpoint_per_mutation.json
     and skills/rollback/SKILL.md line 273.'
-  status: proposed
-  resolution: 'RFC-0005 decision 4 (Draft) proposes: one checkpoint authorises one call that requires
-    one, with the same rule for steps (4.1); it is used up before the effect, as in the executor and the
-    TypeScript binding, with the case for the Python adapter''s after-success rule stated (4.2); validity
-    ends at an execution boundary and a maximum age the layer states, and a permission prompt answered
-    within the call is not a boundary (4.3); `rollback` needs a checkpoint to exist and uses none (4.4,
-    F503); a missing one is F501 (4.5). Remaining: Draft only. Open question 2: whether one checkpoint
-    per call is normative for every host, before the effect or after success, whether a layer may take
-    a checkpoint itself, and whether the Standard caps the maximum age. The executor, the TypeScript binding,
-    the Python adapter (after success, no boundary) and the plugin hook (marker never used up) keep their
-    behaviours; the RFC aligns no implementation.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.2.2 (steps) and §5.18.6 (calls): one checkpoint per gated step or call,
+    the newest valid one, used up when the call is allowed to start and whatever its outcome once it
+    started; a hold that lapses or is never resolved counts as used; validity ends at an execution
+    boundary and, for a call, at a stated maximum age of at most 30 minutes; with none valid the
+    executor has its host take one and a layer refuses (F501); a rollback needs a checkpoint taken
+    earlier and uses none (F503). grounded_agency/state/checkpoint_tracker.py (holds, consume_if_valid,
+    end_validity, the cap, a maximum age applied to every checkpoint) and grounded_agency/adapter.py
+    follow it; a checkpoint dated after the clock reads (a crafted state file, a clock stepped back)
+    authorises nothing. The plugin''s hooks use the marker up per gated call, take it on a successful
+    `git stash create`, end it at Stop, and keep every marker whose validity ended (used, expired, ended
+    with its turn, replaced) under .claude/checkpoints/, so `git stash pop|apply <commit>` of a recorded
+    commit is a rollback that uses none; the rollback skill''s command hook refuses a restore that names
+    no recorded checkpoint (F503). Tests: tests/test_checkpoint_holds.py,
+    tests/test_hook_checkpoint_lifecycle.py and the call fixtures checkpoint_single_use,
+    two_checkpoints_two_calls, refused_call_keeps_checkpoint, failed_call_uses_checkpoint,
+    checkpoint_stale_after_boundary, checkpoint_stale_after_max_age, rollback_needs_checkpoint and
+    rollback_after_use.'
   concerns:
   - safety-enforcement
   - checkpoint-rollback-state
@@ -126,25 +143,21 @@ findings:
     lines 10-31; core/src/exec/machine.rs lines 688-780. Ran the executor on a `mutate` step with no `approval`
     field: it showed and hashed the step''s inputs wrapped in an array. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     hashes `[{ action, capability, args }]`, a different object.'
-  status: partly_fixed
-  resolution: 'The SDK adapter applies requires_approval to tool calls. With GroundedAgentConfig.approval="ask"
-    (default) its PreToolUse hook answers permissionDecision "ask", reason beginning "F502 APPROVAL_REQUIRED:",
-    once the checkpoint rule holds; the host''s can_use_tool callback, which wrap_options now chains instead
-    of replacing, decides. Without a callback the adapter''s callback denies with F502. Read-only classifications,
-    such as a read-only Bash command, are not asked about; approval="off" restores the earlier behaviour.
-    docs/integrations/claude_agent_sdk.md states what is and is not implemented. Remaining: The Standard
-    defines no approval object or digest for a call without a step (RFC). The adapter obtains one decision
-    per call and computes no §5.14 digest, approver count, expiry or action record. The plugin hook and
-    the send skill''s prompt hook are outside this package. RFC-0005 decision 5 (Draft) defines approval
-    for a call with no step: the shown and hashed value is `[{action, capability, args}]` with the §5.14
-    digest, checked before the checkpoint; one decision per call; an expiry the layer states; at least
-    `min_approvers` distinct approvers; any rejection rejects. A host permission prompt that shows the
-    tool and the inputs and decides that call alone satisfies the rule `in_session` with one approver,
-    bound to the call in place of the digest. Otherwise, and with no one to ask, F502. Remaining: Draft
-    only. Open question 3: `[{action, capability, args}]` or `[args]`; one decision per call or per digest
-    until expiry; which check comes first (the executor and the TypeScript binding check approval first,
-    the working-tree Python adapter the checkpoint). Standing mandates, `skip` and `defer_to_queue` are
-    not defined for a call.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.7: the shown values of a call are `[{action, capability, args}]`
+    with the §5.14 digest; one decision per call, used up when the call is allowed; `min_approvers` and
+    expiry from the binding''s `approval`; a host prompt that shows the call and decides it alone is a
+    one-approver decision, relied on only where it reaches a person (F502 otherwise); changed arguments
+    are classified again; with no one to ask, or arguments that are not I-JSON, F502 (both layers, by
+    one I-JSON number rule, and the call fixtures approval_args_not_i_json,
+    approval_args_beyond_limit_by_one and approval_args_integral_float). The Python adapter records the
+    digest, asks only in the permission modes default, acceptEdits and plan, refuses `min_approvers`
+    above 1 and `role`, and re-classifies changed arguments (tests/test_permission_modes.py,
+    tests/test_permission_callback.py); the plugin hook answers `ask` with an F502 reason in those modes
+    and blocks F502 in the others unless ACS_HOOK_APPROVAL=off; the send skill''s prompt hook no longer
+    judges approval. Vectors: the `tool_call` kinds in tests/conformance/approval/digests.json; fixtures
+    decision_single_use, decision_expires, refused_call_keeps_decision, rejection_wins and
+    two_approvers.'
   concerns:
   - published-api-extension-points
   - safety-enforcement
@@ -182,11 +195,20 @@ findings:
     no checkpoint and no approval, validated with no diagnostic, and the first action of its run was `InvokeCapability`
     for `delegate`. Read schemas/capability_ontology.yaml lines 1443-1500, spec/STANDARD-v1.1.0.md lines
     268-284 and 850-861, and schemas/workflow_catalog.yaml lines 1674-1690.'
-  status: partly_fixed
-  resolution: 'docs/integrations/standard_agents.md, ''How a delegate step maps to a host'', gives the
-    workaround a workflow author has today: raise a `delegate` step''s flags when the target agent can
-    mutate. Remaining: deriving a delegate step''s flags from what its target may do needs an agent manifest
-    (ACS-29) and normative text, which needs an RFC.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets), accepted from RFC-0007: in a workflow
+    that targets 1.2 and declares `agents`, a `delegate` step''s ontology baseline is raised to its
+    target maxima, taken from the agent manifests the host gives (ACS-29); literal `read_only: true`
+    takes the read-only maxima. The executor does not delegate when the target maxima are unknown
+    (R402, not retried). A host that cannot enforce `read_only` refuses the delegation, and in a 1.2
+    workflow an accepted delegation whose `read_only` is not attested fails without retry (R402).
+    W621 reports an unbounded delegation in a 1.2 workflow. Code: `core/src/agents.rs`
+    (`target_maxima`), `core/src/validate/delegation.rs` (`check_targets`),
+    `core/src/exec/machine.rs` (`delegate_target_error`, the `output()` checks); fixtures
+    `fail_agents_flags_raised`, `pass_agents_read_only`, `pass_agents_flags_downgrade_warn`,
+    `pass_agents_manifest_missing_warn`, `pass_unbounded_delegation_*`; runtime fixtures
+    `agents_raise_checkpoint_approval`, `agents_manifest_missing`, `agents_read_only_not_attested`,
+    `delegate_read_only_not_attested_v12`, `delegate_read_only_v11_unchecked`.'
   concerns:
   - multi-agent
   related:
@@ -226,17 +248,38 @@ findings:
     set the thresholds low, medium, high and healthcare.yaml sets none, low, low; every `block_autonomous`
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
-  status: partly_fixed
-  resolution: 'docs/domains/README.md gained ''Status of Domain Profiles'': a profile is informative data,
-    no shipped component loads or selects one, and grounded_agency/trust.py applies a profile''s trust_weights
-    only when a caller passes them. A table names what the validator, the reference executor, the Python
-    adapter and the plugin hook enforce. Domain pages and profile header comments point there. The EU
-    AI Act, ISO 42001 and NIST AI RMF documents now present block_autonomous, thresholds, minimum_confidence,
-    anchor types and retention as declarations, and name what enforces each control. Remaining: The normative
-    part: a Standard section saying how a run selects a profile, a tighten-only merge rule, what each
-    field changes, key grammars tied to capability ids and Anchor.kind, and diagnostics. That needs an
-    RFC. README.md (root) and analysis/10-regulatory-compliance.md, outside this package''s scope, still
-    present block_autonomous as enforced.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.21 (Domain Profiles), accepted
+    from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls it covers, a
+    validator may be given them; a workflow''s `profile` field stays descriptive. Rules only tighten (trust
+    weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and §5.14, a person
+    for `require_human`/`block_autonomous` without a mark (records carry `person_required`; a composite
+    whose approval covers such a call is asked of a person, §5.18.4), `checkpoint`
+    steps exempt from `checkpoint_policy`, a grounding policy (`require_grounding` with
+    `required_anchor_types` as kinds, §5.20), a minimum confidence (F504
+    `below_minimum_confidence`/`invalid_confidence`) checked after grounding; key grammars are capability
+    ids or `*`, anchor kinds and trust classes; loading diagnostics S303, S304, V101, V109, W602-W604,
+    `critical` deprecated; an executor or safety layer refuses a profile whose rule it does not put in
+    force, and a validator applies only the flags (§5.21.4). Implemented once in core/src/profile.rs for
+    the validator (`--profile`, `Options.profiles`) and the executor (`StartOptions.profiles`: thresholds,
+    checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
+    delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
+    `GroundedAgentConfig(profiles=)` for flags, the person, a composite taking the raised flags and person of
+    the bindings it invokes, grounding and minimum confidence on the output of every MCP tool bound to a
+    capability (a tool it serves checks its own result, the PostToolUse hook another server''s; Claude
+    Code''s own tools carry no capability output and get a one-time warning), `_core.check_confidence`),
+    each call raised for every capability it performs at its effective risk (§5.21.3, the `calls` vectors
+    of effective.json), to TypeScript through the WebAssembly
+    core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
+    its `invokes`, a composite listing a binding a profile requires a person for asked of a person,
+    `bindingProfiles` reporting loading warnings). Normative vectors
+    tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
+    among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
+    it is by the executor, the adapter and the binding; the compliance documents say where a setting is
+    enforced. A profile''s `allowed_destinations` is a destination policy in force beside the host''s own
+    (§4.4.2, RFC-0009): the executor reads `Policy::destinations` in its send check, the adapter and the
+    binding apply it to send calls (F504 before approval); runtime fixtures profile_destinations_refuse,
+    profile_destinations_none and destination_profile_policy_refuses; no shipped profile sets it.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -275,16 +318,22 @@ findings:
     a catalog that binds `${r_out.evidence_anchors[0]}` in strict mode: B204. Read examples/standard_agents/src/example/settings.ts,
     where the reference binding returns `{ ref, kind: ''file'', metadata: { sha256 } }`. The word ''anchor''
     occurs in spec/STANDARD-v1.1.0.md at lines 58, 65, 1126 and 1138 only.'
-  status: proposed
-  resolution: 'RFC-0005 decision 8 (Draft) lists the three `kind` vocabularies as they stand in schemas/event_schema.yaml,
-    schemas/world_state_schema.yaml and the Python SDK (a free string; the five values its code writes),
-    and proposes one `EvidenceAnchor` from the event schema''s `Anchor`, the event schema''s seven kinds
-    for both schemas and the SDK, an `x-` prefix for a host''s own kinds, an opaque `ref`, an optional
-    `sha256:` digest, and `items` on the capability outputs only once every repository catalog validates
-    with it in strict mode. Remaining: Draft only: no schema, ontology or SDK file changes, since the
-    ontology and the canonical schemas change only by an accepted RFC. Open question 5: whether an item
-    may be a bare string, whether an empty list satisfies §3.1, how the SDK''s five kinds map to the seven.
-    What `required_anchor_types` means stays with ACS-05.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.5 (Evidence Anchors), accepted from RFC-0008, which takes over RFC-0005 decision 8
+    and answers its open question 5: one evidence anchor, `event_schema.yaml#/types/Anchor` 1.2.0, which
+    `world_state_schema.yaml` repeats (`tools/validate_canonical_schemas.py` and
+    `tests/test_evidence_schemas.py` check they are equal), with `ref`, `kind` and optional `timestamp`,
+    `excerpt` and a `sha256:` `digest`; one kind vocabulary (the seven, `record`, and vendor kinds
+    `x-...`); `ref` opaque except the reserved `acs:` scheme; every one of the 36 outputs''
+    `evidence_anchors` has `items: anyOf [Anchor, string, object]` (ontology 2.2.0), the bare string and
+    the non-anchor object being deprecated legacy forms, accepted until 2.0 and never counted. An empty
+    list grounds nothing (§3.1); `required_anchor_types` lists kinds and is a grounding policy''s
+    `kinds` (§5.20). Every repository catalog still validates in strict mode. The Python SDK writes
+    canonical kinds (the legacy names, and free kinds as `x-...`, are deprecated aliases whose queries
+    keep their 1.1 results; `tests/test_evidence_anchor.py`) and §6.5 objects in the outputs it builds
+    (the coordination steps'', `tests/test_coordination.py`); the three languages agree on what is an
+    anchor (`digest: null` is not; grounding vectors); the binding''s `fileAnchor` carries `digest`, and
+    `schemas/interop/evidence.schema.json` restates the anchor.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -326,13 +375,14 @@ findings:
     in full (`_ontology` is assigned at line 301 and not read again) and grounded_agency/adapter.py lines
     192-200 and 579-641.'
   status: fixed
-  resolution: 'grounded_agency/capabilities/mapper.py: register_mcp_tool resolves capability_id against
-    the ontology and raises ValueError naming V101 UNKNOWN_CAPABILITY for an unknown id. Flags are the
-    stricter of ontology and declaration (booleans OR-ed, risk the higher level); a weaker declaration
-    has no effect and is logged and kept in mapper.warnings as W602. ToolMapping is frozen and gains requires_approval
-    and domain; static mappings take every flag from the ontology. An unknown tool maps to UNCLASSIFIED_TOOL
-    (mutate, high, checkpoint and approval), the one constant the adapter also uses. Remaining: Nothing
-    for the SDK. The binding profile that states this default belongs to the tool-call RFC.'
+  resolution: 'Standard 1.2.0 §5.18.2 states the default: an unbound tool is the strictest case,
+    reported W617 UNBOUND_TOOL where the host knows the tools it offers.
+    grounded_agency/capabilities/mapper.py: an unknown tool maps to UNCLASSIFIED_TOOL; an unknown
+    capability is V101; a weaker declaration has no effect (W602). `register_mcp_tool` and
+    `create_grounded_mcp_server` no longer register a tool with no capability as `execute`: it is
+    unbound and reported W617. `check_offered` (Python) and `checkBindings` (TypeScript) report unbound
+    offered tools. Tests: tests/test_tool_bindings.py, tests/test_mcp_integration.py, the fixtures
+    offered_unbound and unbound_tool_is_strictest.'
   concerns:
   - tools-contracts
   - safety-enforcement
@@ -364,23 +414,15 @@ findings:
     569-641, hooks/pretooluse_require_checkpoint.sh lines 31-34, grounded_agency/errors.py lines 1-90
     and the published types at dist/index.d.ts lines 211-236. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     returns the §9.8 object with `location: { tool, capability }`.'
-  status: partly_fixed
-  resolution: 'Hook part: the reason that hooks/pretooluse_require_checkpoint.sh writes to stderr when
-    it blocks a call (exit 2) now opens with `F501 CHECKPOINT_REQUIRED:`. Tests in tests/test_hooks_unit.py
-    and tests/test_pretooluse_hooks.py assert this prefix. hooks/README.md and SECURITY.md §5.1 state
-    it. Remaining: Not done in this package: a §9.8 convention for reporting tool-call denials (needs
-    an RFC), and the Python adapter''s deny reason. The SDK adapter''s refusal reasons open with the diagnostic
-    code and name: "F501 CHECKPOINT_REQUIRED:" for a missing or reserved checkpoint (PreToolUse hook and
-    permission callback) and "F502 APPROVAL_REQUIRED:" for an approval request or for a refusal when no
-    one can approve. Each reason names the tool and its capability. The mapper''s W602 reports carry location
-    {tool, capability, field}. Rate-limit and internal-failure reasons carry no code, since the Standard
-    defines none. Remaining: §9.8 still states no convention for a tool-call denial (RFC). The adapter
-    returns text, not a §9.8 object. The plugin shell hook is another package. RFC-0005 decision 6 (Draft)
-    proposes that a tool-call refusal is the §9.8 diagnostic whose `location` holds `tool` and `capability`
-    and no `workflow` or `step`, and that on a text-only channel the text opens with the code and name,
-    as in `F501 CHECKPOINT_REQUIRED: ...`. §9.8 is unchanged and no code is added. Remaining: Draft only,
-    so the convention is not normative. The adapter''s deny reason and the hook''s message are changed
-    by other work packages, not by this file.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §9.8 and §5.18.8: a refusal of a call is the §9.8 diagnostic with
+    `location` {tool, capability, call}, and its text form is `<CODE> <NAME>: <message>`; host policies
+    such as rate limits refuse with F504, and a failure of the layer is R407 SAFETY_CHECK_FAILED.
+    grounded_agency/errors.py `text_form`; the adapter keeps the diagnostic in `call_records` and sends
+    the text form; the plugin hook''s reasons open with the code and name and its ERR trap blocks with
+    R407; the Standard Agents binding returns R407 for a check or record it cannot complete. Tests:
+    tests/test_pretooluse_hooks.py, tests/test_hooks_unit.py,
+    examples/standard_agents/test/tools.test.ts.'
   concerns:
   - safety-enforcement
   related:
@@ -413,9 +455,22 @@ findings:
     field: ''capability''}, {workflow, step: 2, capability, field: ''requires_aproval''} and {workflow,
     step: 2, capability, field: ''gates[0].when'', column: 1}. Read core/src/validate/mod.rs lines 495-515
     and core/src/diag.rs lines 110-132.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §9.8 (Diagnostic Format) defines every `location` key, those of S1,
+    S2b and S6 included: `step` zero-based in list order, `field` relative to the step, else the
+    workflow, else the document; a finding about a profile or a tool names it and has no `path`;
+    `path` is an RFC 6901 pointer from the catalog root, exact also for keys that contain `.` (the
+    reference builds `field` and `path` from the same segments); `catalog` names another catalog of
+    the set; `column` counts code points; §9.1 keeps implementation codes out of the standard form.
+    Code: `core/src/diag.rs` (`at_field`, `at_field_key`), `core/src/validate/location.rs`; the
+    binding''s `issuePath` (`packages/acs-core/src/issues.ts`). Tests:
+    `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`,
+    `core/tests/delegation_catalogs.rs` (`colliding_keys_get_exact_paths`,
+    `columns_count_code_points`), the fixtures'' `expected_locations`; a finding inside a step,
+    W616 for a step member included, carries `step` and `capability`, and a finding in another
+    catalog of the set, one about its version header included, carries `catalog` and the
+    workflow''s own name (the same test checks both on every fixture; fixture
+    `fail_library_header_version`).'
   concerns:
   - packaging-conformance-governance
   related:
@@ -448,14 +503,15 @@ findings:
     step''s inputs in a one-element array, and expires_at None. Read core/src/exec/machine.rs lines 716-762
     and the script of tests/conformance/runtime/checkpoint_per_mutation.json, whose first RequestApproval
     expectation holds `kind`, `step`, `mode` and `shown`.'
-  status: partly_fixed
-  resolution: 'scripts/gen_runtime_fixtures.py: both approval requests of the runtime fixture checkpoint_per_mutation
-    (two `mutate` steps with no `approval` field) now expect approver `{kind: human}`, mode `in_session`,
-    the step''s resolved inputs in an array and `expires_at: null`. The regenerated fixture passes `--check`,
-    `cargo test --test runtime` and tests/test_runner.py. Fixture matching is by subset, so tests/test_approval_vectors.py
-    also checks that the approver has no other member. Executor behaviour is unchanged. Remaining: STANDARD
-    §5.14 still does not state what is asked for a step whose effective `requires_approval` is true and
-    that declares no `approval` field. That is normative text and needs an RFC; the fixture is informative.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("The request") states it: a step whose effective `requires_approval` is
+    true and that declares no `approval` field is asked as if it declared `approval: {approver: {kind:
+    human}}` (a person, `in_session`, shown its resolved inputs as an array, no expiry, no recheck,
+    `when_unattended: fail`); a partial field takes the default of each member it omits; `expires` runs from
+    the request. Appendix D.2 lists it as a clarification of 1.1. The runtime fixtures
+    checkpoint_per_mutation and approval_defaults_partial (a request a second after the start, expiring an
+    hour after it) pin it, resume_expires_from_request pins `expires` from a resumed run''s new request, and
+    tests/test_approval_vectors.py checks the exact approver. RFC-0006 Part A, decision A1.'
   concerns:
   - approval-human
   related:
@@ -477,7 +533,7 @@ findings:
   - core/src/exec/canonical.rs digest (lines 93-101), same_digest (lines 119-126), unit tests (lines 192-211)
   - core/tests/runtime.rs `{{digest}}` placeholder (lines 30-33)
   - tests/conformance/runtime/approval_wrong_digest.json (the only literal digest)
-  - examples/standard_agents/test/fixtures/approval-digests.json (generated by scripts/gen_standard_agents_binding.py)
+  - tests/conformance/approval/digests.json (generated by scripts/gen_standard_agents_binding.py; when this was verified, the vectors were the Standard Agents example's examples/standard_agents/test/fixtures/approval-digests.json, which packages/acs-core/test/canonical.test.ts replaced by reading this file in place)
   quote: canonical JSON of the shown values matches
   searched: 64-character hexadecimal literals in tests/conformance/runtime/*.json (one, all zeros, in
     approval_wrong_digest.json); '{{digest}}' in the same files (58 occurrences in 42 files); 'digest'
@@ -492,18 +548,19 @@ findings:
     (ten vectors of `shown` and `digest` when this was verified, 16 now) and its generator, scripts/gen_standard_agents_binding.py lines
     174-300, which runs the reference executor; .github/workflows/ci.yml lines 92-93 check that the file
     is current.
-  status: partly_fixed
-  resolution: 'tests/conformance/approval/digests.json holds 16 approval requests of the reference executor,
-    written by scripts/gen_standard_agents_binding.py (CI runs it with `--check`): shown values, RFC 8785
-    canonical JSON and lowercase hexadecimal SHA-256, covering member order, nesting, number forms, non-ASCII
-    text, an empty list, a step without `shows`, a step without `approval` and a re-ask after a recheck.
-    tests/test_approval_vectors.py replays each on the executor and recomputes text and digest independently.
-    The binding''s fixture is a byte copy. spec/CONFORMANCE.md lists the vectors as informative and names
-    what the Standard does not state. Remaining: STANDARD §5.14 does not state the digest input (the array
-    of resolved `shows` values, the default when `shows` is absent, the object appended on a re-ask) or
-    the lowercase hexadecimal form, and §10.3 does not cite the vectors; both are normative text and need
-    an RFC. §5.14 bounds shown integers at ±2^53 while RFC 7493 §2.2 gives ±(2^53 - 1) as the exact range;
-    the `numbers` vector holds 2^53.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("Shown values and digest") states the input (the array of resolved
+    `shows` values in order, null for a reference that resolves to nothing, `[inputs]` without `shows`, a
+    `recheck` element on a re-ask), the SHA-256 of its RFC 8785 text as 64 lowercase hexadecimal digits
+    compared regardless of case, and the integer bound as applied (a number written without fraction or
+    exponent, magnitude at most 2^53; every other number binary64, so `1e+21` is valid); whatever reads
+    values from JSON text refuses a member name twice in one object, as `exec::read_json` does
+    (core/tests/runtime.rs read_json_refuses_values_outside_i_json). §10.3 makes
+    tests/conformance/approval/digests.json normative, with a `kind` per vector, a new
+    `unresolved_reference` vector, and what each step vector shows from (`inputs` or `bindings`,
+    `recheck_read`); tests/test_approval_vectors.py and
+    packages/acs-core/test/canonical.test.ts check it, and the runtime fixtures approval_digest_any_case and
+    approval_shows_unresolved pin the comparison and the null element. RFC-0006 Part A, decision A2.'
   concerns:
   - approval-human
   related:
@@ -537,9 +594,18 @@ findings:
     lines 373-412, core/src/exec/machine.rs lines 742-780 and 983-1030, core/src/exec/mod.rs lines 202-229
     and Standard Agent Specification endpoints.md lines 98-105. The record also proposes that `approval.approver`
     may bind `sender_check` and `accept_trust_classes`.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.17 ("Approvers"): with `identity@1` a decision may carry
+    `approver_identities`; approvers are counted by principal, an identity counts only if its kind is
+    `human` for a human approver and its `role` is the requested one, and two different identities for one
+    principal make the decision malformed. In a workflow that targets 1.2 the approver may require
+    `sender_check` and `accept_trust_classes` (V106, S303; W604 and W616 in an earlier target). The record
+    lists the counted approvers and `approval.approver_identities` (schemas/world_state_schema.yaml 1.2.0).
+    core/src/exec/machine.rs (decide, meets), core/src/validate/approval.rs; runtime fixtures `approver_*`,
+    validator fixtures `*approver_identity*`, core/tests/runtime.rs decision_identities_must_be_well_formed.
+    The Standard Agents binding records each approver as an identity, and a call''s record lists the
+    approvers whose approvals counted (examples/standard_agents/src/acs/approval.ts approverIdentity,
+    countedDecisions). RFC-0006 Part A, decision A4.'
   concerns:
   - approval-human
 - id: ACS-13
@@ -572,9 +638,17 @@ findings:
   verified: Ran the greps listed under searched; read spec/STANDARD-v1.1.0.md lines 844-902, the `defer`
     and `queue` passages of spec/RFC-0003-orchestration-extensions.md (lines 236-311) and of both guides,
     grounded_agency/_core.pyi lines 40-68, and core/src/exec/machine.rs lines 783-862 and 967-981.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14.1 defines resumption: a run that ended `deferred` continues as the same
+    run; its deferred steps run again, with the steps that ran ahead of them that they read and a checkpoint
+    step whose invalidated checkpoint a re-entered mutation binds; a nested deferred run continues; a queued
+    step is asked afresh (of a person when attended), every request naming `queued_action_id` until the step
+    goes on or its action is carried out, and its `planned` record is updated in place with each decision
+    and refusal; a recovery loop runs again only the steps from its target to the step that looped, a
+    deferred handler among them keeping its nested run, and the resumption goes on; the queued actions of a
+    run that did not end `deferred` are abandoned. `Run.resume` (core/src/exec/mod.rs, machine.rs),
+    `_core.Run.resume`, `WorkflowRunner.resume`; thirty-two `resume_*` runtime fixtures,
+    core/tests/runtime.rs and tests/test_runner.py. RFC-0006 Part A, decision A5.'
   concerns:
   - approval-human
 - id: ACS-14
@@ -607,9 +681,19 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md lines 562-595, docs/guides/ORCHESTRATION_EXTENSIONS.md lines
     57-122 and the function list of core/src/cron.rs; read grounded_agency/workflows/runner.py lines 235-269,
     where `start` passes its `attendance` argument, default `attended`, to the core.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.10.2 (Evaluating Triggers) assigns trigger evaluation to the host, which
+    applies the trigger''s attendance (a run an `invoke` step starts always has its invoker''s), starts one
+    run per event it accepts under its sender policy and at most one per `event_id`, and starts schedule runs at their fire times as `overlap` allows; it defines
+    fire times in the declared time zone (RFC 5545 §3.3.5 for clock changes), the `every` anchor (the Unix
+    epoch), the three `overlap` values (a resumed run counts as in progress) and missed fire times.
+    core/src/trigger.rs next_fire, exposed as _core.next_fire; grounded_agency/workflows/triggers.py
+    (trigger_attendance, OverlapGate, EventGate); WorkflowRunner.start(trigger=, event=) and
+    WorkflowRunner(event_seen=) for a persisted store of seen event ids. Normative vectors
+    tests/conformance/triggers/ (fire times, overlap, attendance, events), computed by
+    scripts/gen_trigger_vectors.py with zoneinfo and run by core/tests/triggers.rs and
+    tests/test_triggers.py; runtime fixtures invoke_trigger_attendance_ignored*. RFC-0006 Part B, decision
+    B7.'
   concerns:
   - workflow-execution
 - id: ACS-15
@@ -645,9 +729,16 @@ findings:
     W615) with `join` set to `all_complete`, `any_complete` and `no-such-join-value`; run with `any_complete`,
     the executor issued `InvokeCapability` for steps 0, 1 and 2 in order, one at a time, and completed.
     Read spec/STANDARD-v1.1.0.md lines 153-172, 250-260, 398-406, 778-802.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.2.3 (Parallel Groups): the members are not ordered, an executor may run them
+    in any order or concurrently and a §5.19 executor runs them in list order; the group is complete when
+    every member has finished; unfinished members are abandoned when a recovery escalates or ends the run,
+    and a loop continues from its target. `join` has one defined value, `all_complete`; any other, or a
+    `join` without a group, is W618 (UNKNOWN_JOIN, ignored); a read of a group mate''s store is W619
+    (GROUP_MATE_READ). §4.3, §5.2 and §5.6 reworded, as are spec/EDGE_TYPES.md, the composition patterns,
+    the modality guide and the validator''s messages. core/src/validate/groups.rs; validator fixtures
+    pass_join_unknown_warns and pass_group_mate_read_warns; runtime fixtures parallel_group_list_order,
+    parallel_group_unknown_join and parallel_group_member_fails. RFC-0006 Part B, decision B8.'
   concerns:
   - workflow-execution
   - multi-agent
@@ -683,9 +774,15 @@ findings:
     `conflicts_with` edges of schemas/capability_ontology.yaml (rollback and persist, mutate and rollback,
     each in both directions). Probe parallel.py shows the executor issuing the members of a group one
     at a time.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.3 (Scope of `conflicts_with`) and `spec/EDGE_TYPES.md` §5: the rule
+    applies within one workflow and does not reach across runs or agents; the cases are named, a
+    host SHOULD serialise a `rollback` with `mutate` and `persist` on the same state, and W623
+    reports a schedule trigger with `overlap: allow_all` on a workflow that exercises both
+    capabilities of a pair, through invoked workflows and `rollback` actions (event triggers
+    excluded, with the reason). Code: `core/src/validate/semantics.rs` (`exercised`,
+    `concurrent_conflicts`); fixtures `pass_concurrent_conflict_warn`,
+    `pass_concurrent_conflict_invoked_warn`, `pass_concurrent_conflict_action_warn`.'
   concerns:
   - safety-enforcement
 - id: ACS-17
@@ -717,9 +814,17 @@ findings:
     [claude, gpt]`): as scripted the run completed; with the first letter of each attested `model_family`
     capitalised it failed F504, "no counted verdict from model family claude, gpt". Read core/src/exec/quorum.rs
     lines 88-125 and 240-250.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15 (Model families), §5.16 and §5.17: families compare exactly
+    everywhere, are written `[a-z][a-z0-9_-]*` (W620 for a literal outside it), and a host derives
+    one from the model identifier by one rule (a `name:tag` identifier gives the name);
+    `agent_identity` 1.1.0, the world state''s
+    `AgentIdentity` and `delegate.effective` carry `model_id`, typed and checked against the
+    identity (R402) in a workflow that targets 1.2; a 1.1 run reads no `model_id`, as before.
+    Code: `core/src/names.rs` (`model_family`), `grounded_agency/coordination/families.py`,
+    `packages/acs-core/src/families.ts`; vectors `tests/conformance/families/derive.json` (fictional
+    identifiers); fixtures `pass_model_family_warn`, runtime `quorum_family_exact`,
+    `delegate_identity_model_id_mismatch`, `delegate_identity_model_id_v11_unchecked`.'
   concerns:
   - models-context-memory-security
 - id: ACS-18
@@ -753,9 +858,17 @@ findings:
   verified: 'Read spec/STANDARD-v1.1.0.md lines 84-93, 678-683, 786-790 and 904-940. Listed by script
     every ontology edge that touches `delegate`: decompose enables delegate, delegate enables synchronize,
     delegate specializes invoke; none from `checkpoint`.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.4 (Checkpoints Across a Delegation), accepted from RFC-0009: a
+    run''s checkpoints never authorise a delegate''s changes, except where a safety layer orders the
+    delegate''s calls in the delegator''s scope, where one checkpoint authorises one change by either
+    agent; before each change a delegate needs a checkpoint valid in the scope where that change is
+    checked, which its host may attest as `delegate.effective.checkpointed` (ontology 2.2.0); a rollback
+    restores what its checkpoint captured, whoever changed it, and reaches nothing else (`not_covered`,
+    `delegated`); all-or-nothing needs `read_only: true` or an explicit undo step. The Python adapter''s
+    shared scope is that case, pinned by tests/test_adapter_effects.py
+    (`test_subagent_mutation_uses_shared_checkpoint`); the runtime fixture `delegate_rollback_own_state`
+    pins the executor''s rollback after a delegation; the delegate skill states it.'
   concerns:
   - multi-agent
   related:
@@ -790,9 +903,20 @@ findings:
   verified: 'Read the cited lines. Ran a `send` step with `retry: {max: 1}` on the reference executor,
     the host answering R401 and then an output: the host received two `InvokeCapability` actions with
     identical `inputs` (`attempt` 1 and 2) and one approval request, and the run completed.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.3, §4.4, §4.4.2 (Transmissions) and §12.1, accepted from RFC-0009: for
+    `send` the checkpoint restores the agent''s own state, not the transmission, and a rollback lists it
+    as `not_covered`, `transmitted`; every `InvokeCapability` carries an executor-issued
+    `idempotency_key` (`<run_id>:<n>`, the same for every attempt of one pass, new for loops and
+    replacing delegations; a pending action restored from an older state gets `<run_id>:<id>`); a host
+    MUST NOT transmit twice per key, answers `outcome_unknown` when unsure and `key_conflict` for a
+    reused key; `send.compensation` takes the form of `TransitionRule.rollback` and is performed only by
+    a step of its own. Implemented in core/src/exec/machine.rs (`execute()`, records) and
+    core/src/exec/mod.rs (restore), schemas/host_protocol.schema.json (`idempotency_key` required),
+    grounded_agency/workflows/idempotency.py (`IdempotencyLog`) and `Host.send_once`; `WorkflowRunner`
+    refuses to save runs with an in-memory key log. Tests: core/tests/effects.rs,
+    tests/test_idempotency.py; runtime fixtures `send_retry_one_key`, `send_loop_new_key`,
+    `send_outcome_unknown`, `delegate_replaces_new_key`.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -829,9 +953,18 @@ findings:
     `recorded: false` on the reference executor: the run completed. Read skills/audit/SKILL.md line 95
     and SA hooks.md line 5 (a hook''s failures are non-fatal) and lines 430-442 (`tool_call_done` fires
     for failed calls too).'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §6.4 separates required from best-effort capture and requires that no capture
+    fails silently; an `audit` step that binds `require_record: true` fails R402, reason not_recorded,
+    unless its output''s `recorded` is true (ontology 2.2.0 input); §5.19.8 gives every run a run record, an
+    ActionRecord derived from its terminal action, that every host keeps with the run''s records (failed and
+    cancelled runs included), and the recovery texts of the reference catalog, the composition patterns and
+    the digital twin skill point to it; §8.4 defines allow_manual_override, requires_anchors and
+    audit_required.
+    Run::run_record, RunResult.run_record, WorkflowRunner(archive=); grounded_agency.trust.manual_override;
+    create_evidence_collector(required=True); hooks/posttooluse_log_tool.sh reports every call it does not
+    log or cannot sign (exit 1), and no skill keeps a log of its own beside it. Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
+    tests/test_audit_records.py, tests/test_hooks_unit.py. RFC-0006 Part B, decision B10.'
   concerns:
   - evidence-audit-observability
   related:
@@ -869,9 +1002,23 @@ findings:
   verified: 'Read the cited lines. Listed every capability output property whose name contains ''infer''
     or ''method'' by script: none. Ran the reference executor with empty `evidence_anchors` on every step:
     no diagnostic. Read schemas/profiles/profile_schema.yaml lines 76-80 (`require_grounding`).'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.1, §4.1.1 and §5.20, accepted from RFC-0008: `inference_method` is an optional
+    string on all 36 output contracts with a vocabulary a producer SHOULD use; the extension
+    `grounding@1` (a workflow `grounding` policy) and host policies given at start (covering nested
+    runs) make the reference executor check host outputs, failing with F505, now fireable in `on_error`;
+    outputs the executor builds itself, a waiting delegate included, are exempt; an output reporting an
+    action is grounded by a `record` anchor. Implemented by `core/src/grounding.rs` (`check`) and
+    `core/src/exec/machine.rs`, `validate/grounding.rs` (V106 in a 1.2 target, W604 otherwise, S303,
+    S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding`
+    (applied to the outputs of the MCP tools bound to a capability, those `create_grounded_mcp_server`
+    serves and other servers'' at PostToolUse; Claude Code''s own tools return none, calls its
+    statement names in `calls_without_output`), the binding''s `grounding`
+    option, and `record`
+    anchors on the reference producers'' action outputs (the SDK''s checkpoint and coordination step
+    outputs, `tests/test_coordination.py`); pinned by `tests/conformance/grounding/check.json`
+    (normative, run in Rust, Python and TypeScript), the `grounding_*` runtime fixtures and the workflow
+    fixtures.'
   concerns:
   - evidence-audit-observability
 - id: ACS-22
@@ -901,9 +1048,18 @@ findings:
     for a delegation; without the attestation the claim counts as inferred, not failed.'
   verified: 'Read the cited lines of the Standard and of the two SA pages. Listed every line of spec/STANDARD-v1.1.0.md
     that contains ''anchor'' (58, 65, 1126, 1138): none relates an anchor to what a step read.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.1, §6.5 (Available evidence) and §5.20, accepted from RFC-0008: an anchor grounds a
+    claim only if its producer had the evidence, and a host MUST NOT return one it knows its producer
+    did not have. Under a grounding policy the executor requires an `acs:` citation to be of kind
+    `record` and covered by a reference the step''s `input_bindings` make (same root, the bound path a
+    prefix, an index within a bound slice counting); a host attests other evidence with `evidence_seen`
+    on its `Output` response (absent attests nothing, an empty list attests nothing was seen), and
+    `attested: true` makes an unattested anchor not count, so the output then stands only if marked
+    inferred. A call''s argument names are what its `acs:` anchors may cite; the binding''s `seen`
+    option lists only what the call received. Pinned by the coverage and attestation vectors of
+    `tests/conformance/grounding/check.json` and the `grounding_acs_*`,
+    `grounding_evidence_seen_mismatch` and `grounding_attested_*` runtime fixtures.'
   concerns:
   - models-context-memory-security
 - id: ACS-23
@@ -941,18 +1097,20 @@ findings:
     and 1128-1140, spec/SECURITY.md lines 78-90 and 398-404, schemas/event_schema.yaml lines 28-36 and
     146-149, and skills/perspective-validation/SKILL.md line 149, skills/audit/SKILL.md lines 92 and 314,
     skills/persist/SKILL.md lines 362-363.'
-  status: partly_fixed
-  resolution: 'Plugin part: the audit hook no longer writes skill arguments or any tool input. A SHA-256
-    digest of the input as compact JSON with sorted keys (jq -cS) stands in for it, or `unavailable` when
-    the digest cannot be computed. The skills'' own log hooks under .audit/ likewise write a digest in
-    place of commands, file paths and search patterns. Tests check that a secret in the input, the response
-    or the error text never reaches either log. SDK part: EvidenceAnchor.from_tool_output keeps
-    tool_input in metadata only with include_tool_input=True. The evidence collector also leaves out a
-    Bash command''s text unless asked (from_command accepts None). GroundedAgentConfig.evidence_include_tool_input,
-    default False, reaches the collector and DiscoveryPipeline, whose anchor no longer keeps the task
-    description by default. With the switch on, inputs are stored unredacted. Remaining: A normative rule
-    on secrets in evidence, excerpts, audit records and persisted memory (Standard, SECURITY.md) needs
-    an RFC.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.7 (Secrets in Records), §3.2, §6.2 and §5.19.1, accepted from RFC-0008, and
+    SECURITY.md §1.5: a secret never enters evidence, records, notifications, canonical events,
+    diagnostics, a host''s Error, a trace or persisted memory; redaction to `[REDACTED]` is a transform
+    with documented loss; a canonical event''s `raw` may be the redacted original with `redactions`;
+    persisting a secret is refused (F504 on a layer, reason `secret_in_data` for a step). Enforced by
+    code: the Python `Redactor` in every evidence store, the coordination audit log, the runner''s Error
+    messages and the adapter''s records; the evidence collector keeps no digest of a response holding a
+    secret; the binding redacts every trace entry and notification; the SDK adapter and the binding
+    refuse persist and audit data holding a credential (F504, §5.18.10), changed arguments included,
+    as the plugin''s persist and audit skill hooks do with one shared scan (`hooks/secret_scan.sh`); the
+    three apply one rule, pinned by `tests/conformance/secrets/credentials.json`. Tested by
+    `tests/test_redaction.py`, `tests/test_skill_hooks.py`, `tests/test_permission_callback.py` and
+    the binding''s `test/evidence.test.ts`.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -991,9 +1149,14 @@ findings:
     In schemas/interop/oasf_mapping.yaml 27 distinct `domain_hint` values are dotted. Read core/src/validate/mod.rs
     lines 390-399, core/src/exec/machine.rs lines 1296-1310 and grounded_agency/workflows/tracer.py lines
     210-222.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.2.4 (Domain Parameter): a domain id grammar (W620 outside it), a
+    host selection rule (exact, longest prefix at a dot, the domain-less implementation, else R402
+    with reason `unsupported_domain`), and §5.1 states the workflow-level `domain` is descriptive.
+    `schemas/workflow_catalog.yaml`''s `plan-invalidation` is now `plan_invalidation`, with its
+    bundled copies. Code: `core/src/names.rs` (`is_domain_id`),
+    `grounded_agency/workflows/domains.py`, `packages/acs-core/src/domains.ts`; vectors
+    `tests/conformance/domains/match.json`; fixture `pass_domain_grammar_warn`.'
   concerns:
   - tools-contracts
 - id: ACS-25
@@ -1029,16 +1192,27 @@ findings:
     lines 16-22, docs/integrations/oasf_coverage.md lines 3-5, spec/STANDARD-v1.1.0.md lines 1435-1516,
     site/src/data/versions.ts lines 10-24 and site/src/lib/api.ts lines 44-54 (the data API envelope carries
     standard, ontology and plugin).
-  status: partly_fixed
-  resolution: '`spec/ROADMAP.md` has a Versions table: Standard 1.1.0, ontology 2.1.0, plugin 2.0.0, Python
-    package 0.1.0, each with its declaring file. `tests/test_version_lines.py` compares the table with
-    those files. Review made the check of the introduction''s ''Plugin X implements Standard Y'' sentence
-    fail when the sentence is missing, and added a check that `grounded_agency.__version__` equals the
-    version in `pyproject.toml`. `schemas/interop/oasf_mapping.yaml` names `agent_capability_standard.standard`
-    and `.ontology` in place of `grounded_agency_version`; `docs/integrations/oasf_coverage.md` states
-    the same two versions and is compared with the mapping file. Remaining: No text says how the ontology
-    is versioned relative to the Standard, or what a classification made elsewhere cites. That is a rule
-    for STANDARD section 11 and needs an RFC; this package was limited to a table in ROADMAP.md.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §11.6 (Ontology Versions): the ontology''s own SemVer with a change table that
+    classifies constraint changes and records 2.1.0''s `transform.output` widening; pairing with Standard
+    versions; a citation rule for documents outside workflows (`standard` and `ontology`; another ontology
+    major or an unsupported Standard is V109). §11.7 lists the artifacts of 1.2.0 with their versions, checked
+    by tests/test_version_lines.py (test_standard_artifact_table). §11.5 adds 1.2, makes W616 read one table
+    of features (core `semantics::FEATURES`) and makes the catalog header an explicit start member; each 1.2
+    feature''s row of that table lands with the workstream that adds the feature: S2a''s approver fields,
+    S2b''s `require_record`, S4''s `grounding@1` and F505, S3''s `agents` and `continues` (with the qualified
+    `invoke` target, which the invoke check reports from the names of the invoker''s catalog, and the
+    catalog manifest, which the manifest check reports from the file''s header) and S5''s memory `scope`,
+    each pinned by a validator fixture (warn_version_feature_1_2, warn_version_feature_1_2_grounding,
+    warn_version_feature_1_2_trust_classes, pass_approver_identity_1_1_warn and the *_v11_warn fixtures);
+    and the header fixtures
+    header_1_2_sender_check_needs_identities and header_null_sender_check_not_read pin the header in the
+    executor. The consumers implement the citation rule through one core function
+    (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
+    CitedVersionError); an id a cited document names that the ontology lacks is V101 where it is used (the
+    profile loader; the OASF adapter''s translate, UnknownCapabilityError, tests/test_oasf_adapter.py); the
+    ROADMAP Versions table has five lines and site/src/data/versions.ts reads the TypeScript package''s
+    version.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-26
@@ -1075,9 +1249,23 @@ findings:
     `restored` occurs in core/src only in comments about snapshots. The base `Host.rollback` in grounded_agency/workflows/runner.py
     (lines 93-96) raises `NotImplementedError("no rollback")`, and grounded_agency/adapter.py (lines 306,
     403) leaves file capture to the Claude Agent SDK.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §2 and §4.4.1 (Checkpoints and Rollback), accepted from RFC-0009: a
+    checkpoint is a host-kept copy of the state within its scope; a host reports `mechanism`,
+    `captured`, `excluded`, `digest` and `expires_at` (retention, apart from validity); `restored: true`
+    asserts that everything the rollback concerns is back, with `unrestored` (`failed`, `conflict`,
+    `discarded`, `not_captured`) and `not_covered` (`transmitted`, `delegated`, `outside_scope`) as two
+    lists; the record of what happened is never within a rollback''s reach; a `rollback` step completes
+    either way and W624 reports an unchecked one in a 1.2 workflow, while the executor''s own `Rollback`
+    is answered `RolledBack` only on a full restore, else F503 (`RolledBack.not_covered`, §5.19.1).
+    Ontology 2.2.0 carries the outputs. Implemented in core/src/exec/machine.rs and
+    core/src/validate/effects.rs, grounded_agency/state/snapshots.py (`FileSnapshotStore`, protected
+    paths, secret-path exclusions, private modes), `CheckpointTracker(snapshots=...)` and
+    `Host.rollback`; the checkpoint and rollback skills are host-neutral (`git stash create`, `git
+    restore`). Tests: core/tests/effects.rs, tests/test_snapshots.py, tests/test_runner_effects.py;
+    runtime fixtures `rollback_step_not_restored_completes`, `rollback_step_checked`,
+    `rolled_back_not_covered`; validator fixtures `warn_unchecked_rollback`, `pass_checked_rollback`,
+    `pass_unchecked_rollback_v11`.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -1114,9 +1302,20 @@ findings:
     with tools/validate_workflows.py --strict: no diagnostic for the value. Ran it on the reference executor:
     the host received the string unchanged. The first validator run wrote the tool''s default output file,
     the git-ignored tools/validator_suggestions.json; later runs used --suggestions-out.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.5 (Memory), accepted from RFC-0009: optional `scope` on `persist` and
+    `recall` (`run` = the run the host started and every run nested in it, `session`, `user`, `project`,
+    `global`, `x-` names), each defined by visibility and lifetime and echoed in the output; the
+    executor fails a 1.2 step that binds a scope the output does not echo (R402, `unsupported_scope`); `ttl`
+    is a §5.10.1 duration longer than zero (W614 for a literal outside it, `unsupported_ttl` from a
+    host); `stored_at` on both, `persist.timestamp` deprecated (W603); W626 for an unknown literal
+    scope; W616 for the input in a 1.0 or 1.1 workflow. Implemented in core/src/exec/machine.rs
+    (`output()`), core/src/validate/effects.rs and grounded_agency/state/memory.py; the persist and
+    recall skills follow it. Tests: core/tests/effects.rs; runtime fixtures `persist_scope_echo`,
+    `persist_scope_mismatch`, `recall_scope_absent`, `persist_scope_unbound`,
+    `persist_scope_v11_unchecked`; validator fixtures
+    `warn_memory_inputs`, `warn_persist_timestamp`, `pass_memory_scope_v11_warn`;
+    tests/conformance/memory/store.json.'
   concerns:
   - checkpoint-rollback-state
   - models-context-memory-security
@@ -1153,17 +1352,17 @@ findings:
     ''any''}` and `{type: ''string|object''}` throw ''Unsupported type'', and `{}` yields ZodAny. Read
     core/src/types.rs lines 158-184 and core/src/schema.rs lines 244-258. skills/*/schemas/ holds 36 generated
     output schemas and no input schema.'
-  status: partly_fixed
-  resolution: 'scripts/gen_capability_json_schemas.py renders the ontology''s 72 input and output schemas
-    as one JSON Schema Draft 2020-12 document, schemas/generated/capability_contracts.schema.json (`$defs`:
-    `<capability>.input`, `<capability>.output`); CI runs it with `--check`. A union `a|b` becomes a type
-    list (6 slots); `any` becomes a schema with no `type` and `"x-acs-type": "any"` (26 slots). tests/test_capability_json_schemas.py
-    checks the metaschema, agreement with the ontology and identical reference-validator reports on every
-    workflow fixture and shipped catalog. docs/GLOSSARY.md describes the rendering. The ontology is unchanged.
-    Remaining: STANDARD v1.1.0 §4.1 still calls the contracts ''JSON Schema'' and does not define `any`
-    or `a|b`; defining them (and adopting or renaming `x-acs-type`) is normative and needs an RFC. The
-    36 generated skills/*/schemas/output_schema.yaml files keep the ontology''s spelling, and `evidence_anchors`
-    has no item schema.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.1.2 (Schema Dialect) defines the contracts'' keywords: Draft 2020-12 ones
+    from a fixed list, `type: any`, `type: "a|b"`, `$ref` to a repository path or the same file with sibling
+    keywords merged over the target (a missing target, a cycle or a chain deeper than 12 refuses the ontology
+    at load: core Context::new, and so the validator, the executor, WebAssembly and the Python adapter;
+    core/tests/contracts.rs, tests/test_capability_json_schemas.py), `nullable`, and `x-` annotations with
+    `x-acs-` reserved (Appendix B). The Draft 2020-12 rendering''s rules are normative;
+    schemas/generated/capability_contracts.schema.json is generated from the core''s resolved contracts, and
+    the §5.4 divergence on `nullable` is stated and pinned (tests/test_capability_json_schemas.py).
+    schemas/capability_ontology.schema.json''s dialect metaschema checks the ontology in CI; the TypeScript
+    package compiles the rendering under strict ajv.'
   concerns:
   - tools-contracts
   - models-context-memory-security
@@ -1197,9 +1396,18 @@ findings:
     definitions.'
   verified: Read schemas/capability_ontology.yaml lines 1443-1500, grounded_agency/coordination/registry.py
     lines 1-75 and grounded_agency/coordination/delegation.py lines 193-250; listed schemas/ and schemas/interop/.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.1 (Agent Manifests): the supporting schema
+    `schemas/agent_manifest_schema.yaml` 1.0.0 (`agent`, `standard`, `ontology`, `capabilities`,
+    optional `task`); maxima and read-only maxima derived from the ontology; a manifest that cannot
+    be used is refused when loaded (each task input''s members typed as `agent_task_input` says),
+    and an unknown capability is V101 where it is used. Code:
+    `core/src/agents.rs`, `grounded_agency/coordination/manifest.py` and
+    `AgentDescriptor.from_manifest`/`manifest`/`maxima`, `packages/acs-core/src/agents.ts`, and the
+    binding''s `deriveAgentManifest`, which loads each `acs` annotation as a binding record, as the
+    layer does, follows `invokes`, and refuses to derive from unannotated, unloadable or ungiven
+    invoked tools and from declared flags its capabilities do not carry; vectors
+    `tests/conformance/agents/maxima.json`; fixture `fail_agents_unknown_capability`.'
   concerns:
   - multi-agent
 - id: ACS-30
@@ -1231,9 +1439,16 @@ findings:
     record and accepted an arbitrary object as `event`; a run with an approved `send` produced one `ActionRecord`.
     Trace events had the keys `seq`, `at`, `kind`, `frame`, `step`, `detail`. §10.3 (lines 1427-1431)
     calls the runtime fixtures, which include the trace, informative.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §6.4 (Audit Records): an audit record is an ActionRecord or a canonical event,
+    written in or exported as those shapes; world_state_schema.yaml 1.2.0 adds the correlation and integrity
+    members, `cancelled`, a `rejected` that covers executor and safety-layer refusals and
+    `approval.decision_id`; the executor''s record mode `actions` records every step that runs, every
+    failure-mode checkpoint and every rollback; `audit` records its event under details.event of a record of
+    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord (the skills no
+    longer append free-form lines to .audit/), the audit skill writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
+    records_actions_*, records_failure_*, records_default_unchanged; tests/test_audit_records.py validates
+    every writer''s records against ActionRecord. RFC-0006 Part B, decision B9.'
   concerns:
   - evidence-audit-observability
   related:
@@ -1273,9 +1488,16 @@ findings:
     and 637-644, and machine.rs lines 184-211, 240-250 and 2113-2170. Replayed the 175 runtime fixtures
     with a snapshot and restore before every scripted step (probe measure.py): the restored run returned
     the identical pending action, id included, at 968 of 968 points.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.4 states the host''s obligations (one writer, save after every change and
+    before acting, at-least-once delivery idempotent under the delivery key (`run_id`, `id`), interrupted
+    turns) and integrity (the executor detects corruption and, given a key, refuses a state whose MAC fails;
+    a host whose stored states others can change uses a key); §5.19.2 makes `run_id` unique among the runs
+    whose records or keys the host keeps. Every action carries `run_id` (host_protocol.schema.json requires
+    it); Run.tick returns whether it changed the run; Host.withdraw; WorkflowRunner drive/advance/run take
+    save= and key= and refuse a reused run_id. Tests test_restore_reissues_same_id_and_run_id,
+    test_run_id_reuse_refused, test_drive_saves_after_every_change, test_withdraw_on_timeout; fixture
+    action_has_run_id. RFC-0006 Part B, decision B3.'
   concerns:
   - workflow-execution
   related:
@@ -1311,9 +1533,14 @@ findings:
   verified: 'Read core/src/exec/mod.rs lines 82-89, 100-238 and 638-660 and core/src/exec/machine.rs lines
     1923-1968. Listed the operations of `Run` in core/src/exec/mod.rs and grounded_agency/_core.pyi: start,
     restore, next, submit, tick, finished, trace, action_records, snapshot.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.5 (Cancelling a Run): `cancel(reason, now)` ends a run, or one that ended
+    deferred, with Failed R408 (CANCELLED, §9.5) naming the latest checkpoint; no retry, failure mode,
+    recovery, handler or rollback runs; the pending action is withdrawn; approved and planned records become
+    `cancelled`; in record mode `actions` every started step of every frame, and a pending failure-mode
+    checkpoint or rollback, gets a cancelled record. Run::cancel, _core.Run.cancel, WorkflowRunner.cancel.
+    Fixtures cancel_* (pending call, approval, delay, backoff, waiting delegate, failure-mode checkpoint,
+    nested runs, a deferred run); core/tests/host_protocol.rs. RFC-0006 Part B, decision B4.'
   concerns:
   - workflow-execution
   related:
@@ -1349,10 +1576,15 @@ findings:
     final snapshot state 1,269 to 40,895 bytes, median 3,343; the trace is 43% of all bytes (median 39%
     per fixture). Read core/src/exec/mod.rs lines 414-420 and 494-517. Grepped core/src/exec for uses
     of `st.trace`: `len()` for `seq` and `push` only (machine.rs lines 169, 176).'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: documenting
-    the snapshot size model, and letting a host move the trace out of the run state, in the reference
-    core.'
+  status: fixed
+  resolution: 'Run::take_trace and take_records shed the trace and the settled records from a run''s state while
+    `seq`, record indices and action ids stay sound, and the state keeps SHA-256 chain heads over everything
+    taken (Run::taken_heads, _core.Run.taken_sha256), which spec/STANDARD-v1.2.0.md §5.19.4 makes a MUST for
+    any executor that offers taking; the terminal action is derived from the state, not stored with copies
+    of the records and outputs (snapshot version 2; version-1 snapshots restore,
+    core/tests/data/snapshots_v1.json). Every runtime fixture is replayed with the trace and records taken
+    before every entry and checked against the chain heads (core/tests/runtime.rs); the size model and
+    measured figures are in docs/guides/RUNNING_WORKFLOWS.md. RFC-0006 Part B, decision B6.'
   concerns:
   - workflow-execution
 - id: ACS-34
@@ -1385,9 +1617,14 @@ findings:
     2113-2170. Probe boundary.py restored a snapshot at the first deadline-bearing action of each kind
     and ticked at the deadline and one millisecond later: `InvokeCapability`, `AwaitEvent` and `RequestApproval`
     were unchanged at the deadline and changed after it; `Sleep` changed at `until`.'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a `Run.wake_at()`
-    call in the reference core and an event-driven host recipe in the guide.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.3 (Time) states the tick boundaries (a Sleep ends at `until`; an action
+    times out after its deadline, an answer at the deadline is in time), the wake-up time, and that liveness
+    is the host''s to watch. Run::wake_at and _core.Run.wake_at; WorkflowRunner.advance (one turn of an
+    event-driven host, a Turn with the wake-up time) and drive as a loop of turns; the event-driven recipe
+    in docs/guides/RUNNING_WORKFLOWS.md. Fixtures wake_at_* with `wake_at` and `tick`/`changed` entries;
+    every harness checks at every tick of every fixture that it changed the run exactly when its time
+    reached the wake-up time. RFC-0006 Part B, decision B5.'
   concerns:
   - workflow-execution
   related:
@@ -1423,9 +1660,15 @@ findings:
     the snapshot state holds that identity; `Run.restore` rejected an `actor_identity` argument with TypeError;
     the restored run completed and both of its action records carry `agent-a`. Read core/src/exec/mod.rs
     lines 494-517 and 684-700.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.17 ("Actor"): a run keeps its actor while it continues; a restore that names
+    an actor of another principal (or any actor for a run started without one) is refused; at a handoff the
+    host cancels the run unless it ended `deferred`, which may be resumed under the new actor.
+    `Run.restore_with` and `_core.Run.restore(actor_identity=)`, `WorkflowRunner.restore(actor_identity=)`,
+    `Run.resume` with a new actor (trace `run_resumed`), which the queued records the resumption decides or
+    supersedes carry; core/tests/runtime.rs restore_checks_the_actor, tests/test_runner.py, runtime
+    fixtures resume_new_actor and resume_new_actor_supersedes. docs/integrations/standard_agents.md and
+    schemas/interop/standard_agents_mapping.yaml state the handoff rule. RFC-0006 Part A, decision A6.'
   concerns:
   - multi-agent
 - id: ACS-36
@@ -1462,14 +1705,17 @@ findings:
     and send, with `exit 1` at skills/persist/SKILL.md lines 42 and 47, skills/rollback/SKILL.md line
     46 and skills/send/SKILL.md line 38. Read hooks/pretooluse_require_checkpoint.sh lines 1-34 (its `block`
     function exits 2) and spec/SECURITY.md lines 270-299.'
-  status: partly_fixed
-  resolution: 'The command hooks of the persist, rollback and send skills read the tool call from stdin
-    with jq and block with exit 2, the reason on stderr; a call they cannot read is blocked. The {{tool_input...}}
-    text, which Claude Code never substitutes, was removed from all six skills'' hooks. The SECURITY.md
-    §5.3 example now exits 2 with the reason on stderr. A new §5.4 table lists which checks code enforces
-    and which a model judges. tests/test_skill_hooks.py runs each frontmatter command under sh and bash.
-    Remaining: The proposal to state each of the six checks as a host-neutral requirement of its capability
-    changes the Standard. It needs an RFC and was not done.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.10 states the capability checks host-neutrally, one row per
+    capability the six skills'' hooks cover, with the rule that a required check is decided by code and
+    a model''s judgement may only add a refusal; a host that loads a skill''s text without its hooks
+    applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
+    condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
+    rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
+    name a commit a checkpoint recorded, F503 otherwise, one lookup in <git dir>/acs/checkpoints/commits/), and the `transform` and `persist`
+    secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
+    approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
+    model-judged additions. Tests: tests/test_skill_hooks.py.'
   concerns:
   - safety-enforcement
   - models-context-memory-security
@@ -1508,9 +1754,16 @@ findings:
     in full, schemas/world_state_schema.yaml lines 360-415 (the `decision` enum holds `expired`, which
     no host response carries), spec/CONFORMANCE.md lines 1-82, spec/RFC-0002-agent-reliability-profile.md
     line 207 and Standard Agent Specification runtime.md §16 (lines 382-395).
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19 (Host Protocol) names every action, response and run operation, the
+    members the executor computes, the outputs it composes and Completed.outputs; §5.2 states the retry
+    backoff; schemas/host_protocol.schema.json (supporting, required for class EX) defines each action and
+    response, tested against every action, response, trace event and snapshot of a replay of all runtime
+    fixtures (tests/test_host_protocol_schema.py); unknown response members are ignored. Class EX (§10.5)
+    makes the runtime fixtures normative except `trace_kinds`, after an audit of every pinned member
+    (scripts/gen_runtime_fixtures.py NORMATIVE_MEMBERS refuses an unlisted one);
+    tests/conformance/runtime/schema/fixture.schema.json; ActionRecord.approval.decision_id. RFC-0006 Part
+    B, decisions B1 and B2.'
   concerns:
   - published-api-extension-points
   - approval-human
@@ -1555,17 +1808,22 @@ findings:
     Specification tools.md lines 142-146. Validated the instance {capability: mutate, layer: PERCEIVE,
     risk: low, mutation, requires_checkpoint and requires_approval false} against the annotation schema
     with the jsonschema package: accepted.'
-  status: proposed
-  resolution: 'RFC-0005 decision 2 (Draft) proposes one host-neutral binding record under schemas/interop/:
-    `tool`, `capability`, optional `domain`, declared `flags`, `additional_capabilities`, `invokes`, `ontology`.
-    An unknown capability is V101; effective flags are the stricter of declaration and ontology, a weaker
-    declaration is W602 (except `mutation: false` on a `mutation_overridable` capability); an unbound
-    tool is the strictest case; the enforcing code is authoritative and copies such as `layer` are ignored.
-    The Python `metadata` and the `acs` annotation become carriers; neither is an instance today. Remaining:
-    Draft only: the schema file (proposed name `tool_binding.schema.json`) is not written and the annotation
-    schema is unchanged. Open question 4: strictest case, `observe` at medium risk or refusal for an unbound
-    tool, and whether a definition-time report needs a code. The SDK still gives an MCP tool without metadata
-    `execute`.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.1 and schemas/interop/tool_binding.schema.json: one host-neutral
+    record (`tool`, `ontology`, `standard`, `capability`, `domain`, `flags`, `additional_capabilities`,
+    `classifier`, `invokes`, `approval`, `control`, `destination`, `x-` members), with V101, V109
+    (another ontology major, or a cited Standard the layer does not support), V110 and W602, and
+    carriers that may hold informative copies a layer ignores. Loaders:
+    grounded_agency/capabilities/bindings.py (`load_bindings`, the MCP `metadata` carrier in
+    grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `acs`
+    annotation). The generated schemas/interop/standard_agents_annotation.schema.json makes the
+    annotation a carrier and refuses a copy inconsistent with the capability. A record with a member
+    that has no I-JSON form is S303, by one number rule in both loaders (an integer beyond ±2^53, or a
+    float canonical JSON writes as one, such as 1.8e16); `approval.role`, when present, is a non-empty
+    string, and `approval.expires` at most 2^53 − 1 ms; diagnostics name members by dotted path.
+    Fixtures: the 33 in tests/conformance/bindings/ (unsupported_standard, the vendor_member and
+    approval limits), which both runners read exactly; tests/test_tool_bindings.py,
+    packages/acs-core/test/ijson.test.ts and tests/test_standard_agents_binding.py.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1605,16 +1863,21 @@ findings:
     the ontology with PyYAML and compared the flags of `mutate`, `send` and `persist`. The cited Standard
     Agents example, `close_as_duplicate`, posts a comment and closes an issue in one call (the record
     describes it as labelling and commenting).'
-  status: proposed
-  resolution: 'RFC-0005 rules 2.4 and 2.5 (Draft) propose: a tool that performs several capabilities names
-    them in `additional_capabilities` and takes the strictest flags across them, flag by flag, with the
-    `requires` edges of each; a per-call classifier narrows only for input it recognises, and the declared
-    worst case applies otherwise or when it fails. The classification of remote writes, writes to the
-    host''s own store, messages to a delegate and control-only tools is put to the maintainers as open
-    question 6 (ACS-Q07). Remaining: Draft only. The RFC gives no control-only marker and no decision
-    table for `mutate` versus `send`, `persist` versus `mutate` or `delegate` versus `send`; choosing
-    needs normative text (open question 6). Whether a classifier may return flags weaker than its tool''s
-    declared worst case is open question 7 (ACS-Q08).'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.3 classifies a call by its effect, with a table that answers which
+    capability a remote write, a write to the agent''s own store, a message to a delegate and a stop
+    tool are; `additional_capabilities` takes the strictest flags and every prerequisite; a `classifier`
+    may narrow a call to what its arguments do, never below each returned capability''s flags; a call
+    is `rollback` only when it restores a checkpoint taken in the scope; a control-only tool is never
+    refused and is recorded, and a host action tied to a tool that can be refused is F506. The Python
+    mapper classifies Bash by command (a compound line takes the strictest of its commands; `git stash`
+    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded; a command,
+    expansion or argument it does not recognise gets the worst case, `mutate` and `send`) and binds
+    `Skill` as `invoke`; a grounded MCP server serves a control-only tool unguarded; the Standard Agents
+    binding has `additional_capabilities` and `controlTool`, and its lint reports F506. Tests:
+    tests/test_bash_classification.py, tests/test_mcp_integration.py (TestGroundedServerGuard),
+    examples/standard_agents/test/tools.test.ts; fixtures additional_strictest, gated_control_action,
+    control_action_ok, additional_capability_strictest and control_tool_ungated.'
   concerns:
   - tools-contracts
   related:
@@ -1646,9 +1909,18 @@ findings:
     and let the Python store accept a persistent backend.
   verified: Read the cited lines of the Python SDK, the runner and the reference binding, and SA runtime.md
     lines 344-362.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.6 (Evidence Records and Stores), accepted from RFC-0008: an evidence record (an
+    anchor with `run_id`, `frame`, `step`, `capability`, `tool`, `call_id`) and the duties of an
+    implementation that offers a store (append only, ids never reused, get, filter by capability, kind
+    and run, JSON Lines export, stated durability and bound, removals counted); evidence records are not
+    audit records. `schemas/interop/evidence.schema.json` defines EvidenceRecord, StoreInfo and
+    EvidenceRecorded. Python: `EvidenceStoreProtocol`, the in-memory `EvidenceStore` (frozen kept
+    copies, monotonic ids) and a durable `JsonlEvidenceStore` that repairs a torn last line;
+    `GroundedAgentConfig.evidence_store` takes any backend; the runner records the evidence of outputs
+    the core kept. The binding''s thread trace is a `session` store (`exportEvidence`, `getEvidence`,
+    `findEvidence`, `exportEvidenceJsonl`). Tested by `tests/test_evidence_store.py`,
+    `tests/test_runner_evidence.py` and the binding''s `test/evidence.test.ts`.'
   concerns:
   - evidence-audit-observability
 - id: ACS-41
@@ -1683,13 +1955,24 @@ findings:
     A script over schemas/capability_ontology.yaml found `evidence_anchors` required by all 36 output
     schemas. Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 149, 485-487, 505-507
     and 579 describe the binding''s encoding.'
-  status: proposed
-  resolution: 'RFC-0005 decision 7 (Draft) proposes: where a tool''s result is a string, a capability
-    output is the I-JSON text of the output object with nothing around it; the consumer parses it and
-    checks the fields the output contract requires (R402 otherwise, as in the executor); validated structure
-    such as a submit tool''s arguments is preferred where the host has it; the producer checks the §5.14
-    I-JSON limits first. Remaining: Draft only. The workflow guide and the integration document are not
-    changed by this file.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.9: a capability output carried as a string is the I-JSON text of the
+    output object, nothing around it, with every required field, an evidence_anchors array where present
+    and a required confidence from 0 to 1, else R402; it binds every producer and
+    consumer, a host answering an executor''s capability call included.
+    grounded_agency/capabilities/output.py (`encode_capability_output`, `decode_capability_output`) and
+    packages/acs-core/src/output.ts (`encodeCapabilityOutput`, `decodeCapabilityOutput`); `groundedTool`
+    returns the encoded text, and the Python adapter checks the result of each MCP tool bound to a
+    capability by the same rule (`tool_result_output`: the text of its one text item, which is what the
+    session reads; `GroundedAgentAdapter.check_call_result`, R402, the output-contract row of §5.18.10),
+    a tool `create_grounded_mcp_server` serves as it returns and another server''s at PostToolUse, which
+    replaces a refused result; call fixtures output_breaks_contract, output_not_i_json,
+    nested_output_breaks_contract, refused_output_uses_checkpoint and
+    refused_checkpoint_output_takes_none, played on both routes.
+    docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md
+    tell a host to decode before it answers. The I-JSON limits apply to the text, so the two codecs
+    agree: both pass tests/conformance/output/vectors.json. Tests: tests/test_capability_output.py,
+    tests/test_mcp_integration.py, packages/acs-core/test/output.test.ts.'
   concerns:
   - tools-contracts
   - workflow-execution
@@ -1723,10 +2006,16 @@ findings:
     core/src/lib.rs lines 15-22, core/src/validate/mod.rs lines 95-102 (file paths), core/src/ontology.rs
     lines 105-112 (`Ontology::from_value`), core/src/exec/mod.rs lines 575-600 (`Run::start` takes a parsed
     catalog), examples/standard_agents/package.json (`"private": true`) and spec/ROADMAP.md line 86.'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a published
-    TypeScript package of the ontology table, effective flags, canonical JSON and the digest (the reference
-    binding holds a private copy), and a JSON-in, JSON-out WebAssembly interface to the core.'
+  status: fixed
+  resolution: 'packages/acs-core (`@synaptiai/acs-core` 0.1.0): the plain-TypeScript entry holds the ontology
+    table, effective flags, RFC 8785 canonical JSON and the approval digest; the `./wasm` entry runs the
+    reference validator and executor, domain profiles included, in process through core/src/wasm.rs (feature
+    `wasm`: three C-ABI exports over JSON, no new dependency; `Context::from_values` with an in-memory schema
+    store). The package''s tests replay the validator fixtures, every runtime fixture (straight and restored
+    before each entry), the expression fixtures and the profile vectors through the module; CI builds it.
+    .github/workflows/publish-npm.yml publishes from a tag `acs-core-vX.Y.Z` on main when NPM_PUBLISH_ENABLED
+    and NPM_TOKEN are both set (a dry run otherwise; tests/test_ci_workflows.py). The Standard Agents binding
+    depends on the package.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1772,7 +2061,8 @@ findings:
     Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 10-13 pin the versions.'
   status: fixed
   resolution: '`schemas/interop/standard_agents_mapping.yaml` pins SA 0.2.0, its commit, `@standardagents/spec`
-    0.45.10, Standard 1.1.0, ontology 2.1.0 and the `acs` annotation key with its schema. It records twelve
+    0.45.10, Standard 1.2.0, ontology 2.2.0 (1.1.0 and 2.1.0 when it was fixed) and the `acs` annotation
+    key with its schema. It records twelve
     capability rulings, three anchor `ref` forms, the timestamp units and the identity field map, each
     with the mapping rows it rests on. Review changed `subagent_message` from `is` to `carrier`, because
     tools-contracts#cls-07 leaves its classification by reserved name open, and tightened four notes.
@@ -1813,9 +2103,14 @@ findings:
   verified: Ran the greps listed under searched and read each matching line. In core/src/exec/machine.rs
     the value is read at line 761 for the request and at lines 1013 and 2150 for the record, each with
     the default `in_session`, and nowhere else.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("Modes") defines `in_session` (the party attending the run, in its
+    session) and `out_of_band` (a separate channel whose approvers need not attend the run), says the mode
+    changes neither the shown values, the digest nor which decisions are valid, and keeps the 1.1 rule that
+    a human approver is never asked in an unattended run; out-of-band approval of an unattended run''s
+    action is `defer_to_queue` and resumption (§5.14.1). schemas/workflow_catalog.schema.json and
+    schemas/world_state_schema.yaml describe both values; the runtime fixture
+    approval_out_of_band_unattended pins the unattended rule. RFC-0006 Part A, decision A3.'
   concerns:
   - approval-human
 - id: ACS-45
@@ -1846,9 +2141,13 @@ findings:
     declared outputs). Anything else a workflow wants transmitted is a `send` or `inquire` step.'
   verified: Read schemas/capability_ontology.yaml lines 1133-1142, spec/STANDARD-v1.1.0.md lines 84-88,
     182-190 and 815-825, and the action table of docs/guides/RUNNING_WORKFLOWS.md (lines 83-92).
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.6 (Protocol Traffic): what a host transmits to perform an approval
+    request, a recheck, a wait or a terminal action is protocol traffic, not a `send` step, and needs no
+    checkpoint or approval, provided it carries only the action''s values; a host must not add other values
+    of the run, and a tool that delivers it is a host action under §5.18.3. Appendix D.3 lists it;
+    docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md apply it. RFC-0006 Part B,
+    decision B11.'
   concerns:
   - workflow-execution
 - id: ACS-46
@@ -1880,9 +2179,17 @@ findings:
     the same list under `agents` gave W604; a `delegate` step whose `agent` is `${pool[0]: string}` validated
     with no diagnostic. Read schemas/workflow_catalog.yaml lines 1674-1690 and spec/STANDARD-v1.1.0.md
     lines 222-230.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets): the workflow field `agents`, which
+    applies only in a workflow that targets 1.2, so an older consumer refuses a workflow that relies
+    on it (V109); below 1.2 it is ignored, as by a 1.1 consumer, and W616 (§11.5). A literal target
+    not listed is V107, a computed one is refused by the executor (R402), a listed agent a static
+    host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`, which, like
+    `declaredAgents`, takes the catalog header and ignores `agents` below 1.2), and W622
+    reports a computed target without `agents`. Code: `core/src/validate/delegation.rs`
+    (`check_agents_field`, `check_targets`), `core/src/exec/machine.rs`; fixtures
+    `pass_agents_v11_warn`, `pass_agents_declared`, `fail_agents_undeclared_target`,
+    `fail_agents_shape`, `pass_unbounded_delegation_warn`; runtime `agents_computed_unlisted`.'
   concerns:
   - workflow-execution
 - id: ACS-47
@@ -1913,9 +2220,14 @@ findings:
   verified: 'Probe delegate.py: a `delegate` step that binds `x-continues` validated with no diagnostic
     and the key reached the host in the action''s `inputs`; the same key without `x-` gave W604. Read
     spec/STANDARD-v1.1.0.md lines 753-775, 978 and 987-996 and core/src/exec/quorum.rs lines 88-140.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.3 (Continuing a Delegation): the `delegate` input `continues`
+    (ontology 2.2.0); with a literal `fresh_context: true` it is S303, a host that attests a fresh
+    context for a continuation fails the step (R402), null delegates anew, and every call returns
+    its own `task_id` (R402 otherwise), so a waiting delegate''s correlation and `replaces` name one
+    call. Code: `core/src/validate/delegation.rs`, `core/src/exec/machine.rs` (`output()`); fixtures
+    `fail_delegation_continues`, `pass_delegation_continues`, `pass_continues_v11_warn`; runtime
+    `delegate_continues_*`.'
   concerns:
   - multi-agent
 - id: ACS-48
@@ -1945,9 +2257,18 @@ findings:
     document. Say what `stored: false` does to the step.'
   verified: 'Read the cited lines. Ran a `persist` step on the reference executor with the host returning
     `stored: false`: the step completed and the run went on.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.5 (Memory), accepted from RFC-0009: `stored: true` means
+    read-after-write in the scope until the entry ends, an I-JSON round trip and replace on the same
+    key; `stored: false` means nothing changed and the step completes; refusals are `Error`s
+    (`over_capacity` naming the limit, `unsupported_scope`, `unsupported_ttl`, `secret_in_data`);
+    entries end by expiry, scope end or retention, with no delete operation; a host states durability,
+    retention and limits per scope. Normative vectors tests/conformance/memory/store.json, passed by
+    grounded_agency/state/memory.py (`MemoryStore`, in memory and on file: tests/test_memory_store.py)
+    and by the Standard Agents binding''s `memoryTools` (session scope:
+    examples/standard_agents/test/memory.test.ts); runtime fixture `persist_stored_false_completes`.
+    Each host states durability, retention and limits: `MemoryStore.statement()`, and for `memoryTools`
+    examples/standard_agents/README.md and docs/integrations/standard_agents.md.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -1982,9 +2303,24 @@ findings:
     1328-1331 ('workflow ... is not in the catalog', R402), core/src/exec/program.rs lines 150-165 and
     core/src/exec/mod.rs lines 575-600 (a run is built from one catalog value), and spec/ROADMAP.md lines
     74-81.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.1.1 (Catalog Manifests and Qualified Names): a catalog manifest
+    under `catalog` (`id`, `version`, `ontology`, `exports`), catalog sets, qualified ids `<catalog
+    id>/<name>` for `invoke`, only exported workflows reachable from outside, bare names resolved in
+    the invoker''s own catalog, V107 for a qualified id of a loaded catalog that lacks or hides the
+    workflow, W607 otherwise; workflow names SHOULD be identifiers (W620), and a qualified id''s
+    name is any workflow name, so an exported one that is not an identifier is reachable; a
+    qualified target and a manifest are 1.2 features (W616, §11.5). Code: `core/src/catalogs.rs` (`Resolver`,
+    `Namespace`), `core/src/validate/catalog.rs`, `core/src/validate/invoke.rs`, `Run::start_set`,
+    `WorkflowEngine.load_library`, `--with-catalog`, the WebAssembly `catalogs` member; fixtures
+    `pass_qualified_invoke`, `pass_qualified_invoke_v11_warn`, `fail_qualified_invoke_hidden`,
+    `fail_qualified_cycle`, `fail_catalog_manifest*`, `pass_catalog_manifest_v11_warn`,
+    `pass_names_warn`, `fail_qualified_invoke_names`; runtime `invoke_qualified_library`,
+    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Outside the proposed
+    change: examples/digital_twin_sync_loop.workflow_catalog.yaml still copies three workflows of
+    schemas/workflow_catalog.yaml (a test keeps them identical). It can invoke them by qualified id
+    once the reference catalog carries a manifest, which is a 1.2 feature (W616), and the shipped
+    catalogs still target 1.1.0.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-50
@@ -2010,9 +2346,16 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1645-1704 (`inquire`), the `receive` node's output
     schema and the edge at lines 1849-1852; skills/inquire/SKILL.md lines 98 and 186; Standard Agent Specification
     decisions.md lines 66-96.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.13.1 (Answers to an Inquiry): ontology 2.2.0 adds
+    `inquire.inquiry_id`, question `id` and `answer_type`, and `receive` items'' `inquiry_id` and
+    `answers`; a host gives every question an id, keys and types answers, and never delivers an
+    answer to an unasked question, of the wrong type (a choice compared as a JSON value, so a
+    boolean never matches a number), or twice, nor one without the inquiry''s string `inquiry_id`;
+    a wait correlates on `inquiry_id`.
+    Code: `grounded_agency/coordination/inquiry.py` (`match_answers`), the SDK orchestrator''s
+    `inquire` output now meets its contract; vectors `tests/conformance/inquiry/answers.json`;
+    fixture `pass_inquiry_correlate`.'
   concerns:
   - approval-human
 - id: ACS-51
@@ -2046,9 +2389,16 @@ findings:
     Found a top-level `confidence` in the output contracts of ten of the thirteen skills (not execute,
     mutate or invoke). Read spec/STANDARD-v1.1.0.md §8.1 (line 1218), which calls the factor ''Self-reported
     confidence from source''.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.1.1 (Common Output Fields), accepted from RFC-0008: `confidence` is the
+    producer''s self-reported probability that the output''s claim is correct, with no threshold in the
+    Standard (gates, conditions and profiles set them); `meta.principles` (ontology 2.2.0) now say every
+    output carries evidence anchors or is marked inferred, and that a capability whose contract requires
+    a confidence returns one; the 13 outputs without one declare it optional; one reconciled
+    `Uncertainty`, optional on every output, with `measure.uncertainty` keeping `lower` and `upper` and
+    gaining its members. Every capability skill glosses `confidence` as that probability, and the OASF
+    proposal quotes the reworded principle. Pinned by `tests/test_evidence_schemas.py` (the 23/13 split,
+    the principle, the glosses).'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -2080,9 +2430,25 @@ findings:
     it with origin-scoped credentials.'
   verified: 'Read the cited lines. Ran a `send` to an arbitrary URL on the reference executor with no
     `constrain` step: the host received the destination unchanged.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.4.2 (Transmissions, destination policy), accepted from RFC-0009: a
+    destination policy is a list of patterns of three forms (exact; a prefix after a delimiter that
+    completes any authority; a suffix from `@` or `.` preceded only by host-name or local-part
+    characters), with normative vectors tests/conformance/destinations/match.json covering every known
+    bypass; the policies in force are the host''s (start option) and each applied profile''s
+    `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
+    (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
+    (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
+    `destination` pointer; an unbound tool, a Bash command whose classification includes `send`
+    (Bash''s worst case, any command it does not recognise) and a composite whose `invokes` reach a
+    `send` binding are refused, since it cannot tell whether or where they send) and the Standard Agents binding
+    (`configureLayer`, which every `send` tool obeys; a composite''s profiles reach the sends it
+    invokes), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
+    hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in
+    core/src/destination.rs (Python through `_core`) and one in packages/acs-core/src/destinations.ts.
+    Tests: core/tests/effects.rs, tests/test_destinations.py, tests/test_adapter_effects.py,
+    examples/standard_agents/test/layer.test.ts; runtime fixtures `destination_*`; validator fixtures
+    `warn_destination_not_shown`, `pass_destination_shown`.'
   concerns:
   - models-context-memory-security
   related:
@@ -2116,9 +2482,15 @@ findings:
     Give `audit.retention` the duration form `max_age` uses.
   verified: 'Read the cited lines. Ran an `audit` step with `retention: "whenever"` through strict validation
     and the reference executor: accepted, and passed to the host unchanged.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.3 and §6.6, accepted from RFC-0008: retention applies to the store the records are
+    written to, and a `memory` or `session` store cannot keep a record longer than its process or
+    session; a host that must keep records longer exports each when it writes it. `audit.retention` is a
+    §5.10.1 duration, and a literal outside the grammar is W614 (`core/src/validate/extensions.rs`
+    `audit_retention`, fixture `pass_audit_retention_warn`); the `audit` output gains `store` (`name`,
+    `durability`, `retention`), which a host whose store does not outlive the session never reports
+    `durable`, so a workflow can stop on it. The `audit` skill reports its store; the plugin''s audit
+    log is documented as a `durable` store with no retention of its own.'
   concerns:
   - checkpoint-rollback-state
 - id: ACS-54
@@ -2147,9 +2519,16 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1448-1459 and spec/STANDARD-v1.1.0.md lines 659-672.
     Probe delegate.py validated a `delegate` step whose literal `task` is an arbitrary nested mapping
     with no diagnostic.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Tasks): an agent manifest''s `task` declares task inputs in
+    the form of workflow `inputs`; in a workflow that declares `agents`, a literal task against a
+    literal agent''s declaration is S303/S304 as for `invoke`, and the executor refuses any other
+    before delegating (R402). Code: `core/src/validate/delegation.rs`,
+    `core/src/validate/inputs.rs`, `core/src/exec/machine.rs`, `DelegationProtocol.delegate`, the
+    binding''s `taskRefusal` (Standard Agents'' `subagent_arguments_required`); a manifest whose task
+    input breaks `agent_task_input` (`required: "yes"`) is refused when loaded, in the core and the
+    SDK; fixture `fail_agents_task`; runtime `agents_task_refused`; tests
+    `agents::tests::task_inputs_are_typed`, `tests/test_agent_manifest.py::test_task_inputs_are_typed`.'
   concerns:
   - multi-agent
 - id: ACS-55
@@ -2183,15 +2562,21 @@ findings:
     and 535-550, and in standardagents/spec content/0.2.0/specification/hooks.md lines 169-180 and 428-444,
     content/0.2.0/specification/agents.md lines 132-166 and content/0.2.0/infrastructure/runtime.md lines
     84-92.
-  status: partly_fixed
-  resolution: 'The plugin''s audit hook now runs after every tool call: hooks/hooks.json registers it
-    for PostToolUse and PostToolUseFailure with matcher `*`. It appends one HMAC-chained line per call
-    to .claude/audit.log with ts, event, tool, the skill name on a Skill call, and input_sha256. Concurrent
-    runs are serialised with flock(2) on the log file, taken by flock or else perl, and a held lock
-    delays a run by 40 seconds at most. Tests show that the chain breaks without the lock. tools/verify_audit_log.py verifies the new format and earlier entries.
-    Remaining: Three parts change the Standard and need an RFC: a required hook that a host must refuse
-    to run without, a record of which configuration activated a hook, and a stated concurrency assumption
-    for the safety layer.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.8: a host that claims a conforming layer runs no covered call
+    without the layer''s decision, and a missing, failing or silent layer means refusal (R407); every
+    record names the layer and its configuration (`recorded_by`). §5.18.10 makes the checks a skill''s
+    hooks implement requirements of the capability on every host. §5.18.5 makes check-and-use atomic,
+    and each statement says how. `create_grounded_mcp_server()` (`require_layer=True` by default) serves
+    tools that refuse a call the adapter''s layer did not allow (R407), a control-only tool excepted;
+    adapter records (digest of the settings, rate limits included, and bindings, computed once per
+    change, every loaded binding I-JSON), the plugin''s audit lines (`recorded_by` with the digest of
+    hooks/hooks.json and the effective settings) and every entry a grounded or control tool writes in
+    the binding''s trace (a grounded tool''s digest covers its annotation and checkpoint maximum age),
+    refusals and the layer''s own failures included, carry `recorded_by`; one adapter is one scope.
+    Tests: tests/test_mcp_integration.py, tests/test_tool_bindings.py (TestRecordedBy),
+    tests/test_verify_audit_log.py, tests/test_toctou_race.py,
+    examples/standard_agents/test/tools.test.ts, grounded.test.ts and nesting.test.ts.'
   concerns:
   - safety-enforcement
 - id: ACS-56
@@ -2226,18 +2611,15 @@ findings:
     * trust_decay`, a different score) and tests/test_validators.py lines 704-711 (the test replaces the
     formula string in the schema). Listed tests/conformance: contrib, expressions, runtime. benchmarks/tests/test_scenarios.py
     tests only the benchmark''s private `_recency_weight`.'
-  status: partly_fixed
-  resolution: 'New module grounded_agency/trust.py, standard library only: decay_factor (0.5 ** (age /
-    half_life), floored at min_trust), static_weight (the lower of class and source weight, with profile
-    `trust_class:<class>` and source keys), trust_score (the product in schemas/authority_trust_model.yaml)
-    and TrustModel. Vectors tests/conformance/trust/decay.json (13), weight.json (14) and score.json (7),
-    absolute tolerance 1e-12; each file lists under `not_covered` the cases section 8 leaves open, and
-    no vector covers them. tests/test_trust.py runs the vectors and checks agreement with the benchmark
-    scenario''s decay. Remaining: STANDARD §10.3 does not name the trust vectors (normative text, RFC).
-    Field authority (§8.1) and the §8.2 strategies have no stated arithmetic and are not implemented.
-    A min_trust above 0.5 (which conflicts with 0.5 at one half-life), a negative age, unknown weights
-    and the composition of the factors are left open by the Standard''s text; the files list them. benchmarks/scenarios/conflicting_sources.py
-    still uses its private `_recency_weight`.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §8.1-§8.3: score = weight × confidence × decay in binary64; confidence 1 when none
+    is reported; an age below zero counts as zero; a `min_trust` above 0.5 applies; evidence without a
+    static weight has no score; field authority ranks sources in §8.2 through the trust model''s new
+    `field_authority.fields`. §8.2 defines six strategies (default `highest_score`), tie-breaking by
+    `tie_breakers`, and chooses a single candidate whatever the strategy. grounded_agency/trust.py gains `resolve`, `Candidate`, `Resolution` and
+    `merge_trust_weights`; the trust vectors are normative with resolve.json added
+    (tests/test_trust.py); the conflicting-sources benchmark resolves with `resolve`, with unchanged
+    results.'
   concerns:
   - models-context-memory-security
 - id: ACS-57
@@ -2267,14 +2649,17 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md §5.1 (lines 201-230), §5.12 (lines 659-672) and §9.2 (lines 1272-1284);
     skills/mutate/SKILL.md lines 1-9; Standard Agent Specification tools.md lines 36-44. The integration
     document names `uses` in the unnumbered paragraph that follows item 6, not in a numbered item.
-  status: proposed
-  resolution: 'RFC-0005 rule 2.6 (Draft) proposes an `invokes` field on the binding record, naming the
-    bindings a tool calls. The tool takes the strictest flags over its own and, transitively, those of
-    the bindings listed; a host SHOULD refuse an invocation outside the list; the list bounds named invocation
-    only, not storage or network calls, so the computed flags are a lower bound. Remaining: Draft only;
-    no schema or implementation carries `invokes`. The RFC does not say whether a layer that also sees
-    the invoked calls checks them on their own, which would make a composite and its inner `mutate` call
-    each need a checkpoint.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.4: `invokes` lists the bindings a composite may call; its effective
+    flags include theirs transitively (V107 for an unresolved name, V105 for a cycle); a nested call the
+    composite''s own code made is covered by its approval and checkpoint, keeps its other checks
+    (prerequisites included) and is recorded with the call that covered it; attribution needs evidence
+    the composite made the call, and a nested call outside the list is F504. The Standard Agents
+    binding''s `groundedTool({invokes})` passes the names as `uses` and issues a one-shot nesting token
+    per invocation; the Python loader computes the flags (its statement says it cannot see nested
+    calls). Tests: examples/standard_agents/test/nesting.test.ts; fixtures invokes_transitive,
+    invokes_cycle, invokes_unresolved, composite_takes_invoked_flags, nested_call_covered,
+    nested_call_keeps_prerequisites and nested_call_outside_invokes.'
   concerns:
   - tools-contracts
   related:
@@ -2302,9 +2687,16 @@ findings:
     which is delivered at most once.
   verified: Grepped the Standard. Read spec/ROADMAP.md lines 72-104, SA threads.md lines 322-348 and SA
     client-api.md lines 445-462.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.6 (Notification), accepted from RFC-0008: a host MAY send an
+    `acs.evidence_recorded` payload when it stores evidence records, a canonical event or audit records
+    (`record_ids`, `event_id` or `action_ids`), with the anchors'' `ref`, `kind` and `digest` and the
+    correlation; it is not a record, may be delivered at most once, and carries no excerpt or secret
+    (`schemas/interop/evidence.schema.json` `EvidenceRecorded`). The Python stores notify `subscribe`d
+    listeners once per append, outside their lock; the binding emits it through `state.emit` after a
+    grounded call completes with anchors, at most once and never failing the call. Tested by
+    `tests/test_evidence_store.py`, `tests/test_evidence_schemas.py` and the binding''s
+    `test/evidence.test.ts`.'
   concerns:
   - evidence-audit-observability
 - id: ACS-59
@@ -2335,15 +2727,13 @@ findings:
     on 13, `hooks` on 6, no `version` key; two names differ from their directory. Read skills/README.md
     lines 119-124 and 146-160, docs/WORKFLOW_ROADMAP.md lines 76-79, site/test/data.test.ts lines 283-288
     and CLAUDE.md line 256.'
-  status: partly_fixed
-  resolution: 'skills/README.md ''Skill Structure'' now shows the eight frontmatter keys all 42 skills
-    carry and the five sections all have. A table says `layer` is in 13 skills (12 capability skills and
-    discover-capabilities) and `hooks` in 6. It says the ontology, not the frontmatter, gives a capability''s
-    layer, that no skill declares a version, and which two composed skills declare a name other than their
-    directory. docs/GLOSSARY.md no longer says skills are organized by layer. Counts were checked by parsing
-    every frontmatter. CLAUDE.md ''Skill Structure'' now says `layer` is in 13 of the 42 skills. Remaining:
-    No document yet says which keys belong to Agent Skills, Claude Code
-    or ACS. The two composed skills keep their differing names, as instructed.'
+  status: fixed
+  resolution: 'Every skill''s frontmatter `name` equals its directory (capability-gap-analysis and
+    digital-twin-sync-loop renamed; their slash commands change, a plugin MAJOR recorded in the
+    CHANGELOG), the `layer` key is removed from the 13 skills that had it (the ontology gives the
+    layer), skills/README.md lists each key''s owner (Agent Skills, Claude Code, ACS under
+    `metadata.acs-*`), and tests/test_skill_frontmatter.py enforces the table. The Agent Skills
+    specification is cited in Standard 1.2.0 §13.2.'
   concerns:
   - published-api-extension-points
   - packaging-conformance-governance
@@ -2380,7 +2770,7 @@ findings:
     fixtures that name an approval kind: 11, of which 8 name `approval_requested`.'
   status: fixed
   resolution: docs/guides/RUNNING_WORKFLOWS.md has a new informative section, 'The trace'. It lists the
-    six fields of a trace event and the 34 kinds the reference executor records, with each kind's detail
+    six fields of a trace event and the kinds the reference executor records (39 in 1.2.0), with each kind's detail
     members. It says these are executor trace kinds, not §5.13 event types, and that relaying them is
     left to the host. tests/test_trace_kinds_doc.py compares the list with the kinds core/src/exec passes
     to trace(), with the runtime fixtures' trace_kinds, and with the events and detail members the fixtures'
@@ -2426,8 +2816,10 @@ findings:
     ''How a delegate step maps to a host''. A waiting delegate is a result the host waits for. A plain
     delegate is a non-blocking child. A cap refusal is accepted false or an Error response. A plain delegate''s
     refusal fails nothing unless the workflow tests accepted. The subsection also covers create-or-continue
-    and retries under maxInstances. For ACS-04 it gives the workaround: raise requires_approval or requires_checkpoint
-    on the step, with a YAML example that the validator accepts.'
+    and retries under maxInstances. For ACS-04 it shows Standard 1.2.0''s workflow field `agents`, with a
+    YAML example that the validator accepts given the target''s agent manifest (without it, W621), and states
+    1.1''s workaround in prose: a workflow that does not declare `agents` raises requires_checkpoint and
+    requires_approval on the step by hand, as the reference catalog''s multi_agent_orchestration does.'
   concerns:
   - multi-agent
 - id: ACS-62
@@ -2462,15 +2854,15 @@ findings:
     lines 260 and 1306-1315, core/src/exec/mod.rs lines 209-213 (`Error` has `code` and `message`) and
     core/src/exec/machine.rs lines 2020-2026 (R401 is kept, R406 is kept on a wait, any other code becomes
     R402).
-  status: partly_fixed
-  resolution: 'docs/guides/MODALITY_HANDLING.md (now 1.1.0) cites STANDARD §5.2 for the step field domain:
-    the validator checks only that it is a string (S303), and the executor passes it on InvokeCapability.
-    §1.3 says a host without a pipeline answers Error, the step fails with R402, and the Standard defines
-    no code or field for an unsupported domain. Every anchor now uses an Anchor.kind of schemas/event_schema.yaml
-    (file), and the modality forms are ref conventions. composite and nested_anchors are removed. The
-    RUNNING_WORKFLOWS InvokeCapability row now names domain. Remaining: A machine-readable place for the
-    reason unsupported_domain (a reason field on Error or a fixed message prefix) needs normative text
-    in §9.5 or the host protocol.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.7 (Error Reasons): an `Error` may carry a `reason` token
+    (unsupported_capability, unsupported_domain, not_recorded and the other defined tokens, or an `x-`
+    vendor token); any other value is ignored, as 1.1 ignored the member; the reason travels to the step''s
+    trace, the run''s Failed action and the record''s `reason_code`. The core reads it (exec Reason), the
+    runner''s HostCannotServe sends it, and docs/guides/MODALITY_HANDLING.md §1.3 uses `unsupported_domain`.
+    Fixtures error_reason_unsupported_domain, error_reason_with_retry, error_reason_outside_grammar_ignored;
+    core/tests/runtime.rs reason_grammar and reason_outside_grammar_is_ignored. RFC-0006 Part B, decision
+    B12.'
   concerns:
   - models-context-memory-security
   related:
@@ -2531,9 +2923,16 @@ findings:
     both files in it.
   verified: Read spec/STANDARD-v1.1.0.md lines 1176-1182 and schemas/entity_taxonomy.yaml lines 10-16.
     Found by the coverage check, which looked for sections of the Standard that no mapping row cites.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §7.1 takes the taxonomy''s form `<class>:<namespace>/<local_id>`, states its
+    grammar (namespace outermost first, `namespace_components` the recommended order) and gives examples of
+    both files, 1.1''s printed example rewritten. schemas/entity_taxonomy.yaml 1.1.0 adds
+    `id_convention.pattern`, which names each white space and control character a segment cannot hold so that
+    it means the same in every regular expression dialect, and that example; grounded_agency/entities.py
+    parses ids; tests/conformance/entities/ids.json (normative) pins the grammar, U+00A0, U+2028, U+3000,
+    U+FEFF and U+0085 included (tests/test_entities.py), and tools/validate_canonical_schemas.py checks every
+    taxonomy example against the pattern and the class list; the skills'' examples write ids in the form, and
+    tests/test_entities.py parses every quoted `entity_id` in the repository''s examples.'
   concerns:
   - evidence-audit-observability
 questions:
@@ -2548,6 +2947,10 @@ questions:
   depends: The history a guard keeps and searches before each call, when that history is cleared, and
     whether a call that breaks an ordering edge is refused with V102 or only logged.
   finding: ACS-01
+  answer: 'Standard 1.2.0 §5.2.1 and §5.18 bind a safety layer over calls (RFC-0005 decisions 1 and 3).
+    History counts over the scope''s lifetime, which the layer names in its statement; a checkpoint''s
+    power to authorise ends sooner (§5.18.6). `requires` refuses (F501, F503, V102); `precedes` is
+    neither refused nor reported over calls (§5.18.5).'
 - id: ACS-Q02
   question: 'Is one checkpoint per gated step normative for every host, or host-defined? If normative:
     is it consumed before the step runs (executor) or after it succeeds (SDK adapter), and with no valid
@@ -2561,6 +2964,10 @@ questions:
   depends: Whether a guard marks a checkpoint used and when, whether a failed call gives it back, and
     whether a missing checkpoint yields F501 or a checkpoint taken on the caller's behalf.
   finding: ACS-02
+  answer: 'Normative for every host (§5.2.2, §5.18.6; RFC-0005 decision 4). Used up when the step or
+    call is allowed to start, before its effect, and whatever its outcome once started. With none valid
+    the executor has its host take one (F501 if that fails); a safety layer refuses with F501 and takes
+    none itself.'
 - id: ACS-Q03
   question: For a tool-level guard, when a model calls one tool several times with identical arguments,
     is approval one decision per call, single use as §5.14 states for a step, or one decision per digest
@@ -2571,6 +2978,8 @@ questions:
   depends: Whether the guard stores a used-decision marker per call or per digest, and whether a repeated
     identical call is refused with F502 until a person decides again.
   finding: ACS-03
+  answer: 'One decision per call, used up when the call is allowed; an identical later call needs a new
+    decision (§5.18.7; RFC-0005 decision 5).'
 - id: ACS-Q04
   question: 'Which classification applies to a tool with no capability binding: non-mutating `observe`
     at medium risk, as `ToolCapabilityMapper.map_tool` returns, or the high-risk mutation the adapter
@@ -2582,6 +2991,8 @@ questions:
   depends: Whether an unbound tool runs with no check, is refused in strict mode, or needs a checkpoint.
     The reference binding reports it as a lint warning and applies no rule to its calls.
   finding: ACS-07
+  answer: 'The strictest case: high risk, a mutation, a checkpoint and an approval (§5.18.2; RFC-0005
+    decision 2). A host that knows the tools it offers reports one as W617 UNBOUND_TOOL.'
 - id: ACS-Q05
   question: 'What may an item of a capability''s `evidence_anchors` be: a string, an `Anchor` object as
     in event_schema.yaml, or a host-defined reference such as `message:<id>`? Does an empty list satisfy
@@ -2595,6 +3006,12 @@ questions:
   depends: The item type a binding emits and validates, the `ref` scheme it uses for host artefacts, and
     whether a capability output with no anchors is accepted or refused.
   finding: ACS-06
+  answer: 'An evidence anchor of §6.5: an object with `ref` and `kind` (the event schema''s kinds,
+    `record` for the agent system''s own records and workflow values, or a vendor kind `x-...`) and an
+    optional `digest`; `ref` is opaque except the reserved `acs:` scheme, so a host artefact such as
+    `message:<id>` is a `ref` under a fitting kind. A bare string or another object is a deprecated legacy
+    form, accepted and never counted toward a grounding policy until 2.0. An empty list grounds nothing:
+    the output must then be marked inferred (§3.1, §5.20; RFC-0008 decisions 1 to 3).'
 - id: ACS-Q06
   question: Is a domain profile normative? If so, do `auto_approve`, `require_review`, `require_human`
     and `block_autonomous` change effective `requires_approval` and §5.14, and what do the keys of `checkpoint_policy`
@@ -2607,6 +3024,12 @@ questions:
   depends: Whether a host reads a profile at all and, if it does, which steps it sends to a person, which
     capabilities it refuses to run unattended and where it takes checkpoints.
   finding: ACS-05
+  answer: 'Normative where applied: a host gives profiles to a run, a safety layer to its calls, and a
+    validator may be given them; a workflow''s `profile` field applies nothing (§5.21.1). Each threshold
+    covers a set of risk levels and raises the effective `requires_approval`, so §5.14 asks for approval;
+    `require_human` and `block_autonomous` also require a person (§5.21.3). `checkpoint_policy` keys are
+    capability ids or `*`, its values `always`, `high_risk`, `medium_risk` or `never`; `critical` is
+    deprecated and read as `none` (W603, §5.21.2; RFC-0010 decision 1).'
 - id: ACS-Q07
   question: 'Which capability classifies each of: a write to a remote system through an API (`mutate`
     or `send`); a write to the host''s own durable store (`persist` or `mutate`); a message to an existing
@@ -2619,6 +3042,10 @@ questions:
   depends: Whether such a tool needs a checkpoint and an approval (`mutate`, `send`) or neither (`persist`,
     `delegate`), and which capability name `requires` edges and audit records carry.
   finding: ACS-39
+  answer: '§5.18.3''s table (RFC-0005 decision 2): a write to a remote system that can be read back is
+    `mutate`; a write to the store the host provides for the agent''s own memory is `persist`, anywhere
+    else `mutate`; a message to an existing delegate is `delegate`; a tool that only signals the host is
+    control-only, never refused and recorded.'
 - id: ACS-Q08
   question: May a per-call classifier return, for one input, a capability with weaker flags than the tool's
     declared worst case, as the SDK's Bash classifier does for read-only commands, or does "cannot weaken"
@@ -2630,6 +3057,10 @@ questions:
   depends: Whether a binding gates every call of a tool by its worst case, or reads the arguments first
     and lets a read-only call through with no checkpoint or approval.
   finding: ACS-39
+  answer: 'Yes (§5.18.3; RFC-0005 decision 2). A binding''s declared capability and flags are the worst
+    case; a `classifier` may narrow one call to what its arguments do, never below the ontology flags of
+    each capability it returns. "Cannot weaken" bounds a declaration against the ontology, not each call
+    against the declaration.'
 - id: ACS-Q09
   question: Do a delegator's checkpoints and `rollback` cover what a delegate changes, as an invoked run
     "shares the caller's checkpoints" (§5.13), or does a delegate that mutates take its own?
@@ -2639,6 +3070,11 @@ questions:
   depends: Whether a parent's rollback must reach into a child's state, and whether a child agent needs
     a checkpoint tool of its own before it may mutate.
   finding: ACS-18
+  answer: 'A delegate takes its own: a run''s checkpoints never authorise a delegate''s changes, except in
+    a safety layer''s shared scope, where one checkpoint authorises one change by either agent. A rollback
+    restores what its checkpoint captured, whoever changed it, and reaches nothing else (a change elsewhere
+    is reported `delegated`); all-or-nothing needs `read_only: true` or an explicit undo step (§5.15.4,
+    §4.4.1; RFC-0009 decision 7).'
 - id: ACS-Q10
   question: 'How does a host establish `attendance` for a model-driven thread that no trigger started:
     is a run attended when a person can answer, or only when one is present in the session at the moment
@@ -2661,6 +3097,9 @@ questions:
   depends: Whether a host redacts before it stores an event, which §6.2 as written rules out, or stores
     the payload as received, which can put credentials into evidence and audit records.
   finding: ACS-23
+  answer: 'Yes: `raw` is the original unmodified except that each secret is replaced by the redaction
+    marker, a documented-loss transform (§3.2), and the event MAY list where in `redactions`; a secret
+    never enters evidence, events or records (§6.2, §6.7; RFC-0008 decision 9).'
 - id: ACS-Q12
   question: What does a host answer for the pending action when its own execution is stopped, terminated
     or deleted, and does a run ended that way attempt a rollback to the latest checkpoint?
@@ -2671,6 +3110,10 @@ questions:
   depends: Whether a stopped thread answers `Error` and lets retries and failure modes run, leaves the
     run unanswered, or ends it with a recorded cause; and whether what the run changed so far is restored.
   finding: ACS-32
+  answer: 'The host cancels the run (§5.19.5): it ends at once with `Failed` R408, the pending action is
+    withdrawn, and no retry, failure mode, recovery, handler or rollback runs. Approved and planned records
+    become `cancelled`. The executor does not roll back; the terminal action names the latest checkpoint
+    (`checkpoint_id`), which the host may restore itself (RFC-0006 decision B4).'
 - id: ACS-Q13
   question: Must an executor run the members of a `parallel_group` concurrently, or does running them
     in list order, as the reference executor does, conform? Which values of `join` are defined, and what
@@ -2683,6 +3126,11 @@ questions:
   depends: Whether an executor needs concurrent dispatch and a join rule, and whether a host that maps
     group members to separate agents may start them one after another.
   finding: ACS-15
+  answer: 'List order conforms: a group''s members are unordered, and an executor may run them in any
+    order or concurrently; one with a single pending action runs them in list order. A group is complete
+    when every member has finished. `join` has one defined value, `all_complete`; another is W618 and
+    ignored. A recovery that escalates or ends the run abandons unfinished members, and a loop continues
+    from its target (§5.2.3; RFC-0006 decision B8).'
 - id: ACS-Q14
   question: 'Are the strings in a decision''s `approvers` meant to be principals (§5.15), so that `min_approvers`
     counts distinct authenticated parties, or free names, as in the guide''s example `"approvers": ["alice"]`?'
@@ -2694,6 +3142,11 @@ questions:
   depends: 'Whether a host records the authenticated caller''s identifier or a display name, and so whether
     one person under two names can satisfy `min_approvers: 2`.'
   finding: ACS-12
+  answer: 'Without identities, `min_approvers` counts the distinct strings of `approvers`, and the host
+    vouches for them. With `identity@1` a decision may carry `approver_identities`, `approvers` must then
+    list exactly their principals, and approvers are counted by principal, each identity checked against
+    the requested kind and role; in a workflow that targets 1.2 or later, `sender_check` and
+    `accept_trust_classes` make attested identities required (§5.14, §5.17; RFC-0006 decision A4).'
 - id: ACS-Q15
   question: Is `acs` the final annotation key on a Standard Agents tool, or will it be replaced by a name
     the project controls, such as an npm package name or a domain name?

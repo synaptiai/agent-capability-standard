@@ -12,7 +12,7 @@ The audio domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 3 (Audio)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering audio classification, speech recognition, speaker identification, and audio synthesis.
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -54,15 +54,34 @@ block_autonomous:
 
 ### Checkpoint Policy
 
-Audio workflows require checkpoints before any action that:
-- Modifies source audio
-- Produces a final transcription
-- Generates or synthesizes audio
-- Identifies speakers
+The profile requires a checkpoint before each step or call that:
+- Modifies source audio (`mutate`)
+- Writes a final transcription or synthesized audio out (`persist`)
+- Carries high risk, such as a large batch
+
+Identifying a speaker (`classify`) changes no state, so the profile sets no
+checkpoint for it; a deployment that wants one adds `classify: always`. The
+profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_audio_modification -> mutate; before_transcription_output and
+  # before_synthesis -> persist; before_speaker_identification -> none
+  # (classifying changes no state); before_batch_processing (high_risk) -> "*".
+  mutate: always
+  persist: always
+  "*": high_risk
+```
 
 ## Capability Usage
 
-The 36 atomic capabilities apply to audio through domain parameterization:
+The 36 atomic capabilities apply to audio through domain parameterization.
+Each output's `evidence_anchors` are evidence anchors (Standard 1.2.0 §6.5):
+a `kind`, which the profile's `required_anchor_types` count, and a `ref` in
+the forms of the [modality guide](../../guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality);
+an `acs:` ref names a value the step was given, such as the text to speak
+(§5.20). Other data, such as signal quality, stay out of the anchors.
 
 ### Detection
 
@@ -78,11 +97,8 @@ detect:
         time_segment: [12.4, 13.1]
         confidence: 0.88
     evidence_anchors:
-      - type: audio_reference
-        ref: "mic://room-3/stream-2024-01-15T10:32:00Z"
-      - type: time_segment
-        start: 12.4
-        end: 13.1
+      - kind: sensor
+        ref: "audio:mic://room-3/stream-2024-01-15T10:32:00Z:segment:12400-13100"
 ```
 
 ### Classification
@@ -96,11 +112,11 @@ classify:
   output:
     label: "speech"
     confidence: 0.94
+    signal_quality:
+      snr_db: 32.5
     evidence_anchors:
-      - type: audio_reference
+      - kind: file
         ref: "s3://corpus/sample_042.wav"
-      - type: signal_quality
-        snr_db: 32.5
 ```
 
 ### Transformation (Speech-to-Text)
@@ -116,13 +132,12 @@ transform:
   output:
     transcript: "The quarterly results show..."
     word_timestamps: [...]
+    confidence: 0.91
+    signal_quality:
+      snr_db: 28.0
     evidence_anchors:
-      - type: audio_reference
+      - kind: file
         ref: "recording://meeting-2024-01-15.wav"
-      - type: signal_quality
-        snr_db: 28.0
-      - type: confidence_score
-        value: 0.91
 ```
 
 ### Generation (Text-to-Speech)
@@ -137,10 +152,8 @@ generate:
   output:
     audio_ref: "generated://tts-uuid-def456.wav"
     evidence_anchors:
-      - type: source_modality
-        ref: "text input"
-      - type: modality_hash
-        value: "sha256:..."
+      - kind: record
+        ref: "acs:text"
 ```
 
 ## Available Workflows
@@ -250,18 +263,17 @@ trust_weights:
   reference_audio: 0.95       # Reference tracks
   expert_annotation: 0.92     # Musicologist annotations
 evidence_policy:
-  required_anchor_types:
-    - audio_reference
-    - time_segment
-    - frequency_analysis       # Spectral evidence
-    - confidence_score
+  required_anchor_types:       # Anchor kinds (Standard 1.2.0 §6.5)
+    - file                     # The source audio
+    - x-spectral_analysis      # A vendor kind: spectral evidence
+  require_grounding: [detect, classify]
 ```
 
 ## Safety Considerations
 
 1. **Always ground** detections to specific time segments
 2. **Never trust synthesized audio** at the same level as recordings
-3. **Checkpoint before speaker identification** -- Privacy implications
+3. **Gate speaker identification** -- Privacy implications: the profile sets no checkpoint for it, so add `classify: always`, or list `classify` in `block_autonomous` to have a person approve it, where identifying a speaker needs either
 4. **Maintain provenance** -- Track from capture through all processing stages
 5. **Assess signal quality** -- Low SNR audio requires lower confidence thresholds
 

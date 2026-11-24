@@ -1,0 +1,17 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.2 §6.3, §5.10.1): an audit step's literal
+# retention outside the duration grammar is W614 (warning-first); the store
+# it is written to cannot apply it.
+audit_retention:
+  goal: Record a deployment with a retention no store can apply.
+  risk: low
+  spec_version: "1.1"
+  steps:
+  - capability: audit
+    purpose: Record the deployment.
+    store_as: record
+    input_bindings:
+      event: {what: deploy}
+      retention: whenever
+  success:
+  - The deployment is recorded

@@ -12,7 +12,7 @@ The healthcare domain profile is calibrated for environments where:
 - **Regulatory compliance is required** — HIPAA, FDA, HL7 standards apply
 - **Audit trails are critical** — 7-year retention for medical records
 
-The profile is informative data. Its `block_autonomous` list (`mutate`, `send`, `execute`, `delegate`) and its `require_human: low` threshold state the rule above; no shipped component loads the profile or enforces them, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+Its `block_autonomous` list (`mutate`, `send`, `execute`, `delegate`) and its `require_human: low` threshold state the rule above. They take effect where a host, a safety layer or the validator applies the profile (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, every step and call needs a person's approval each time, which no standing mandate covers. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -61,6 +61,20 @@ Healthcare requires checkpoints before **every** recommendation:
 - Before modifying any documentation
 - Before suggesting any order
 - Before any care handoff
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_documentation -> mutate; before_any_recommendation,
+  # before_alert_generation and before_order_suggestion -> persist;
+  # before_handoff -> send and delegate.
+  mutate: always
+  persist: always
+  send: always
+  delegate: always
+```
 
 ## Available Workflows
 

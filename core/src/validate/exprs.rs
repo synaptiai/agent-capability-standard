@@ -7,9 +7,13 @@ use super::{Report, Scope, StepLoc};
 use crate::diag::Code;
 use crate::expr::{self, SyntaxError, ast::Expr, check};
 
-impl check::Scope for Scope {
+impl check::Scope for Scope<'_> {
     fn root(&self, name: &str) -> Option<check::RootInfo<'_>> {
-        let schema = self.stores.get(name).or_else(|| self.inputs.get(name))?;
+        let schema = self
+            .stores
+            .get(name)
+            .copied()
+            .or_else(|| self.inputs.get(name))?;
         Some(check::RootInfo {
             schema: Some(schema),
             always_present: !self.maybe_absent.contains(name),
@@ -17,15 +21,21 @@ impl check::Scope for Scope {
     }
 }
 
-/// Report a parse result, or type-check the parsed expression.
+/// Report a parse result, or type-check the parsed expression. `src` is
+/// the expression's text: a `column` counts its Unicode code points
+/// (§9.8), while the parser's positions are byte offsets.
 pub(crate) fn check_parsed(
     parsed: &Result<Expr, SyntaxError>,
+    src: &str,
     scope: &Scope,
     loc: &StepLoc<'_>,
     field: &str,
     report: &mut Report,
 ) {
-    let at = |d: crate::diag::Diagnostic, pos: usize| d.at("field", field).at("column", pos + 1);
+    let at = |d: crate::diag::Diagnostic, pos: usize| {
+        let column = src.get(..pos).map_or(pos, |p| p.chars().count()) + 1;
+        d.at("field", field).at("column", column)
+    };
     match parsed {
         Err(e) => {
             report.push(at(
@@ -51,7 +61,7 @@ pub(crate) fn check_expression(
     field: &str,
     report: &mut Report,
 ) {
-    check_parsed(&expr::parse(src), scope, loc, field, report);
+    check_parsed(&expr::parse(src), src, scope, loc, field, report);
 }
 
 /// When a gate is evaluated relative to its step.
@@ -68,6 +78,8 @@ pub(crate) struct Gate<'a> {
     pub action: Option<&'a str>,
     /// `None` when `when` is missing or not a string (reported elsewhere).
     pub when: Option<Result<Expr, SyntaxError>>,
+    /// The text of `when`, when it is a string.
+    pub src: &'a str,
 }
 
 /// The gates of a step, each parsed and with its effective phase. Reports
@@ -100,19 +112,20 @@ pub(crate) fn gates<'a>(
                 .at("field", format!("{field}.action")),
             );
         }
-        // Ending the run from a concurrently running step would leave its
-        // group mates half done.
+        // Ending the run from a group member would leave its group mates,
+        // which may run concurrently with it, half done.
         if action == Some("end") && step.contains_key("parallel_group") {
             report.push(
                 loc.diag(
                     Code::SchemaValidationFailed,
                     format!(
-                        "{field} ends the run, but the step runs concurrently in a parallel_group"
+                        "{field} ends the run, but the step is in a parallel_group, whose members may run concurrently"
                     ),
                 )
                 .at("field", format!("{field}.action")),
             );
         }
+        let src = gate.get("when").and_then(Value::as_str).unwrap_or_default();
         let when = gate.get("when").and_then(Value::as_str).map(expr::parse);
         let reads_own = matches!((&when, store), (Some(Ok(e)), Some(s)) if e.refs().iter().any(|r| r.r.root == s));
         let phase = match gate.get("phase") {
@@ -158,6 +171,7 @@ pub(crate) fn gates<'a>(
             phase,
             action,
             when,
+            src,
         });
     }
     out

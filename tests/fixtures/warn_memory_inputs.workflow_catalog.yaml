@@ -1,0 +1,31 @@
+# Standard version: 1.2.0
+# Memory inputs (STANDARD v1.2 §4.5): a scope that is not a memory scope is
+# W626, a ttl outside the duration grammar is W614; an x- scope, a defined
+# scope and an ISO duration are fine.
+remember_findings:
+  goal: Keep findings for the team.
+  risk: low
+  spec_version: "1.2"
+  steps:
+  - capability: persist
+    purpose: Keep the findings for the team.
+    store_as: team_note
+    input_bindings:
+      data: {finding: the cache is stale}
+      key: findings
+      scope: team
+      ttl: five fortnights
+  - capability: recall
+    purpose: Read the vendor-scoped note.
+    store_as: vendor_note
+    input_bindings:
+      key: findings
+      scope: x-team
+  - capability: persist
+    purpose: Keep the findings for the session.
+    store_as: session_note
+    input_bindings:
+      data: {finding: the cache is stale}
+      key: findings
+      scope: session
+      ttl: PT1H

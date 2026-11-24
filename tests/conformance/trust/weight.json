@@ -1,21 +1,18 @@
 {
-  "standard": "1.1.0",
+  "standard": "1.2.0",
   "section": "8.3",
-  "status": "informative",
-  "description": "Static weights of STANDARD v1.1.0 section 8.3. Evidence from an item whose sender's identity has a trust class weighs the class weight; when the evidence also has a source type, the lower of the class weight and the source weight applies. A domain profile overrides a class weight with the trust_weights key trust_class:<class>, kept apart from source keys of the same name. The Standard states the class override only. That any other trust_weights key is the weight of the source it names, replacing the model's weight for that source or weighing a source the model does not name, rests on the comment on trust_classes in schemas/authority_trust_model.yaml (a profile's trust_weights 'may override any class, as it may any source') and on the description of trust_weights in schemas/profiles/profile_schema.yaml; the vectors that depend on it say so. `model` holds the weights of schemas/authority_trust_model.yaml that the vectors read. `not_covered` lists the cases the vectors leave out because the Standard does not state their result, each with what the reference implementation does; a vector for one of them would make one reading look required. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
+  "status": "normative",
+  "description": "Static weights of STANDARD v1.2.0 section 8.3. Evidence with a source type only weighs the source type's weight; from an item whose sender's identity has a trust class, with no source type, the class weight; with both, the lower of the two. Evidence with neither, with a source type that has no weight, or with a trust class the model does not have has no static weight, and an implementation refuses it (expect_error). A domain profile's trust_weights override weights: trust_class:<class> replaces a class weight, kept apart from a source key of the same name; any other key replaces the weight of the source type it names, higher or lower, or gives a weight to one the model does not name; with several profiles (profile_trust_weights given as a list), the lowest weight per key applies. `model` holds the weights of schemas/authority_trust_model.yaml that the vectors read. Normative (section 10.3). grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
   "tolerance": 1e-12,
   "fields": {
     "name": "The vector's name, unique in this file.",
     "about": "What the vector covers.",
     "source_type": "The source type of the evidence. Absent: it has none.",
     "trust_class": "The trust class of the identity of the item's sender. Absent: the evidence has none.",
-    "profile_trust_weights": "The trust_weights of the domain profile in force. Absent: no profile.",
-    "weight": "The expected static weight. A conforming value differs from it by at most `tolerance`."
+    "profile_trust_weights": "The trust_weights of the domain profile applied, or a list of those of several profiles applied together. Absent: no profile.",
+    "weight": "The expected static weight, absent when expect_error is true. A conforming value differs from it by at most `tolerance`.",
+    "expect_error": "true: the evidence has no static weight and an implementation refuses it; the vector then has no weight."
   },
-  "not_covered": [
-    "A source type that has no weight in the model or the profile, a trust class the model does not have, and evidence with neither. Section 8 does not say what they weigh. The reference implementation refuses each.",
-    "A profile key trust_class:<class> for a class the model does not have. Section 8.3 says the classes are exactly those of agent_identity.trust_class. The reference implementation does not read such a key as adding a class, and refuses evidence of that class."
-  ],
   "model": {
     "source_ranking": {
       "weights": {
@@ -84,7 +81,7 @@
     },
     {
       "name": "profile_overrides_a_source",
-      "about": "The profile key primary_api replaces the source weight. Rests on the schema comment, not on the Standard's text.",
+      "about": "The profile key primary_api replaces the source weight.",
       "source_type": "primary_api",
       "profile_trust_weights": {
         "primary_api": 0.5
@@ -93,7 +90,7 @@
     },
     {
       "name": "profile_names_its_own_source",
-      "about": "The model has no weight for user_calendar; the profile gives it one, as the shipped profiles do for their own sources. Rests on the profile schema's description of trust_weights, not on the Standard's text.",
+      "about": "The model has no weight for user_calendar; the profile gives it one, as the shipped profiles do for their own sources.",
       "source_type": "user_calendar",
       "profile_trust_weights": {
         "user_calendar": 0.95
@@ -140,7 +137,7 @@
     },
     {
       "name": "both_keys_of_one_name",
-      "about": "The profile overrides the source to 0.6 and the class to 0.8; the lower applies. The source override rests on the schema comment, not on the Standard's text.",
+      "about": "The profile overrides the source to 0.6 and the class to 0.8; the lower applies.",
       "source_type": "system_of_record",
       "trust_class": "system_of_record",
       "profile_trust_weights": {
@@ -159,6 +156,70 @@
         "trust_class:external": 0.1
       },
       "weight": 0.6
+    },
+    {
+      "name": "profile_raises_a_source",
+      "about": "A replacement may be higher than the model's weight: human_note, 0.55 in the model, weighs 0.9.",
+      "source_type": "human_note",
+      "profile_trust_weights": {
+        "human_note": 0.9
+      },
+      "weight": 0.9
+    },
+    {
+      "name": "two_profiles_lowest",
+      "about": "Two profiles applied together give primary_api 0.7 and 0.5: the lowest applies.",
+      "source_type": "primary_api",
+      "profile_trust_weights": [
+        {
+          "primary_api": 0.7
+        },
+        {
+          "primary_api": 0.5,
+          "trust_class:owner": 0.6
+        }
+      ],
+      "weight": 0.5
+    },
+    {
+      "name": "two_profiles_lowest_class",
+      "about": "The lowest per key, a class key here; a profile without the key changes nothing for it.",
+      "trust_class": "owner",
+      "profile_trust_weights": [
+        {
+          "primary_api": 0.7
+        },
+        {
+          "trust_class:owner": 0.6
+        }
+      ],
+      "weight": 0.6
+    },
+    {
+      "name": "unknown_source_type",
+      "about": "A source type with no weight in the model or a profile has no static weight.",
+      "source_type": "no_such_source",
+      "expect_error": true
+    },
+    {
+      "name": "unknown_trust_class",
+      "about": "A trust class the model does not have.",
+      "trust_class": "auditor",
+      "expect_error": true
+    },
+    {
+      "name": "profile_key_adds_no_class",
+      "about": "A profile key trust_class:<c> for a class the model does not have adds no class.",
+      "trust_class": "auditor",
+      "profile_trust_weights": {
+        "trust_class:auditor": 0.5
+      },
+      "expect_error": true
+    },
+    {
+      "name": "neither",
+      "about": "Evidence with neither a source type nor a trust class.",
+      "expect_error": true
     }
   ]
 }

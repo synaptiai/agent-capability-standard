@@ -878,6 +878,15 @@ class TestWorkflowDefinitionFromDict:
         )
         assert len(wf.steps) == 0
 
+    def test_positional_fields_keep_their_order(self) -> None:
+        """A definition built positionally, as before 1.2, keeps its
+        fields: ``agents`` (new) comes after ``extra``."""
+        wf = WorkflowDefinition(
+            "w", "g", "low", [], [], "", {}, {}, {}, "1.1", {"x-owner": "ops"}
+        )
+        assert wf.extra == {"x-owner": "ops"}
+        assert wf.agents is None
+
 
 class TestCatalogData:
     """Definitions keep their source for validation; definitions built in

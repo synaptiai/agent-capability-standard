@@ -1,0 +1,22 @@
+# Standard version: 1.2.0
+# Delegations in a 1.2 workflow without agents (STANDARD v1.2 §5.15.2): W621
+# for each delegate that binds no read_only and requires no approval, W622
+# for the computed target.
+fan_out:
+  goal: Ask two agents.
+  risk: medium
+  inputs:
+    pick: {type: string, required: true}
+  steps:
+  - capability: delegate
+    purpose: Ask agent x.
+    store_as: x_out
+    input_bindings:
+      agent: x
+      task: {draft: d}
+  - capability: delegate
+    purpose: Ask the agent picked.
+    store_as: picked_out
+    input_bindings:
+      agent: "${pick}"
+      task: {draft: d}

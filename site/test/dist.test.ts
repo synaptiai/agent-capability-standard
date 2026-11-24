@@ -17,6 +17,8 @@ import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
 import { EXEMPT_RUNS, pageMatches } from '../src/lib/runs';
+import { CODE_TABLE_FIGURES, codeTableCodes } from '../src/lib/spec-tail-figures';
+import { markerUrls, visibleText, withoutTags } from './html-text';
 import {
   allCatalogSteps,
   claudeLayerTable,
@@ -101,6 +103,11 @@ describe('built site', () => {
     expect(rows.length).toBe(loadCounts().diagnosticCount);
     expect(rows.length).toBe(scanned.reduce((a, b) => a + b, 0));
     expect(rows).toContain('v102');
+    // A family's table has a tile in every row, so it is an enriched table,
+    // which the figure-gap check counts as an information figure (visual spec 4.2).
+    const tables = [...html.matchAll(/<table class="diagnostics-table"([^>]*)>/g)].map((m) => m[1]);
+    expect(tables.length).toBeGreaterThan(1);
+    for (const attrs of tables) expect(attrs).toContain('data-info-figure="enriched-table"');
   });
 
   it('marks each profile workflow that no catalog defines as proposed', () => {
@@ -295,7 +302,7 @@ describe('built site', () => {
         expect(card, `${page} ${id}`).toBeGreaterThan(0);
         const before = html.slice(0, card);
         const lastH3 = [...before.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].at(-1)!;
-        const title = lastH3[1]!.replace(/<[^>]*>/g, '').replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const title = withoutTags(lastH3[1]!).replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         expect(title, `${page} ${id}`).toBe(id);
         expect(before.slice(lastH3.index! + lastH3[0].length).replace(/<figure[\s\S]*$/, ''), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
       }
@@ -393,10 +400,7 @@ describe('design system on the built site', () => {
       expect(link, f).not.toBeNull();
       const [, attrs = '', inner = ''] = link!;
       expect(attrs.includes('aria-label'), f).toBe(false);
-      const text = inner
-        .replace(/<svg[\s\S]*?<\/svg>/g, '')
-        .replace(/<[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
-        .replace(/<[^>]+>/g, '');
+      const text = visibleText(inner);
       for (const word of ['Agent Capability Standard', 'ACS', ' home']) expect(text, f).toContain(word);
     }
   });
@@ -434,13 +438,15 @@ describe('design system on the built site', () => {
 describe('Standard, edge types and diagnostics figures on the built site', () => {
   const page = (rel: string) => readFileSync(path.join(dist, rel), 'utf8');
   const figures = (h: string) => [...h.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/g)].map((m) => ({ attrs: m[1]!, body: m[2]! }));
-  const SPEC_PAGES = ['spec/1.1.0/index.html', 'spec/1.0.0/index.html', 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
+  const SPEC_PAGES = [...standardFileVersions().map((v) => `spec/${v}/index.html`), 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
 
   it('draws where codes are raised with a row per family and a column per §5 section, and its transpose for narrow frames (F-S27)', () => {
-    const std = repoText('spec/STANDARD-v1.1.0.md');
+    // The current Standard's page: the newest spec/STANDARD-v*.md.
+    const v = standardFileVersions()[0]!;
+    const std = repoText(`spec/STANDARD-v${v}.md`);
     const sections = std.split('\n').filter((l) => /^### 5\.\d+ /.test(l)).length;
     const families = sectionLines(std, /^### 9\.1 /).filter((l) => /^\| [A-Z]/.test(l) && !/^\| Category/.test(l)).length;
-    const fig = figures(page('spec/1.1.0/index.html')).find((x) => x.attrs.includes('data-fig-kind="code-heat"'))!;
+    const fig = figures(page(`spec/${v}/index.html`)).find((x) => x.attrs.includes('data-fig-kind="code-heat"'))!;
     const wide = /<table class="heat heat--wide">([\s\S]*?)<\/table>/.exec(fig.body)![1]!;
     const rows = [...wide.matchAll(/<tr data-family=/g)].length;
     expect(rows).toBe(families);
@@ -513,6 +519,21 @@ describe('Standard, edge types and diagnostics figures on the built site', () =>
     const tables = figures(h).filter((x) => /data-fig-kind="code-table"/.test(x.attrs));
     const tiles = tables.flatMap((x) => [...x.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a) && /href="\/spec\/diagnostics\/#[a-z]\d{3}"/.test(a)));
     expect(tiles).toHaveLength(want);
+  });
+
+  it("draws each of §5.18's code tables as a figure whose codes are tiles linking to the diagnostics page", () => {
+    const v = standardFileVersions()[0]!;
+    const h = page(`spec/${v}/index.html`);
+    const text = repoText(`spec/STANDARD-v${v}.md`);
+    const tables = figures(h).filter((x) => /data-fig-kind="call-codes"/.test(x.attrs));
+    expect(tables).toHaveLength(Object.keys(CODE_TABLE_FIGURES).length);
+    for (const [i, key] of Object.keys(CODE_TABLE_FIGURES).entries()) {
+      const linked = [...tables[i]!.body.matchAll(/<a\b[^>]*>/g)]
+        .map((m) => m[0])
+        .filter((a) => /class="diag-tile/.test(a))
+        .map((a) => /href="\/spec\/diagnostics\/#([a-z]\d{3})"/.exec(a)?.[1]?.toUpperCase());
+      expect(new Set(linked)).toEqual(new Set(codeTableCodes(key, text, 'spec').map((d) => d.code)));
+    }
   });
 });
 
@@ -644,12 +665,12 @@ describe('agent files', () => {
     const title = /^# (.+)$/m.exec(repoText(`spec/STANDARD-v${version}.md`))![1]!;
     const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
     expect(full).toContain(`\n# ${title}\n`);
-    const first = /<!-- (\S+) -->/.exec(full)![1];
+    const first = markerUrls(full)[0];
     expect(first).toBe(`${ORIGIN}/spec/${version}/index.md`);
     // Every built page under /spec/, /capabilities/, /layers/ and /workflows/
     // (the design's Specification, Capabilities and Workflows sections), each
     // once, minus the older Standards named by the spec/STANDARD-v*.md files.
-    const urls = [...full.matchAll(/^<!-- (\S+) -->$/gm)].map((m) => m[1]!.slice(ORIGIN.length));
+    const urls = markerUrls(full).map((url) => url.slice(ORIGIN.length));
     const older = new Set(standardFileVersions().slice(1).map((v) => `/spec/${v}/`));
     const want = dirsWith('index.md')
       .filter((d) => /^\/(spec|capabilities|layers|workflows)\//.test(d) && !older.has(d))
@@ -719,7 +740,7 @@ describe('agent files', () => {
   it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
     const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
     const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
-    const text = (h: string) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
+    const text = (h: string) => withoutTags(h).replace(/&amp;/g, '&').trim();
     const h2Html = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => text(m[1]!));
     const h2Md = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]!.trim());
     expect(h2Html.length).toBeGreaterThan(0);

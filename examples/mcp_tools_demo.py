@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -151,15 +152,33 @@ async def demo_permission_enforcement():
         # execute requires approval, so the host's callback (here:
         # approve) decides the call once the checkpoint rule is satisfied.
         callback = adapter._make_permission_callback(approve)
+        pre_tool_use = adapter._make_pretooluse_safety_hook()
+
+        async def decide(tool_use_id: str) -> object:
+            # Claude Code names each call (tool_use_id), runs the PreToolUse
+            # hook on it, then, unless the hook refused it, asks the
+            # callback, which decides only on a call the hook checked. The
+            # call holds the checkpoint it uses under that id.
+            call = {"tool_name": "mcp__deploy__push", "tool_input": {}}
+            out = (await pre_tool_use(call, tool_use_id, None)).get(
+                "hookSpecificOutput", {}
+            )
+            if out.get("permissionDecision") == "deny":
+                return SimpleNamespace(
+                    behavior="deny", message=out["permissionDecisionReason"]
+                )
+            return await callback(
+                "mcp__deploy__push", {}, SimpleNamespace(tool_use_id=tool_use_id)
+            )
 
         # Without checkpoint
-        result = await callback("mcp__deploy__push", {}, None)
+        result = await decide("deploy-1")
         print(f"Without checkpoint: {'allowed' if is_allowed(result) else 'BLOCKED'}")
         print(f"  {getattr(result, 'message', '')}")
 
         # With checkpoint
         adapter.create_checkpoint(["*"], "Before deploy")
-        result = await callback("mcp__deploy__push", {}, None)
+        result = await decide("deploy-2")
         print(f"With checkpoint: {'ALLOWED' if is_allowed(result) else 'blocked'}")
 
 
@@ -176,7 +195,10 @@ async def demo_mcp_server_factory():
     print()
     print('  @tool("search_docs", "Search documentation.", {"query": str})')
     print("  async def search_docs(args):")
-    print('      return {"content": [{"type": "text", "text": "results..."}]}')
+    print("      # The search output, as JSON text (STANDARD 1.2.0 section 5.18.9);")
+    print("      # a result without it fails the call with R402 (section 5.18.10).")
+    print('      output = {"results": [], "evidence_anchors": [], "confidence": 0.9}')
+    print('      return {"content": [{"type": "text", "text": json.dumps(output)}]}')
     print()
     print("  search_docs.metadata = {")
     print('      "capability_id": "search",')

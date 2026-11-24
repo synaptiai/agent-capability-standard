@@ -8,29 +8,989 @@ allowed-tools: Read, Grep, Bash
 context: fork
 agent: general-purpose
 hooks:
-  PostToolUse:
-    - matcher: "Read"
+  PreToolUse:
+    - matcher: "Bash"
       hooks:
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Read | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
-    - matcher: "Grep"
+            # Code-decided check (STANDARD 1.2.0 §5.18.10): an audit record appended
+            # to .claude/audit/records.jsonl holds no credential (§6.7). The records
+            # file is written in one form only, whose record this hook reads; any
+            # other command that may name the file or another file of .claude/audit
+            # (in any quoting, $'...' and $"..." and line continuations included,
+            # from a directory under .claude, by a glob or a brace that may match it
+            # or a directory on its way, or by a redirection to a name the shell
+            # builds) is read word by word, as the shell passes the words (escapes
+            # and line continuations read as bash reads them), and may not write a
+            # file, run a program that could (an interpreter, an in-place editor, cp,
+            # tee, dd, ...), set or name a variable that changes what a program runs
+            # (PATH, BASH_CMDS, printf -v), or build its text when it runs; a glob's
+            # bracket expressions are read as bash reads them; mv only moves the
+            # project's records file aside in its own directory. So a file named with
+            # quotes, a glob or a brace, or a record rewritten in two steps, is
+            # refused, as is an extglob pattern (@(...), once shopt -s extglob has
+            # run), whose words are not read here. In every command, a program that
+            # writes the files its input names (an archive or patch tool, a recursive
+            # copy, git apply or a git alias, a git command that writes the work tree
+            # from a commit: only git's reads and commands that write no file from a
+            # commit run, and checkout and restore only of literal paths after --
+            # that do not hold the records, gunzip -N, a download a server or a
+            # configuration file names, find -exec or xargs running another) is
+            # refused wherever it stands: as the program (after !, if, while), and
+            # after any program but one read here (a wrapper this check does not
+            # list, prlimit, setpriv, runs it); a here-document's lines are read as
+            # commands too, those a reader (cat) takes as data as before. It is read
+            # again with no quoting at all where a command substitution's quotes may
+            # hide it. A name built only when a
+            # command runs, code inside a word (sh -c, an interpreter's, a script)
+            # and a link planted under another name are not read here; the plugin's
+            # pre-tool-use hook gates such a write as a mutate.
+            # Claude Code passes the tool call as JSON on stdin, read once here; exit 2
+            # blocks the call and the reason on stderr is shown to Claude. A call that
+            # cannot be read is blocked.
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # A record is appended in one form only, whose text is the record:
+            #   printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"
+            # (or >> .claude/audit/records.jsonl), on one line, <json> one JSON
+            # object with no single quote. Any other command that names the file
+            # may not build or redirect text: a $ (but in ${CLAUDE_PROJECT_DIR:-.}),
+            # a backtick, a backslash, < or > would let the record's text be
+            # computed when the command runs, where no scan of the command sees it.
+            # The form is read with a case pattern and the removal of a literal
+            # prefix and suffix, whose cost grows with the line alone: a pattern
+            # removal such as ${REST#*\'} costs the line times itself when no
+            # quote follows, so a long line would hold the hook past its time.
+            FORM="printf '%s\n' '"
+            RECORD=""
+            for TO in "' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" "' >> .claude/audit/records.jsonl"; do
+              case "$CMD" in
+                "$FORM"*"$TO")
+                  RECORD="${CMD#"$FORM"}"
+                  RECORD="${RECORD%"$TO"}"
+                  break
+                  ;;
+              esac
+            done
+            NL='
+            '
+            case "$RECORD" in *\'* | *"$NL"*) RECORD="" ;; esac
+            if [ -n "$RECORD" ]; then
+              # The record as a reader decodes it: its JSON text with escapes
+              # resolved (g is g) and each of its strings, each read on its own,
+              # as it is and with its line breaks read as blanks (secret_lines)
+              DECODED="$(printf '%s' "$RECORD" | jq -rs 'def joined($s): (.[0:1] + (.[1:] | map($s + .))) | add // ""; if length == 1 and (.[0] | type) == "object" then .[0] | (tojson, (.. | strings | ., (select(index("\n") != null or index("\r") != null) | split("\r") | joined(" ") | split("\n") | joined(" ")))) else error("not one object") end' 2>/dev/null)" || {
+                echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
+                exit 2
+              }
+              # A member name given twice: jq keeps the last value, so the earlier
+              # ones are never scanned, though the file holds them (I-JSON names are
+              # unique). The values the text holds, as jq's stream reads them, against
+              # those of the object jq keeps.
+              STREAMED="$(printf '%s' "$RECORD" | jq -n --stream '[inputs | select(length == 2)] | length' 2>/dev/null)" || STREAMED="unread"
+              KEPT="$(printf '%s' "$RECORD" | jq '[tostream | select(length == 2)] | length' 2>/dev/null)" || KEPT="unkept"
+              if [ "$STREAMED" != "$KEPT" ]; then
+                echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object with unique member names (I-JSON): a name given twice hides a value from this check; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
+                exit 2
+              fi
+            else
+              # Skill hooks stay registered for the rest of the session, so only a
+              # command that may write the records file is read: one that names records,
+              # jsonl, audit or .claude in any quoting (quotes, backslashes and line
+              # breaks removed, so a name split by a line continuation is read whole),
+              # that holds $'...' or $"..." (which can spell any name: $'\x2ecla\x75de'),
+              # that runs in a directory under .claude, that holds a glob character or a
+              # brace (read below: a pattern that may match the records file or a
+              # directory on its way), that redirects output and expands text, or that
+              # names a program that writes files its input names (read below), as
+              # written or with its line continuations joined (pat\<newline>ch)
+              # (the cwd exactly as given: the x keeps the line breaks that may end
+              # a directory's name from the command substitution)
+              RUNS_IN="$(printf '%s' "$INPUT" | jq -j '(.cwd // empty), "x"' 2>/dev/null)" || RUNS_IN="x"
+              RUNS_IN="${RUNS_IN%x}"
+              [ -n "$RUNS_IN" ] || RUNS_IN="$(pwd)"
+              JOINED="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "" | split("\\\n") | add // ""' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+              NAMED=false
+              INAUDIT=false
+              case "$CMD$JOINED" in *"\$'"* | *'$"'*) NAMED=true ;; esac
+              printf '%s\n' "$CMD" | tr -d "\"'\\\\\n" | grep -qiE 'records|jsonl|audit|\.claude' && NAMED=true
+              printf '%s\n' "$RUNS_IN" | grep -qi '\.claude' && INAUDIT=true
+              if [ "$NAMED" = false ] && [ "$INAUDIT" = false ]; then
+                READ=false
+                case "$CMD" in *'*'* | *'?'* | *'['* | *'{'* | *'@('* | *'!('* | *'+('*) READ=true ;; esac
+                case "$CMD" in *'>'*'$'* | *'$'*'>'* | *'>'*'`'* | *'`'*'>'*) READ=true ;; esac
+                printf '%s\n%s\n' "$CMD" "$JOINED" | tr -d "\"'\\\\" | grep -qE '(^|[^A-Za-z0-9_.-])(g?tar|bsdtar|pax|cpio|ar|unzip|7zr?a?|unar|unrar|rar|jar|cabextract|lha|unsquashfs|dpkg(-deb)?|rpm|patch|rsync|busybox|toybox|xargs|find|apply|am|update-index|read-tree|checkout-index|mktree|fast-import|alias|config-env|git|g?zip|gunzip|unpigz|pigz|GZIP|curl|wget|aria2c|https?|httpie|zipfile|tarfile|ditto|xar|aa|aunpack|atool|dtrx|patool|cp|gcp|scp|rclone|sftp|lftp|unison)($|[^A-Za-z0-9_-])' && READ=true
+                [ "$READ" = true ] || exit 0
+              fi
+              case "$CMD" in
+                *records.jsonl*)
+                  LITERAL="$(printf '%s' "$CMD" | sed 's/[$]{CLAUDE_PROJECT_DIR:-[.]}//g')"
+                  case "$LITERAL" in
+                    *'$'* | *'`'* | *'\'* | *'<'* | *'>'*)
+                      echo "F504 CONSTRAINT_VIOLATED: a command that names the audit records file may not expand, escape or redirect text, so a record built when it runs is never written unchecked; append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)" >&2
+                      exit 2
+                      ;;
+                  esac
+                  ;;
+              esac
+              DECODED=""
+              # Any other command, read word by word (jq reads one of up to 16384
+              # bytes in well under a second)
+              READER="$(cat <<'JQ'
+            # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # A Bash command's simple commands and their words as the shell passes them,
+            # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
+            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), g (dequoted,
+            # the unquoted *, ?, [ and ] as \u0001 to \u0004: glob_text), braces (an
+            # unquoted brace outside ${...}), ansi (it holds $'...' or $"...", kept as
+            # written: bash decodes or translates them), subst (it holds a backtick, or
+            # $( or ${ in double quotes, whose own quotes bash pairs apart from the text
+            # around them, so this reading may not follow it), assign (NAME=value), target
+            # (a redirection's target) and writes (the redirection writes). Quotes pair as
+            # bash pairs them: a backslash escapes the next character (inside double
+            # quotes or $'...' too, so an escaped quote never closes one), and a line
+            # continuation (a backslash and a newline) is removed, inside an operator and
+            # before a comment as well. An unquoted extglob opener (@(, !(, +(, *( or
+            # ?(, a line continuation allowed before its parenthesis) is a token of its
+            # own, ext: once a command has run shopt -s extglob, bash reads the group as
+            # part of a word (blanks, ; and | included) and expands it as a pattern, and
+            # otherwise refuses the line. commands gives {why, cmds}: why names what this
+            # reading cannot follow (an unclosed quote, an extglob pattern, a
+            # here-document, a process substitution), else is null. jq's global match
+            # costs the text times its matches, so the caller bounds the command's
+            # length.
+            def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            # A word's text as a glob: with $unquoted, *, ?, [ and ] as \u0001 to
+            # \u0004; a character from \u0001 to \u0005 typed in it as U+FFFD, which
+            # matches no name, as bash matches the character.
+            def glob_text($unquoted): [explode[] | if . >= 1 and . <= 5 then 65533
+              elif ($unquoted | not) then .
+              elif . == 42 then 1 elif . == 63 then 2 elif . == 91 then 3 elif . == 93 then 4 else . end] | implode;
+            # A glob (glob_text) with each bracket expression read as bash reads one, in
+            # time linear in the glob. A [, then ! or ^ and a character, or a character
+            # other than ! and ^, then characters, up to the ] that closes it, is one
+            # character (\u0002) where no character before that ] is a [ followed by :,
+            # = or . (a class such as [:alpha:], [=c=] or [.c.]) and the first is no ]
+            # (bash reads a ] first in the set as one of it). Where a [ that a ] follows
+            # opens any other bracket expression, the run from it to the last ] is any
+            # run (\u0001): more than bash matches there, never less. With $lossy (the
+            # quotes were removed before, so a ] in a set cannot be told from one after
+            # it), a ] after a bracket expression makes that run any run too. A [ or ]
+            # left is a character (bash reads a [ that no ] closes as one). A run of
+            # \u0001 and \u0006 (a brace expansion's digits) is one, \u0001 where either
+            # is.
+            def glob_marks($lossy): explode as $c | ($c | length) as $n
+              # $stop[k]: the first j >= k where a set ends or cannot go on (a ], or a
+              # [ followed by :, = or .), null if none
+              | (reduce range($n - 1; -1; -1) as $j ([null];
+                   .[$j] = (if $c[$j] == 4 or ($c[$j] == 3 and ($c[$j + 1] == 58 or $c[$j + 1] == 61 or $c[$j + 1] == 46))
+                            then $j else .[$j + 1] end))) as $stop
+              | (reduce range(0; $n) as $i ({skip: 0, out: []};
+                   if $i < .skip then .
+                   elif $c[$i] == 3 then
+                     ($i + 1 + (if $c[$i + 1] == 33 or $c[$i + 1] == 94 then 1 else 0 end)) as $f
+                     | if $f < $n and $stop[$f] != $f and $stop[$f] != null and $c[$stop[$f]] == 4
+                       then .out += [5] | .skip = $stop[$f] + 1
+                       else .out += [3] end
+                   else .out += [$c[$i]] end) | .out) as $o
+              | ($o | length) as $m
+              | (first(range(0; $m) as $i | select($o[$i] == 3 or ($lossy and $o[$i] == 5)) | $i) // null) as $open
+              | (if $open == null then null else first(range($m - 1; $open; -1) as $i | select($o[$i] == 4) | $i) // null end) as $close
+              | (if $close != null then $o[:$open] + [1] + $o[$close + 1:] else $o end)
+              | reduce .[] as $x ([];
+                  if ($x == 1 or $x == 6) and (.[-1] == 1 or .[-1] == 6) then .[-1] = (if $x == 1 then 1 else .[-1] end)
+                  else . + [if $x == 5 then 2 else $x end] end)
+              | implode;
+            # The fewest characters a glob_marks glob matches.
+            def glob_min: explode | map(select(. != 1 and . != 6)) | length;
+            # A glob_marks glob as an anchored regular expression.
+            def marks_regex: "^" + (gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0002"; ".")
+              | gsub("\u0003"; "\\[") | gsub("\u0004"; "\\]") | gsub("\u0006"; "[0-9-]*")) + "$";
+            # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
+            # newline is removed (a line continuation with its newline), any other stays.
+            def dq_text: [scan("\\\\[\\s\\S]|[^\\\\]+")]
+              | map(if . == "\\\n" then "" elif test("^\\\\[$`\"\\\\]$") then .[1:] else . end) | add // "";
+            def segments: [scan("\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\$\"(?:[^\"\\\\]|\\\\[\\s\\S])*\"|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\"|\\\\[\\s\\S]|(?:[^'\"\\\\$]|\\$(?!['\"]))+")]
+              | map(if startswith("$'") then {q: true, sq: true, ansi: true, t: .[2:-1]}
+                    elif startswith("$\"") then {q: true, sq: false, ansi: true, t: (.[2:-1] | dq_text)}
+                    elif startswith("'") then {q: true, sq: true, t: .[1:-1]}
+                    elif startswith("\"") then {q: true, sq: false, t: (.[1:-1] | dq_text)}
+                    elif startswith("\\") then {q: true, sq: false, esc: true, t: (if . == "\\\n" then "" else .[1:] end)}
+                    else {q: false, sq: false, t: .} end);
+            def word($raw): ($raw | segments) as $s
+              | {raw: $raw,
+                 d: ($s | map(.t) | add // ""),
+                 m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 g: ($s | map(.q as $q | .t | glob_text($q | not)) | add // ""),
+                 braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
+                 ansi: ($s | any(.ansi)),
+                 subst: ($s | any(if .sq or .esc then false elif .q then .t | test("`|\\$[({]") else .t | test("`") end)),
+                 assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
+            # Operators (a line continuation may stand between their characters: <\
+            # < is <<), comments (a # where a word may start, after any continuation), a
+            # lone continuation, words, an extglob opener, and a quote or a backslash
+            # that nothing closes.
+            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>@!+*?]|[@!+*?](?!(?:\\\\\n)*\\()|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<ext>[@!+*?](?:\\\\\n)*\\()|(?<bad>\\$'|['\"\\\\])"; "g")
+              | .captures | map(select(.string != null)) | .[0]
+              | {(.name): (if .name == "op" then .string | split("\\\n") | add else .string end)}]
+              | map(select(has("comment") or has("cont") | not));
+            # A redirection whose target is the next word (2>&1 and >&- name none).
+            def takes_target: test("[<>]") and (test("&([0-9]+-?|-)$") | not);
+            # Each step is linear in the command: no list grows by copying.
+            def commands: tokens as $t | ($t | length) as $n
+              | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .ext) then {why: "extglob"}
+                elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
+                elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
+                else [range(0; $n) as $i | $t[$i]
+                      | if .word then
+                          ($t[$i - 1].op // "") as $op
+                          | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                           writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                        else . end] as $w
+                | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+                | {why: null, cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)]}
+                end;
+            # END shell-words
+            # The programs a command may run here: none writes a file but by a
+            # redirection, which is refused below, and none runs other code.
+            def readers: ["cat", "echo", "printf", "jq", "ls", "head", "tail", "wc", "grep", "cut", "tr", "base64", "sha256sum", "shasum", "md5sum", "date", "hostname", "sleep", "test", "true", "false", "pwd", "cd", "stat", "basename", "dirname", "mkdir", "mv", "openssl"];
+            def sinks: ["/dev/null", "/dev/stdout", "/dev/stderr"];
+            def basename_ci: ascii_downcase | sub("/+$"; "") | sub("^.*/"; "");
+            def literal_path: gsub("\\$\\{CLAUDE_PROJECT_DIR:-\\.\\}"; ".");
+            # The variables that change what a program runs or writes: PATH, IFS,
+            # ENV, BASH_ENV, CDPATH, bash's tables of the programs names run and of
+            # aliases (BASH_CMDS[cat]=/usr/bin/tee makes cat tee), the loader's and
+            # openssl's. A variable is set without NAME=value too (printf -v NAME,
+            # printf -vNAME, printf -v 'NAME[key]'), for the rest of the line, so a
+            # word that names one, alone, glued to an option, with a subscript or a
+            # value, is refused.
+            def sensitive_names: "PATH|ENV|BASH_ENV|IFS|CDPATH|BASH_CMDS|BASH_ALIASES|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|OPENSSL_[A-Z0-9_]*";
+            def sensitive: test("^(\(sensitive_names))$");
+            def names_sensitive: test("^(-[A-Za-z]*)?(\(sensitive_names))(\\[.*\\])?(\\+?=.*)?$");
+            def openssl_writes: test("^-(out|engine|provider|config|writerand|rand)");
+            # Whether a word with a glob character (its g: glob_text), or a word a
+            # brace expansion gives, may name the records file or another file of
+            # .claude/audit (the records moved aside, records.<time>.jsonl), or a
+            # directory on its way (.claude, .claude/audit: cd .cl*/au*t, then the
+            # file by its last name), from the directory the command runs in: each of
+            # its last components may match the path's, and the directories it leaves
+            # out are the last ones of that directory. A component matches as the
+            # shell matches it (in any letter case), each bracket expression read as
+            # bash reads one (glob_marks: .cl[[:lower:]]ude, .cl[a-z]ude and
+            # .cl[!x]ude are .claude), but a glob does not match a name's leading dot
+            # unless the command may turn on dotglob ($dots); a sequence of numbers
+            # gives a run of digits (\u0006).
+            # (A pattern that matches more characters than the name has cannot
+            # match it: so no regex is built from a long word.)
+            def glob_part($pattern): . as $name | ($pattern | ascii_downcase | glob_marks(false)) as $p
+              | ($p | glob_min) <= ($name | length)
+              and ($dots or ((($name | startswith(".")) and ($p | test("^[\u0001\u0002]"))) | not))
+                and ($name | test($p | marks_regex));
+            def may_name_path($cwd; $file): . as $parts
+              | ($file | length) as $n
+              | ([$parts | length, $n] | min) as $k
+              | (all(range(0; $k); . as $i | $parts[($parts | length) - 1 - $i] as $p | ($file[$n - 1 - $i] | . == null or glob_part($p))))
+                and ($k == $n or ($cwd | ascii_downcase | rtrimstr("/") | endswith("/" + ($file[:$n - $k] | join("/")))));
+            # (null: any name of the directory)
+            def may_name_records($cwd): split("/") | map(select(. != "" and . != ".")) as $parts
+              | any($parts[]; . == "..")
+                or any([".claude"], [".claude", "audit"], [".claude", "audit", null]; . as $file | $parts | may_name_path($cwd; $file));
+            # A path as the shell reaches it from the call's directory, its //, . and
+            # trailing / read, ${CLAUDE_PROJECT_DIR:-.} at its start as the project's
+            # directory, in lower case; null when it holds .., a ~ or an expansion.
+            def resolved($cwd; $project):
+              (if startswith("${CLAUDE_PROJECT_DIR:-.}") then $project + "/" + ltrimstr("${CLAUDE_PROJECT_DIR:-.}") else . end) as $p
+              | if ($p | test("[$`~]")) then null
+                else (if $p | startswith("/") then $p else $cwd + "/" + $p end)
+                | split("/") | map(select(. != "" and . != "."))
+                | if any(.[]; . == "..") then null else "/" + join("/") | ascii_downcase end
+                end;
+            def parent_of: sub("/[^/]*$"; "");
+            # Brace expansion, as bash makes it of a word: a group opens at the first
+            # { that a } closes, and runs to the first } after a , or .. at its own
+            # level (bash closes no group at a } before its first comma: {a},b} gives
+            # a} and b); a group that is a list gives its parts (split at its own
+            # commas), each expanded again, a sequence x..y its elements, and the text
+            # after the group is expanded again. Bash versions differ on the rest
+            # ($v): 5.2 reads a group as a list when a comma is anywhere in it, nested
+            # included ({a..b{c,d}} gives a..bc and a..bd), and keeps a group that is
+            # neither as written; 5.3 reads it as a list only when a comma is at its
+            # own level, and of a group that is neither expands the text inside its
+            # braces, keeping them ({a..bc} and {a..bd}, seen on a runner), which two
+            # readings give: the { kept and all that follows it expanded (5.3a), or
+            # the group's braces kept around the words of its text, then the text
+            # after it expanded (5.3c). brace_words gives the words of the three
+            # readings (the hook runs under whichever bash the user has), each once
+            # where they differ. A sequence takes a sign and leading zeros as bash
+            # does ({a..e..+2}); one of numbers gives digits (\u0006). null for more
+            # than 256 words (all readings' together), groups 32 deep, more than 512
+            # braces and commas in a word, more than 8 { tried for one group, or a
+            # sequence with a number of more than 9 digits (an increment of more than
+            # 18), leading zeros aside, in any reading.
+            def brace_marks: [match("[{},]|\\.\\.(?!\\})"; "g") | {o: .offset, t: .string}];
+            def brace_close($m; $k): first(foreach range($k + 1; $m | length) as $j ({l: 0, c: 0, at: null};
+                $m[$j].t as $t
+                | if $t == "}" and .l == 0 and .c > 0 then .at = $j
+                  elif $t == "{" then .l += 1 | .at = null
+                  elif $t == "}" then (if .l > 0 then .l -= 1 else . end) | .at = null
+                  elif .l == 0 then .c += 1 | .at = null
+                  else .at = null end;
+                select(.at != null) | .at)) // null;
+            def brace_parts: . as $a
+              | (reduce ([match("[{},]"; "g") | {o: .offset, t: .string}][]) as $x ({l: 0, cuts: []};
+                  if $x.t == "{" then .l += 1
+                  elif $x.t == "}" then (if .l > 0 then .l -= 1 else . end)
+                  elif .l == 0 then .cuts += [$x.o]
+                  else . end) | [-1] + .cuts + [$a | length]) as $b
+              | [range(0; ($b | length) - 1) as $i | $a[$b[$i] + 1:$b[$i + 1]]];
+            # Whether a sequence ("x..y" or "x..y..n") has a term of more than 9
+            # digits or an increment of more than 18, sign and leading zeros aside.
+            def brace_seq_long: split("..") | map(sub("^[+-]"; "") | sub("^0+"; "") | length)
+              | (.[0] > 9 or .[1] > 9 or (.[2] // 0) > 18);
+            # A letter sequence's letters: from x toward y, every |n|th (0 is 1).
+            def brace_letters: explode as $c
+              | ((.[6:] | sub("^[+-]"; "") | sub("^0+"; "")) | if . == "" then 1 else tonumber end) as $s
+              | (if $c[0] <= $c[3] then 1 else -1 end) as $d
+              | [range(0; (($c[3] - $c[0]) * $d / $s | floor) + 1) | [$c[0] + . * $d * $s] | implode];
+            def brace_expand($depth; $v): . as $w | brace_marks as $m
+              | [range(0; $m | length) | select($m[.].t == "{" and (($m[.].o == 0 and $w[1:2] == "}") | not))] as $opens
+              | if ($m | length) > 512 or $depth > 32 then null
+                else (first($opens[:8][] as $k | brace_close($m; $k) as $c | select($c != null) | [$m[$k].o, $m[$c].o]) // null) as $g
+                | if $g == null then (if ($opens | length) > 8 then null else [$w] end)
+                  else $w[:$g[0]] as $pre | $w[$g[0] + 1:$g[1]] as $body | $w[$g[1] + 1:] as $post
+                  | ($body | brace_parts) as $parts
+                  | (if ($body | test(",")) and ($v == "5.2" or ($parts | length) > 1) then
+                       [$parts[] | brace_expand($depth + 1; $v)] | if any(.[]; . == null) then null else add end
+                     elif $body | test("^[+-]?[0-9]+\\.\\.[+-]?[0-9]+(\\.\\.[+-]?[0-9]+)?$") then
+                       (if $body | brace_seq_long then null else ["\u0006"] end)
+                     elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.[+-]?[0-9]+)?$") then
+                       (if $body | brace_seq_long then null else $body | brace_letters end)
+                     elif $v == "5.2" then ["{" + $body + "}"]
+                     elif $v == "5.3c" then $body | brace_expand($depth + 1; $v) | if . == null then null else map("{" + . + "}") end
+                     else false end) as $mid
+                  | if $mid == false then
+                      ($w[$g[0] + 1:] | brace_expand($depth + 1; $v)) as $rest
+                      | if $rest == null then null else [$rest[] | $pre + "{" + .] end
+                    else ($post | brace_expand($depth + 1; $v)) as $tail
+                    | if $mid == null or $tail == null or ($mid | length) * ($tail | length) > 256 then null
+                      else [$mid[] as $a | $tail[] as $b | $pre + $a + $b] end
+                    end
+                  end
+                end;
+            def brace_words: [brace_expand(0; "5.2"), brace_expand(0; "5.3a"), brace_expand(0; "5.3c")]
+              | if any(.[]; . == null) then null elif .[0] == .[1] and .[0] == .[2] then .[0]
+                else add | unique | if length > 256 then null else . end end;
+            def names_records($cwd): may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd));
+            def may_name($cwd):
+              if .braces then (.g | brace_words) as $ws | $ws == null or any($ws[]; names_records($cwd))
+              else (.m | test("\u0001")) and (.g | names_records($cwd)) end;
+            # The first refusal of a simple command, or null.
+            def check_command($words):
+              ($words | map(select(.target | not))) as $args
+              | (first(range(0; $args | length) | select($args[.].assign | not)) // ($args | length)) as $p
+              | (first($args[] | select(.d | names_sensitive)) // null) as $var
+              | if $var != null then {kind: "assign", word: $var.d}
+                elif $p == ($args | length) then
+                  (first($args[] | select(.raw | sub("\\+?=.*$"; "") | sensitive)) // null) as $bad
+                  | if $bad != null then {kind: "assign", word: $bad.raw} else null end
+                elif $p > 0 then {kind: "assign", word: $args[0].raw}
+                else $args[0].d as $prog
+                | if ($prog | test("[/$]")) or (any(readers[]; . == $prog) | not) then {kind: "program", word: $prog}
+                  # printf with an option (printf -v NAME sets a variable the rest of
+                  # the line runs with), or a first word that may expand to one
+                  elif $prog == "printf" and $args[1] != null
+                       and (($args[1].d | startswith("-")) or ($args[1].raw | test("[$`]"))
+                            or ($args[1].m | test("\u0001")) or $args[1].braces) then
+                    {kind: "assign", word: "printf \($args[1].d)"}
+                  elif $prog == "openssl" then
+                    (first($args[1:][] | select(.d | startswith("-") | not)) // {d: ""}) as $sub
+                    | if $sub.d != "dgst" then {kind: "program", word: "openssl \($sub.d)"}
+                      else (first($args[1:][] | select(.d | openssl_writes)) // null) as $w
+                      | if $w != null then {kind: "program", word: "openssl dgst \($w.d)"} else null end
+                      end
+                  # mv moves the project's records file aside in its own directory,
+                  # <project>/.claude/audit: a file from elsewhere never takes a
+                  # records name there, and the records never leave it
+                  elif $prog == "mv" then
+                    [$args[1:][] | select(.d | startswith("-") | not)] as $ops
+                    | ($ops | map(.d | resolved($cwd; $project))) as $at
+                    | ([$project] | map(resolved($cwd; $cwd)) | .[0]) as $root
+                    | if any($args[1:][]; .d | startswith("-") and (test("^-[fniv]+$") | not))
+                         or ($ops | length) != 2
+                         or any($ops[]; (.m | test("\u0001")) or .ansi or .braces)
+                         or any($at[]; . == null)
+                         or $root == null
+                         or any($at[]; parent_of != $root + "/.claude/audit")
+                         or ($at[0] | basename_ci) != "records.jsonl"
+                         or ($at[1] | basename_ci | test("^records\\.[^/]+\\.jsonl$") | not)
+                      then {kind: "mv", word: ($args | map(.d) | join(" "))}
+                      else null end
+                  else null end
+                end;
+            # For each token, whether it lies in the body of a here-document that a
+            # reader takes as data: the program of the command that holds the << is
+            # a reader (cat <<'EOF' > notes.md, git commit -m "$(cat <<'EOF' ...)"), and
+            # no pipe follows it (cat <<EOF | sh is code). A body runs from the line
+            # after the << to a line that holds only its delimiter; bodies follow one
+            # another as their << do. One pass, linear in the command. The state's odd
+            # says a delimiter is not a plain word (letters, digits, _ . -), whose line
+            # this reading may split where bash does not.
+            def heredoc_data($t): ($t | length) as $n
+              | ([-1] + [range(0; $n) | select($t[.].op == "|")] | max) as $lastpipe
+              | [foreach range(0; $n) as $i ({pend: [], body: null, want: null, prog: null, cnt: 0, first: null, mark: false, odd: false};
+                  $t[$i] as $x
+                  | if .body != null then
+                      .mark = .body.data
+                      | if $x.op == "\n" then
+                          (if .cnt == 1 and .first == .body.delim then
+                             (if (.pend | length) > 0 then .body = .pend[0] | .pend = .pend[1:] else .body = null end)
+                           else . end)
+                          | .cnt = 0 | .first = null
+                        else .cnt += 1 | .first = (if .cnt == 1 and $x.word then word($x.word).d else null end) end
+                    else
+                      .mark = false
+                      | if .want != null then
+                          (if $x.word then word($x.word).d else null end) as $d
+                          | .pend += [{delim: ($d // "\u0000"), data: .want}] | .want = null
+                          | .odd = (.odd or (($d // "") | test("^[A-Za-z0-9_.-]+$") | not))
+                        elif $x.op and ($x.op | test("^[0-9]*<<-?$")) then
+                          .want = (((.prog // "") | IN(readers[])) and $i > $lastpipe)
+                        elif $x.op == "\n" then
+                          (if (.pend | length) > 0 then .body = .pend[0] | .pend = .pend[1:] else . end) | .prog = null
+                        elif $x.op and ($x.op | test("[<>]") | not) then .prog = null
+                        elif $x.word and .prog == null and (($i > 0 and ($t[$i - 1].op // "" | takes_target)) | not) then
+                          word($x.word) as $wd | if $wd.assign then . else .prog = ($wd.d | sub("^.*/"; "")) end
+                        else . end
+                    end;
+                  {mark, odd})];
+            # The simple commands of any command, read even where the shared reader
+            # stops: a here-document's body is read as commands too (more than bash
+            # runs; each word of a body a reader takes as data marked data), a lone
+            # quote is left out, heredoc says whether it holds one, and ext whether it
+            # holds an extglob opener.
+            def loose: tokens as $t | ($t | length) as $n
+              | heredoc_data($t) as $hd
+              | [range(0; $n) as $i | $t[$i]
+                 | if .word then
+                     ($t[$i - 1].op // "") as $op
+                     | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                      writes: ($i > 0 and ($op | takes_target) and ($op | test(">"))),
+                                      data: $hd[$i].mark}
+                   else . end] as $w
+              | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+              | {heredoc: any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)),
+                 ext: any($t[]; .ext),
+                 data: any($hd[]; .mark),
+                 odd: ($n > 0 and $hd[-1].odd),
+                 cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)],
+                 # whether these words are the ones bash reads: no quote is left
+                 # unclosed and no word holds a command substitution
+                 follows: ((any($t[]; .bad) | not) and (any($w[]; .subst) | not))};
+            # The command with no quoting at all, read where the reader cannot follow
+            # it (a quote inside a command substitution, a backtick's command, an
+            # unclosed quote): each line continuation removed (a backslash and a
+            # newline after an even run of backslashes, as bash removes it), a
+            # backtick read as ;, a # as a letter (no comment), and every quote and
+            # backslash removed. It reads more commands than bash runs, and every one
+            # bash runs.
+            def unquoted_text: gsub("(?<!\\\\)(?<k>(?:\\\\\\\\)*)\\\\\n"; .k) | gsub("`"; " ; ") | gsub("#"; "_") | gsub("[\"'\\\\]"; "");
+            def name_of: sub("^.*/"; "");
+            # Programs that run the program their words name (timeout 5 tar ...).
+            def wrappers: ["env", "nice", "nohup", "timeout", "time", "command", "builtin", "exec", "sudo", "doas", "stdbuf", "ionice", "chrt", "taskset", "setsid", "unbuffer", "xargs", "watch", "flock", "chroot", "strace", "ltrace", "faketime", "firejail", "nsenter", "unshare", "prlimit", "numactl", "systemd-run", "script", "parallel", "busybox", "toybox"];
+            # Programs that write the files their input names (an archive's members, a
+            # patch's targets, a download's name or directory a server or a
+            # configuration file gives), and git's commands that write files or the
+            # index from a patch or from data (git checkout then writes what the index
+            # holds).
+            def writers: ["gtar", "bsdtar", "pax", "cpio", "ar", "7z", "7za", "7zr", "unar", "unrar", "rar", "jar", "cabextract", "lha", "unsquashfs", "dpkg-deb", "patch", "rsync", "busybox", "toybox", "aria2c", "http", "https", "httpie", "ditto", "xar", "aa", "aunpack", "atool", "dtrx", "patool", "scp", "rclone", "sftp", "lftp", "unison"];
+            # Programs read with a rule of their own below.
+            def handled: ["tar", "unzip", "git", "find", "xargs", "gzip", "gunzip", "pigz", "unpigz", "curl", "wget", "dpkg", "rpm", "cp", "gcp"];
+            # Programs whose later words are their arguments, not programs they run
+            # (git log --grep tar): the readers, the writers, and those read with a
+            # rule of their own but xargs. After any other program (env, timeout, a
+            # wrapper this check does not list: prlimit, setpriv, runcon, a loader)
+            # every later word is read as a program it may run.
+            def known: readers + writers + [handled[] | select(. != "xargs")];
+            # The words before a command's program that bash reads as its own.
+            def reserved: ["!", "if", "then", "elif", "else", "do", "while", "until", "coproc", "{", "}", "fi", "done", "esac"];
+            def git_writers: ["apply", "am", "update-index", "read-tree", "checkout-index", "mktree", "fast-import"];
+            # git's commands that read, or write no file of the work tree from a
+            # commit, a tree or data, and run no program their words name: any other
+            # (checkout, restore, switch, reset --hard, merge, pull, rebase,
+            # cherry-pick, revert, stash apply, worktree, submodule, sparse-checkout,
+            # clone, bisect, an alias a configuration file defines, ...) may write the
+            # records file from content this check never reads.
+            def git_reads: ["add", "annotate", "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "cherry", "commit", "commit-graph", "commit-tree", "config", "count-objects", "describe", "diff", "diff-files", "diff-index", "diff-tree", "fetch", "for-each-ref", "fsck", "gc", "grep", "hash-object", "help", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge-base", "mv", "name-rev", "pack-refs", "prune", "push", "range-diff", "reflog", "remote", "repack", "rev-list", "rev-parse", "rm", "shortlog", "show", "show-branch", "show-ref", "status", "symbolic-ref", "tag", "update-ref", "var", "verify-commit", "verify-tag", "version", "whatchanged", "write-tree"];
+            # git's own commands: any other is an alias, which a configuration file or
+            # variable may define (git x then runs git apply), or another program.
+            def git_own: ["add", "am", "annotate", "apply", "archimport", "archive", "backfill", "bisect", "blame", "branch", "bugreport", "bundle", "cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "checkout", "checkout-index", "cherry", "cherry-pick", "citool", "clean", "clone", "column", "commit", "commit-graph", "commit-tree", "config", "count-objects", "credential", "credential-cache", "credential-store", "cvsexportcommit", "cvsimport", "cvsserver", "daemon", "describe", "diagnose", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "fast-export", "fast-import", "fetch", "fetch-pack", "filter-branch", "fmt-merge-msg", "for-each-ref", "for-each-repo", "format-patch", "fsck", "fsck-objects", "gc", "get-tar-commit-id", "grep", "gui", "hash-object", "help", "hook", "http-backend", "http-fetch", "http-push", "imap-send", "index-pack", "init", "init-db", "instaweb", "interpret-trailers", "last-modified", "log", "ls-files", "ls-remote", "ls-tree", "mailinfo", "mailsplit", "maintenance", "merge", "merge-base", "merge-file", "merge-index", "merge-octopus", "merge-one-file", "merge-ours", "merge-recursive", "merge-recursive-ours", "merge-recursive-theirs", "merge-resolve", "merge-subtree", "merge-tree", "mergetool", "mktag", "mktree", "multi-pack-index", "mv", "name-rev", "notes", "p4", "pack-objects", "pack-redundant", "pack-refs", "patch-id", "pickaxe", "prune", "prune-packed", "pull", "push", "quiltimport", "range-diff", "read-tree", "rebase", "receive-pack", "reflog", "refs", "remote", "remote-ext", "remote-fd", "remote-ftp", "remote-ftps", "remote-http", "remote-https", "repack", "replace", "replay", "request-pull", "rerere", "reset", "restore", "rev-list", "rev-parse", "revert", "rm", "send-email", "send-pack", "shell", "shortlog", "show", "show-branch", "show-index", "show-ref", "sparse-checkout", "stage", "stash", "status", "stripspace", "submodule", "subtree", "svn", "switch", "symbolic-ref", "tag", "unpack-file", "unpack-objects", "update-index", "update-ref", "update-server-info", "upload-archive", "upload-pack", "var", "verify-commit", "verify-pack", "verify-tag", "version", "whatchanged", "worktree", "write-tree"];
+            # Whether a word sets an option: a short option's cluster holds one of
+            # $flags up to the first letter that takes a value ($values: the rest of
+            # the word is its value), or a long one is one of $long, as written or
+            # abbreviated to at least $min characters (curl, wget and gzip read
+            # an unambiguous prefix as the option).
+            def sets($flags; $values; $long; $min):
+              .d as $d
+              | if $d | startswith("--") then ($d | sub("=.*$"; "")) as $name
+                  | any($long[]; . as $l | $name == $l or (($name | length) >= $min and ($l | startswith($name))))
+                elif $d | test("^-[^-]") then ($d[1:] | explode | map([.] | implode)) as $ls
+                  | (first(range(0; $ls | length) as $i | select($values | contains($ls[$i])) | $i) // ($ls | length)) as $at
+                  | any($ls[:$at + 1][]; . as $c | $flags | contains($c))
+                else false end;
+            # gzip and its kin restore the name stored in the file with -N (or GZIP=-N).
+            def gzip_refusal($prog; $rest; $text):
+              if $text | test("GZIP") then "\($prog) where the command names GZIP"
+              else (first($rest[] | select(sets("N"; "bpSI"; ["--name"]; 4))) // null) as $w
+              | if $w != null then "\($prog) \($w.d)" else null end end;
+            # curl names a file from the server with -J, reads its options from a file
+            # with -K, builds them from files or variables with --variable, and reads
+            # ~/.curlrc (which may set remote-header-name or output-dir) unless -q is
+            # its first word. curl 8.13 and later reads URLs from a file given as --url
+            # @file (--url=@file from 8.16, an abbreviation read alike) or as an operand
+            # @file (@- its input), and names the files it writes after them
+            # (--remote-name): a word that starts with @ is refused unless it is the
+            # value of a short option that takes one or of an option that reads data,
+            # a header or a form from a file.
+            def curl_at_values: ["--data", "--data-ascii", "--data-binary", "--data-raw", "--data-urlencode", "--json", "--form", "--form-string", "--header", "--proxy-header", "--url-query", "--write-out"];
+            def takes_next($values): test("^-[^-]") and ((.[1:] | explode | map([.] | implode)) as $ls
+              | (first(range(0; $ls | length) as $j | select($values | contains($ls[$j])) | $j) // null) as $at
+              | $at != null and $at == ($ls | length) - 1);
+            def curl_url_file($rest):
+              first(range(0; $rest | length) as $i | $rest[$i]
+                | select((.d | startswith("--")) and (.d | test("^[^=]*=@"))
+                         and ((.d | sub("=.*$"; "")) as $n | ($n | length) >= 4 and ("--url" | startswith($n)))
+                         or ((.d | startswith("@"))
+                             and ((if $i > 0 then $rest[$i - 1].d else "" end)
+                                  | (takes_next("ECbcdDFPHhmoUQreXYytzTuAwxK") or IN(curl_at_values[])) | not)))) // null;
+            def curl_refusal($rest):
+              if (($rest[0].d // "") | IN("-q", "--disable")) | not then "curl without -q first (its configuration file may name the files it writes)"
+              else (first($rest[] | select(sets("JK"; "ECbcdDFPHhmoUQreXYytzTuAwxK"; ["--remote-header-name", "--config", "--variable"]; 5) or (.d | startswith("--expand-")))) // curl_url_file($rest)) as $w
+              | if $w != null then "curl \($w.d)" else null end end;
+            # wget names files from the server (--content-disposition,
+            # --trust-server-names), from the pages it follows (-r, -m, -p) or the URLs
+            # it reads (-i, -x), runs wgetrc commands (-e), and reads ~/.wgetrc and
+            # /etc/wgetrc (which may set any of these) unless given --no-config, read
+            # here as its first word (not an option's value, not after --).
+            def wget_refusal($rest):
+              if ($rest[0].d // "") != "--no-config" then "wget without --no-config first (its configuration file may name the files it writes)"
+              else (first($rest[] | select(sets("rmpxieBF"; "oaBtOTwQPUlARDIXnei"; ["--content-disposition", "--trust-server-names", "--recursive", "--mirror", "--page-requisites", "--force-directories", "--force-html", "--input-file", "--input-metalink", "--metalink-over-http", "--execute", "--config", "--base"]; 4))) // null) as $w
+              | if $w != null then "wget \($w.d)" else null end end;
+            # cp copying a directory writes every file it holds (cp -r src/. . writes
+            # src/.claude/audit/records.jsonl over the records).
+            def cp_refusal($prog; $rest):
+              (first($rest[] | select(sets("rRa"; "St"; ["--recursive", "--archive"]; 4))) // null) as $w
+              | if $w != null then "\($prog) \($w.d)" else null end;
+            # dpkg and rpm extract or install the files a package names.
+            def package_refusal($prog; $rest):
+              (if $prog == "dpkg" then [$rest[] | select(sets("xXiR"; ""; ["--extract", "--vextract", "--install", "--unpack", "--recursive"]; 5))]
+               else [$rest[] | select(sets("iUF"; ""; ["--install", "--upgrade", "--freshen", "--reinstall", "--restore"]; 5))] end) as $w
+              | if ($w | length) > 0 then "\($prog) \($w[0].d)" else null end;
+            # python -m zipfile or tarfile extracts an archive.
+            def python_refusal($prog; $rest):
+              if any(range(0; $rest | length) as $i | ($rest[$i].d | IN("-mzipfile", "-mtarfile")) or ($rest[$i].d == "-m" and (($rest[$i + 1].d // "") | IN("zipfile", "tarfile"))); .)
+              then "\($prog) -m zipfile or tarfile" else null end;
+            # The programs find -exec and xargs may run on the names they find or read.
+            def fed_readers: [readers[] | select(. != "mv" and . != "openssl" and . != "cd")];
+            def letters: ltrimstr("-") | explode | map([.] | implode);
+            # tar creating or listing an archive, with short options only.
+            def tar_reads($rest): ($rest | map(.d)) as $r
+              | (any($r[]; startswith("--")) | not)
+                and ([($r[] | select(startswith("-"))), (if ($r | length) > 0 and ($r[0] | startswith("-") | not) then $r[0] else empty end) | letters[]] as $ls
+                     | ($ls | length) > 0 and all($ls[]; IN("c", "t", "v", "f", "z", "j", "J", "C", "T", "h", "p", "P", "S")) and any($ls[]; . == "c" or . == "t"));
+            # unzip listing or testing an archive.
+            def unzip_reads($rest): ($rest | map(.d)) as $r
+              | ($r | length) > 0 and ($r[0] | startswith("-"))
+                and ([$r[] | select(startswith("-")) | letters[]] as $ls
+                     | all($ls[]; IN("l", "t", "v", "Z", "q", "z")) and any($ls[]; IN("l", "t", "v", "Z")));
+            # A path git checkout or restore may write from a commit: a literal path
+            # after --, resolved from the call's directory, that neither is the
+            # records file nor holds it (no glob, no pathspec magic, no .., ~ or
+            # expansion).
+            def pathspec_safe($records):
+              (.raw | test("[$`\\\\]") | not) and (.braces | not) and (.d | test("[*?\\[]|^:") | not)
+              and ((.d | resolved($cwd; $project)) as $r
+                   | $r != null and $r != $records and ($records | startswith($r + "/") | not));
+            def git_refusal($rest):
+              (reduce range(0; $rest | length) as $i ({skip: false, sub: null, at: null, opts: false, alias: false};
+                 $rest[$i] as $w
+                 | if .sub != null then .
+                 elif .skip then .skip = false | .alias = (.alias or ($w.d | ascii_downcase | startswith("alias.")))
+                 elif $w.d | startswith("-") then
+                   .skip = ($w.d | test("^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--attr-source)$"))
+                   | .alias = (.alias or ($w.d | test("^-c.*alias\\.|^--config-env"; "i")))
+                   | .opts = true
+                 else .sub = $w.d | .at = $i end)) as $g
+              | (if $g.at == null then [] else $rest[$g.at + 1:] end) as $sw
+              | ([$project + "/.claude/audit/records.jsonl"] | map(resolved($cwd; $cwd)) | .[0]) as $records
+              | (first(range(0; $sw | length) | select($sw[.].d == "--")) // null) as $dd
+              | if $g.alias then "git -c alias.*"
+                elif $g.sub == null then null
+                elif any(git_writers[]; . == $g.sub) then "git \($g.sub)"
+                elif $g.sub == "config" and any($rest[]; .d | ascii_downcase | startswith("alias.")) then "git config alias.*"
+                elif ($g.sub | IN(git_own[])) | not then "git \($g.sub) (not one of git's own commands: an alias or another program)"
+                elif $g.sub == "grep" then
+                  (if any($sw[]; .d | test("^-[A-Za-z]*O|^--op")) then "git grep -O (it runs the program it names)" else null end)
+                elif $g.sub | IN(git_reads[]) then null
+                # stash: list, show, create, store, drop and clear write no file
+                elif $g.sub == "stash" then
+                  (if (($sw[0].d // "") | IN("list", "show", "create", "store", "drop", "clear")) then null else "git stash \($sw[0].d // "push") (it writes the work tree)" end)
+                # reset: --soft and --mixed write the index, not the work tree
+                elif $g.sub == "reset" then
+                  (if all($sw[]; (.d | startswith("-") | not) or (.d | IN("--soft", "--mixed", "-q", "--quiet", "--"))) then null
+                   else "git reset \(first($sw[] | select(.d | startswith("-") and (IN("--soft", "--mixed", "-q", "--quiet", "--") | not)) | .d))" end)
+                # checkout and restore of literal paths after -- that do not hold the
+                # records, with no option of git's before the command
+                elif $g.sub | IN("checkout", "restore") then
+                  (if ($g.opts | not) and $records != null and $dd != null and ($sw | length) > $dd + 1
+                      and (any($sw[:$dd][]; .d | startswith("--pathspec")) | not)
+                      and all($sw[$dd + 1:][]; pathspec_safe($records))
+                   then null
+                   else "git \($g.sub) (but of literal paths after -- that do not hold the records)" end)
+                else "git \($g.sub) (it may write the work tree from a commit, or run a program)" end;
+            def find_refusal($rest):
+              first(range(0; $rest | length) as $i | $rest[$i].d as $d
+                | select(($d | IN("-fprint", "-fprint0", "-fprintf", "-fls"))
+                         or (($d | IN("-exec", "-execdir", "-ok", "-okdir")) and (($rest[$i + 1].d // "") as $q | any(fed_readers[]; . == $q) | not)))
+                | "find \($d) \($rest[$i + 1].d // "")") // null;
+            def xargs_refusal($rest):
+              (reduce $rest[] as $w ({skip: false, prog: null};
+                 if .prog != null then .
+                 elif .skip then .skip = false
+                 elif $w.d | startswith("-") then .skip = ($w.d | test("^(-[aIdEnLPs]|--(arg-file|delimiter|eof|max-args|max-lines|max-procs|max-chars|process-slot-var))$"))
+                 else .prog = $w.d end)) as $x
+              | if $x.prog == null or any(fed_readers[]; . == $x.prog) then null else "xargs \($x.prog)" end;
+            # A program of a simple command that writes files its input names: its
+            # program (after reserved words: ! tar xf, if git apply ...), and every
+            # later word unless the program is one whose words are its arguments
+            # (known). In a here-document's body a reader takes as data, read as
+            # before: its first word, and any word after a wrapper. Each is read
+            # over its next 64 words (no list grows with the command); a longer one
+            # is refused.
+            def writer_refusal($words; $text):
+              ($words | map(select(.target | not))) as $a
+              | ($a | length) as $n
+              | (any($words[]; .data) | not) as $strict
+              | (if $strict then first(range(0; $n) | select(($a[.].assign | not) and ($a[.].d | IN(reserved[]) | not))) // $n
+                 else first(range(0; $n) | select($a[.].assign | not)) // $n end) as $p
+              | (($a[$p].d // "") | name_of) as $pn
+              | (if $strict then (if ($pn | IN(known[])) or ($pn | test("^python[0-9.]*$")) then $n else $p end)
+                 else first(range($p; $n) | select($a[.].d | name_of | IN(wrappers[]))) // $n end) as $wrap
+              | first(range($p; $n) as $i | select($i == $p or $i > $wrap)
+                      | ($a[$i].d | name_of) as $prog | $a[$i + 1:$i + 65] as $rest
+                      | if ($prog | IN(writers[])) then $prog
+                        elif ($prog | IN(handled[]) or test("^python[0-9.]*$") | not) then empty
+                        elif $n - $i > 65 then "\($prog) with more than 64 words"
+                        elif $prog == "tar" then (if tar_reads($rest) then empty else "tar" end)
+                        elif $prog == "unzip" then (if unzip_reads($rest) then empty else "unzip" end)
+                        elif $prog == "git" then (git_refusal($rest) // empty)
+                        elif $prog == "find" then (find_refusal($rest) // empty)
+                        elif $prog == "xargs" then (xargs_refusal($rest) // empty)
+                        elif $prog | IN("gzip", "gunzip", "pigz", "unpigz") then (gzip_refusal($prog; $rest; $text) // empty)
+                        elif $prog == "curl" then (curl_refusal($rest) // empty)
+                        elif $prog == "wget" then (wget_refusal($rest) // empty)
+                        elif $prog | IN("dpkg", "rpm") then (package_refusal($prog; $rest) // empty)
+                        elif $prog | IN("cp", "gcp") then (cp_refusal($prog; $rest) // empty)
+                        else (python_refusal($prog; $rest) // empty) end
+                      | {kind: "writer", word: .}) // null;
+            .tool_input.command // ""
+            | . as $text
+            | if utf8bytelength > 16384 then "long "
+              else loose as $l
+              # Where the reader cannot follow the command, it is read again with no
+              # quoting at all, which reads more than bash runs
+              | (if $l.follows then {cmds: [], ext: false, data: false, odd: false} else (unquoted_text | loose) end) as $ul
+              | $ul.cmds as $u
+              # A command that may name the records file, or a directory on its way, or
+              # that redirects output to a name the shell builds, or that holds an
+              # extglob pattern (which may match any name), is read as a whole
+              | if $named or $inaudit or $l.ext or $ul.ext or any($l.cmds[][], $u[][]; may_name($cwd))
+                   or any($l.cmds[][]; .writes and ((.raw | test("[$`]")) or .braces)) then
+                  # $'...' and $"..." are decoded or translated by bash, unread here
+                  if test("\\$['\"]") then "subst "
+                  elif [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] | map(select(startswith("'") | not)) | add // "" | test("\\$\\(|`|\\\\") then "subst "
+                  else commands as $c
+                  | if $c.why == "process substitution" then "subst "
+                    elif $c.why == "extglob" then "expands an extglob pattern, @(...) and its kin, which may match any name"
+                    elif $c.why != null then "expands \($c.why)"
+                    elif any($c.cmds[][]; .braces) then "expands an unquoted brace"
+                    else (first($c.cmds[][] | select(.writes and (.d as $t | any(sinks[]; . == $t) | not))) // null) as $w
+                    | if $w != null then "writes \($w.d | .[:200])"
+                      else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
+                      | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+                      end
+                    end
+                  end
+                # A here-document whose text a quote carries past a line's end: where
+                # its body ends, and what runs after it, are not read
+                elif $l.heredoc and any($l.cmds[][]; .raw | test("\n")) then "expands a here-document"
+                # A body read as data ends at its delimiter's line: where a line
+                # continuation or a delimiter other than a plain word may hide that
+                # line from this reading, what runs after it is not read as bash runs it
+                elif ($l.data or $ul.data) and (contains("\\\n") or $l.odd or $ul.odd) then "expands a here-document"
+                else (first($l.cmds[], $u[] | writer_refusal(.; $text) | select(. != null)) // null) as $r
+                | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+                end
+              end
+            JQ
+            )"
+              # Whether the command may turn on dotglob, so that a glob matches a
+              # leading dot (*laude matches .claude): shopt, GLOBIGNORE, BASHOPTS, or
+              # a file it sources or text it evaluates (quotes and backslashes removed)
+              DOTS=false
+              printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qE '(shopt|GLOBIGNORE|BASHOPTS|SHELLOPTS|dotglob)|(^|[[:space:];&|(])(\.|source|eval)([[:space:]]|$)' && DOTS=true
+              VERDICT="$(printf '%s' "$INPUT" | jq -r --arg cwd "$RUNS_IN" --arg project "${CLAUDE_PROJECT_DIR:-$RUNS_IN}" --argjson named "$NAMED" --argjson inaudit "$INAUDIT" --argjson dots "$DOTS" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2; }
+              KIND="${VERDICT%% *}"
+              WORD="${VERDICT#* }"
+              ONE_FORM="append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)"
+              case "$KIND" in
+                ok) ;;
+                writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed, braced, linked or built when the command runs may be the records file): $ONE_FORM" >&2; exit 2 ;;
+                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, a recursive copy (cp -r, -R or -a, scp, rsync, rclone), git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, a git command that writes the work tree from a commit (checkout and restore but of literal paths after -- that do not hold the records, switch, reset but --soft or --mixed, merge, pull, rebase, cherry-pick, revert, stash but list, show, create, store, drop or clear, worktree, submodule, clone, ...), find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K, --variable or URLs read from a file (--url @file, an @file operand), wget but with --no-config first and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists), wherever it stands: after !, if or while, and after any program but one read here (prlimit, setpriv, a loader): $ONE_FORM" >&2; exit 2 ;;
+                program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
+                mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, in the project's audit directory, as mv <project>/.claude/audit/records.jsonl <project>/.claude/audit/records.<UTC time>.jsonl with literal paths (no .., ~ or expansion); it does not run '$WORD', which could put another file in its place or take the records out: $ONE_FORM" >&2; exit 2 ;;
+                assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor run printf with an option (printf -v NAME sets a variable for the rest of the line), nor name PATH, IFS, ENV, BASH_ENV, CDPATH, BASH_CMDS, BASH_ALIASES, LD_*, DYLD_* or OPENSSL_* (alone, as -vNAME, NAME[key] or NAME=value), which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;
+                subst) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not substitute a command or a process, or escape text (\$(, a backtick, <(, >(, \\ outside single quotes, \$'...' or \$\"...\"), since what runs is not what this check reads; run each command on its own, with literal values: $ONE_FORM" >&2; exit 2 ;;
+                expands) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not hold text whose words this check cannot read ($WORD); $ONE_FORM" >&2; exit 2 ;;
+                long) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command other than the append form is read up to 16384 bytes, and this one is longer; $ONE_FORM" >&2; exit 2 ;;
+                *) echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2 ;;
+              esac
+              # A command that does not name the records file is read; its other
+              # text is other hooks' business.
+              case "$CMD" in
+                *records.jsonl*) ;;
+                *) exit 0 ;;
+              esac
+            fi
+            # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
+            # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7), read line by line and again with
+            # its line breaks read as blanks, as the SDK's and the TypeScript rules read whitespace (password:<newline>value).
+            # secret_lines TEXT: the same rules, each line read on its own; a caller that joins texts read apart joins them with line
+            # breaks, each text given once as it is and once with its own line breaks read as blanks.
+            # secret_values TEXT: what the rules whose match may hold whitespace find in TEXT, one per line, each line read on its own:
+            # the match, or the value a rule reads out of it (a caller compares what two texts hold).
+            # Each reads TEXT with the JSON escapes some encoders write decoded (secret_decoded), and secret_lines first looks for a
+            # value the layer holds itself (secret_held).
+            # The shapes of keys and tokens (the first two may hold whitespace)
+            SECRET_SPACED='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
+            SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+            # ... and service tokens by their prefix (Stripe, Google, GitLab, npm, Vault, SendGrid) and a Slack webhook's path
+            SECRET_ERE="$SECRET_ERE"'|[rs]k_(live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\.[A-Za-z0-9_-]{24,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]{16,}'
+            SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
+            # A quote, or an escaped one (\" in JSON text inside a JSON string)
+            SECRET_Q="\\\\*[\"']"
+            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
+            SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
+            SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
+            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+            # curl's cookie option (-b, --cookie), up to its value, and up to the quote its value opens with
+            SECRET_COOKIE_OPT="(^|[^A-Za-z0-9_-])(-b$SECRET_SEP?|--cookie$SECRET_SEP)"
+            SECRET_COOKIE_OPTQ="(^|[^A-Za-z0-9_-])(-b([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*)?|--cookie([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*))$SECRET_Q"
+            # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+            SECRET_QUOTED="$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']"
+            # The rules are ASCII, read byte by byte (LC_ALL=C, in a subshell): a multibyte locale sends some of them to a matcher whose time grows with the square of the text
+            # secret_held TEXT: status 0 when TEXT holds, as written, the value of AUDIT_HMAC_KEY (the key the plugin's audit log is
+            # signed with) or of SECRET_HELD (a value the calling hook holds itself), 4 characters or more: a host recognises the
+            # credentials it holds itself (STANDARD 1.2.0 §6.7)
+            secret_held() (
+              for SECRET_VALUE in "${AUDIT_HMAC_KEY:-}" "${SECRET_HELD:-}"; do
+                [ "${#SECRET_VALUE}" -ge 4 ] || continue
+                case "$1" in *"$SECRET_VALUE"*) return 0 ;; esac
+              done
+              return 1
+            )
+            # secret_decoded TEXT: TEXT with the JSON escapes some encoders write for characters the rules read decoded, \u0022 and
+            # \u0027 as an escaped quote (\" and \'), \u0026, \u002b, \u003c, \u003d and \u003e (Go's, Gson's and .NET's HTML-safe
+            # escapes, in either case) as the character, and \/ (PHP's) as /; the SDK's and the TypeScript rules decode the same
+            secret_decoded() (
+              LC_ALL=C
+              export LC_ALL
+              printf '%s' "$1" | sed -e 's/\\u0022/\\"/g' -e "s/\\\\u0027/\\\\'/g" -e 's/\\u0026/\&/g' -e 's/\\u002[bB]/+/g' \
+                -e 's/\\u003[cC]/</g' -e 's/\\u003[dD]/=/g' -e 's/\\u003[eE]/>/g' -e 's#\\/#/#g'
+            )
+            secret_values() (
+              LC_ALL=C
+              export LC_ALL
+              case "$1" in
+                *'\u00'* | *'\/'*)
+                  SECRET_TEXT="$(secret_decoded "$1")" || { echo '(unread)'; return 0; }
+                  set -- "$SECRET_TEXT"
+                  ;;
+              esac
+              printf '%s' "$1" | grep -Eo -- "$SECRET_SPACED"
+              printf '%s' "$1" | grep -Eio -- "$SECRET_QUOTED"
+              # An Authorization header's value, 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
+                sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
+                sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # ... or after any other scheme (ApiKey, SSWS, Bot) and spaces: the first word may be the scheme or the credential, so both readings count
+              printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}" |
+                sed -E 's/^.* //' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+                sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
+                sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # ... and the same after any other scheme
+              printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+                sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.* //" |
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # A user option's password (curl -u user:password), 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
+                sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
+              printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
+                sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
+                sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # A .netrc entry's password (machine <host> login <user> password <value>), 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eo -- "(^|[^A-Za-z0-9_-])(machine|login|account|default)[[:space:]]+([^[:space:]]+[[:space:]]+)?password[[:space:]]+[^[:space:]\"']{8,}" |
+                sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              # A cookie (name=value) in a Cookie or Set-Cookie header's value (to the end of its line or its closing quote), or in
+              # curl's cookie option's value (holding a name and = in its first 64 characters; quoted, or to a blank): a value of 8 or
+              # more token characters with letters and digits, a Set-Cookie attribute aside
+              {
+                printf '%s' "$1" | grep -Eio -- "(set-)?cookie($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[^[:space:]\"'\\\\][^[:cntrl:]\"'\\\\]*" |
+                  sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//"
+                printf '%s' "$1" | grep -Eo -- "$SECRET_COOKIE_OPTQ[^[:cntrl:]\"'\\\\=]{0,64}=[^[:cntrl:]\"'\\\\]*" |
+                  sed -E "s/^.?(-b|--cookie)([[:space:]]+|=|(\\\\*[\"'])?[[:space:]]*,[[:space:]]*)?\\\\*[\"']//"
+                printf '%s' "$1" | grep -Eo -- "$SECRET_COOKIE_OPT[^[:space:]\"'\\\\=]{0,64}=[^[:space:]\"'\\\\]*" |
+                  sed -E "s/^(.?-b|.?--cookie)([[:space:]]+(\\\\*[\"'])?|=(\\\\*[\"'])?|(\\\\*[\"'])?[[:space:]]*,[[:space:]]*\\\\*[\"'])?//"
+              } | tr ';, ' '\n\n\n' | grep -E '^[^=]*=' | grep -Eiv '^(path|domain|expires|max-age|samesite|secure|httponly|partitioned|priority)=' |
+                sed -E 's/^[^=]*=//' | grep -Ex '[A-Za-z0-9._~+/=%-]{8,}' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              return 0
+            )
+            secret_lines() (
+              LC_ALL=C
+              export LC_ALL
+              secret_held "$1" && return 0
+              SECRET_TEXT="$1"
+              case "$1" in
+                *'\u00'* | *'\/'*) SECRET_TEXT="$(secret_decoded "$1")" || return 0 ;;
+              esac
+              printf '%s' "$SECRET_TEXT" | grep -Eq -- "$SECRET_ERE" && return 0
+              # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once; its
+              # slashes escaped or not)
+              printf '%s' "$SECRET_TEXT" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*:(\\*/){2}[^[:space:]/:@]*:[^[:space:]/@]+@' |
+                sed -E 's#^.*/[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+              # The rules that read a quoted value, or a value out of a match
+              secret_values "$1" | grep -q .
+            )
+            secret_in() (
+              secret_lines "$1" && return 0
+              SECRET_FOLDED="$(printf '%s' "$1" | LC_ALL=C tr '\n\r' '  ')" || return 0
+              [ "$SECRET_FOLDED" != "$1" ] && secret_lines "$SECRET_FOLDED"
+            )
+            # END secret-scan
+            # A value under a member named for a credential, in the record's data:
+            # the shared rule (hooks/secret_member.jq, copied below), which the
+            # plugin's pre-tool-use hook applies to the data a persist tool stores and
+            # the SDK redactor to data. The text scan above needs a long or quoted
+            # value; {"password":"hunter2"}, a value in an array, one with blanks or
+            # a number are found only here. A record jq cannot read this way is
+            # refused (R407).
+            SECRET_MEMBER_JQ='
+            # BEGIN secret-member (source: hooks/secret_member.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # acs_held(false): whether JSON data holds, in a member named for a
+            # credential, a value redaction replaces that is not a placeholder: the rule
+            # the SDK redactor applies to data (grounded_agency/state/redaction.py,
+            # _secret_member_value; STANDARD 1.2.0 §6.7). A member is secret when its
+            # name ends in a credential name or names a header that carries one
+            # (Authorization, Cookie), when it is the value of a name/value pair whose
+            # name is such a name ({"name": "Authorization", "value": ...}), the second
+            # of a [name, value] tuple, or inside a secret member. Its value counts when
+            # it is a number, or a string of 4 or more characters other than [REDACTED]
+            # that is not a placeholder (<...>, ${...}, ****, password, token, ...).
+            # Names are compared in ASCII lower case, as the SDK compares them (re.ASCII,
+            # IGNORECASE), with string functions: jq compiles a regular expression at
+            # each test, about 0.4 ms a member, so a record of 1 MB took 22 s. A name
+            # outside ASCII (utf8bytelength differs from length) is also tested with
+            # Unicode case folding, so this rule finds a name the SDK does not in rare
+            # spellings, never the reverse; a placeholder is matched in ASCII only, so
+            # no rare spelling hides a value. A copy sits in a single-quoted shell
+            # string, so this text holds no single quote.
+            def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "account_key", "account-key", "accountkey", "signing_key", "signing-key", "signingkey", "encryption_key", "encryption-key", "encryptionkey", "hmac_key", "hmac-key", "hmackey", "master_key", "master-key", "masterkey", "credential", "authorization", "cookie", "cookies"];
+            def acs_name: (ascii_downcase as $n | any(acs_names[]; . as $s | $n | endswith($s)))
+              or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential|authorization|cookies?)\\z"; "i"));
+            def acs_is($words): (ascii_downcase | IN($words[])) or (utf8bytelength != length and test("\\A(" + ($words | join("|")) + ")\\z"; "i"));
+            def acs_scalar: (type == "string" and length >= 4 and . != "[REDACTED]") or type == "number";
+            def acs_placeholder: type == "string"
+              and (((.[0:1] | IN("$", "<", "{", "*", "[")) and (contains("\n") | not))
+                   or (ascii_downcase | IN("password", "passwd", "pwd", "pass", "secret", "token")));
+            def acs_held($secret):
+              if $secret and acs_scalar then (acs_placeholder | not)
+              elif type == "object" then
+                (($secret | not) and any(to_entries[]; (.key | acs_is(["name", "key", "header"])) and (.value | type == "string" and acs_name))) as $pair
+                | any(to_entries[]; .key as $k | .value | acs_held($secret or ($k | acs_name) or ($pair and ($k | acs_is(["value"])))))
+              elif type == "array" then
+                (($secret | not) and length == 2 and (.[0] | type == "string" and acs_name)) as $tuple
+                | any(to_entries[]; .key as $i | .value | acs_held($secret or ($tuple and $i == 1)))
+              else false end;
+            # END secret-member
+            '
+            HELD=false
+            if [ -n "$RECORD" ]; then
+              HELD="$(printf '%s' "$RECORD" | jq -r "$SECRET_MEMBER_JQ"' acs_held(false)' 2>/dev/null)" || HELD=unread
+            fi
+            if [ "$HELD" = true ] || secret_in "$CMD" || secret_lines "$DECODED"; then
+              echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
+              exit 2
+            fi
+            if [ "$HELD" != false ]; then
+              echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the record's members" >&2
+              exit 2
+            fi
+            exit 0
+    - matcher: "Edit|Write|MultiEdit|NotebookEdit"
       hooks:
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Grep | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
+            # Code-decided check (STANDARD 1.2.0 §5.18.10, §6.7): the records file is
+            # written only in the Bash append form, whose record the Bash hook reads,
+            # so an Edit, Write, MultiEdit or NotebookEdit of it, or of another file of
+            # .claude/audit/ (the records moved aside), is refused: the path as
+            # written and the file it reaches (links followed; a link that cannot be
+            # followed is refused), and another name of the records file (a hard
+            # link). Claude Code passes the tool call as JSON on stdin; exit 2 blocks
+            # the call and the reason on stderr is shown to Claude. A call that cannot
+            # be read is blocked.
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The path exactly as given: a command substitution strips the line
+            # breaks that end its output, and a file's name may end in one (x and
+            # x<newline> are two files), so an x is printed after it and taken off.
+            TARGET="$(printf '%s' "$INPUT" | jq -j '(.tool_input.file_path // .tool_input.notebook_path // empty), "x"' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="${TARGET%x}"
+            [ -n "$TARGET" ] || exit 0
+            REFUSE="F504 CONSTRAINT_VIOLATED: in the audit skill the records file is written only by appending a record with Bash, as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", whose record is checked for credentials; an edit or a write of '$TARGET' could change it unread (STANDARD 1.2.0 §6.7)"
+            REACHED="$TARGET"
+            if [ -L "$TARGET" ]; then
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || { echo "$REFUSE" >&2; exit 2; }
+            elif [ -e "$TARGET" ] || [ -d "$(dirname -- "$TARGET")" ]; then
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || REACHED="$TARGET"
+            fi
+            for P in "$TARGET" "$REACHED"; do
+              # In lower case (a file system may ignore case), repeated slashes and ./
+              # segments removed
+              SEEN="$(printf '%s\n' "$P" | tr 'A-Z' 'a-z' | sed -e 's#//*#/#g' -e 's#/\./#/#g' -e 's#^\./##')"
+              case "$SEEN" in
+                .claude/audit/* | */.claude/audit/* | records.jsonl | */records.jsonl | records.*.jsonl | */records.*.jsonl | *..*.claude* | *.claude*..*)
+                  echo "$REFUSE" >&2
+                  exit 2
+                  ;;
+              esac
+            done
+            # Another name of the records file (a hard link)
+            RECORDS="${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"
+            if [ -e "$TARGET" ] && [ -e "$RECORDS" ] && [ "$TARGET" -ef "$RECORDS" ]; then
+              echo "$REFUSE" >&2
+              exit 2
+            fi
+            exit 0
 ---
 
 ## Live Context
@@ -41,7 +1001,7 @@ Current audit context:
 - Git authors today: !`git log --since="midnight" --format="%an" 2>/dev/null | sort | uniq -c || echo "None"`
 - Uncommitted changes: !`git status --short 2>/dev/null || echo "Not a git repo"`
 - Recent file modifications: !`find . -type f -mtime -1 -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '` files in last 24h
-- Audit log exists: !`ls -la .audit/ 2>/dev/null | head -5 || echo "No .audit/ directory"`
+- Tool-call log exists: !`wc -l "${CLAUDE_PROJECT_DIR:-.}/.claude/audit.log" 2>/dev/null || echo "No .claude/audit.log"`
 - Audit records exist: !`wc -l "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" 2>/dev/null || echo "No .claude/audit/records.jsonl"`
 - Checkpoint log exists: !`ls -la .checkpoints/ 2>/dev/null | head -5 || echo "No .checkpoints/ directory"`
 
@@ -64,7 +1024,8 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 |-----------|----------|------|-------------|
 | `event` | Yes | object | Event to record |
 | `context` | No | object | Event context |
-| `retention` | No | string | How long to retain |
+| `retention` | No | string | How long the record is to be kept in the store it is written to: a duration (STANDARD v1.2 §5.10.1, e.g. `2555d` or `P30D`); absent, the store's own policy applies (§6.3). A literal outside the grammar is W614 |
+| `require_record` | No | boolean | The step fails (R402, reason `not_recorded`) unless the record was written, in a workflow that targets 1.2 or later (STANDARD v1.2 §6.4) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
@@ -92,17 +1053,17 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document transformations applied
    - List dependencies between artifacts
 
-5) **Ground claims**: Attach evidence for all audit entries
-   - Format: `file:line`, `tool:git:commit_hash`, `timestamp`
-   - Include actual command outputs where relevant
+5) **Ground claims**: Attach evidence anchors to all audit entries (STANDARD v1.2 §6.5)
+   - `{ref: "file:src/app.py:45", kind: file}`, `{ref: "tool:git:<commit>", kind: tool}`; the output's own is the record written, `{ref: "audit:<audit_id>", kind: record}` (§3.1)
+   - Cite command outputs by reference or digest, never by copying them (§6.7)
 
 6) **Write the record (append-only)**: Persist the audit record before returning
-   - Build one compact JSON line: `audit_id`, `timestamp`, the `event`, the `context`, `retention` if given, and the collected `audit_record`, `changes` and `provenance` (redact credentials and PII first)
-   - Append it with Bash to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (`mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`, then `>>`), so the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
-   - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
-   - The plugin's PreToolUse hook blocks every Bash call, this append included, while there is no valid checkpoint marker (`.claude/checkpoint.ok`): a shell command is not trusted to be read-only. If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
+   - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
+   - Append it with Bash as a literal, exactly `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` on one line (no intermediate file: the skill's hook reads it there), after `mkdir -p` of its directory, the project's `.claude/`; refuse a symlink, and never rewrite, truncate or reorder lines. Every other command that names the file only reads (Safety Constraints)
+   - Cite earlier lines of `.claude/audit.log` (the calls being audited) as evidence, and never write to it (Safety Constraints): the plugin's hooks append a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself
+   - The plugin's PreToolUse hook treats this append as a `mutate` call, since a `>>` redirect writes a file: it is blocked without a valid checkpoint (F501), uses that checkpoint up, and asks for approval (F502). If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
-7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line
+7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, `record` is that line, and `store` is where it went (Field Definitions)
 
 ## Output Contract
 
@@ -110,6 +1071,11 @@ Return a structured object:
 
 ```yaml
 recorded: boolean  # Whether the record was appended to .claude/audit/records.jsonl
+record: object  # The action record written (STANDARD v1.2 §6.4)
+store:  # Where the record was written (STANDARD v1.2 §6.3, §6.6)
+  name: string  # e.g. .claude/audit/records.jsonl
+  durability: memory | session | durable  # never durable for a store that does not outlive the session
+  retention: string | null  # the duration the store applies (§5.10.1); absent when it keeps records until removed by hand
 audit_id: string  # Unique audit record ID
 timestamp: string  # ISO 8601 date-time the audit record was generated
 audit_record:
@@ -133,8 +1099,8 @@ provenance:
   inputs: array[string]  # Source data/files
   outputs: array[string]  # Produced artifacts
   dependencies: array[string]  # External dependencies used
-confidence: number  # 0.0-1.0 (completeness of audit)
-evidence_anchors: ["tool:git:...", "file:..."]
+confidence: number  # probability that the record was appended as reported (§4.1.1)
+evidence_anchors: [{ref: "audit:<audit_id>", kind: record}, {ref: "tool:git:...", kind: tool}, {ref: "file:...", kind: file}]  # the record written grounds the output (STANDARD v1.2 §3.1)
 assumptions: []
 ```
 
@@ -143,6 +1109,8 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `recorded` | boolean | Whether the record was appended to `.claude/audit/records.jsonl` (false when the write was blocked or failed) |
+| `record` | object | The action record of step 6: `action_id` (the `audit_id`), `timestamp`, `actor: agent`, `intent` (the event's `intent`, else its `event_type`, when a string; else `audit`), `status: executed`, `capability: audit`, `details` (`event`, `context` and `retention` when given, and the collected `audit_record`, `changes` and `provenance`), `recorded_by: {"name": "audit skill"}`, then `prev_hmac` (the `hmac` of the file's last line, empty for the first) and `hmac` (HMAC-SHA-256, as lowercase hex, of the line without `hmac` as `jq -c` prints it, with `openssl dgst -sha256 -hmac` under `AUDIT_HMAC_KEY`, else the default key the plugin's hook and `tools/verify_audit_log.py` use: `grounded-agency-audit-` then the short host name, `hostname -s`, or `default` when there is none). When the last line has no readable `hmac` (a line written before Standard 1.2, which does not verify), do not chain onto it: move the file aside (`records.<UTC time>.jsonl`, same directory) and start a new one, whose first line has `prev_hmac` empty. Each member of `event` stays under `details.event`: it is what the step reported, and cannot claim another writer, an actor, an approval or a place in the chain |
+| `store` | object | Where the record was written: the store's `name`, its `durability` (`memory`, `session` or `durable`; a store that does not outlive the session is never reported `durable`) and the `retention` it applies, so a workflow can stop on `${a.store.durability} != 'durable'` (STANDARD v1.2 §6.3, §6.6). This skill's is `{name: ".claude/audit/records.jsonl", durability: durable}`, a file in the project kept until removed by hand, with no `retention` |
 | `audit_id` | string | Unique identifier for this audit record |
 | `timestamp` | string | ISO 8601 date-time the audit record was generated |
 | `audit_record.actor` | string | Who performed the actions |
@@ -151,8 +1119,8 @@ assumptions: []
 | `tool_usage` | array | Summary of tools invoked |
 | `decision_rationale` | string | Explanation of why actions were taken |
 | `provenance` | object | Input/output/dependency lineage |
-| `confidence` | number | 0.0-1.0 completeness of audit trail |
-| `evidence_anchors` | array | References to source evidence |
+| `confidence` | number | Probability, 0.0-1.0, that the record was appended as reported (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to source evidence |
 | `assumptions` | array | What was assumed during audit collection |
 
 ## Examples
@@ -222,13 +1190,20 @@ provenance:
     - "psycopg2"
 confidence: 0.95
 evidence_anchors:
-  - "file:.claude/audit/records.jsonl"
-  - "tool:git:abc123def456"
-  - "tool:bash:pytest tests/ - 7 passed"
-  - "file:src/api/handlers/user.py:45"
+  - {ref: "audit:audit_20240115_160000_session", kind: record}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
+  - {ref: "tool:git:abc123def456", kind: tool}
+  - {ref: "tool:bash:pytest tests/ - 7 passed", kind: tool}
+  - {ref: "file:src/api/handlers/user.py:45", kind: file}
 assumptions:
   - "Git log accurately reflects all changes"
   - "No manual edits outside of tracked session"
+```
+
+**The line step 6 appends** (with `AUDIT_HMAC_KEY=example-key`; `python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl --no-head` checks the chain, which no head anchors):
+
+```json
+{"action_id":"audit_20240115_160000_session","timestamp":"2024-01-15T16:00:00Z","actor":"agent","intent":"audit","status":"executed","capability":"audit","details":{"event":{"type":"session_completed","actor":"claude-agent","timestamp":"2024-01-15T16:00:00Z"},"context":{"scope":"session"},"audit_record":{"actor":"claude-agent","action_type":"code_modification","targets":["src/api/handlers/user.py"],"outcome":"success"},"changes":[{"type":"modify","location":"src/api/handlers/user.py:45-62","timestamp":"2024-01-15T14:45:00Z"}],"provenance":{"inputs":["security_audit_report.md"],"outputs":["src/api/handlers/user.py"],"dependencies":[]}},"recorded_by":{"name":"audit skill"},"prev_hmac":"","hmac":"67bcae7663853fd55f9d77492b9612e9a2ee77b91331995e964eefb17db4d90a"}
 ```
 
 **Evidence pattern:** Git commit history, tool invocation logs, file diffs.
@@ -291,9 +1266,10 @@ provenance:
   dependencies: []
 confidence: 1.0
 evidence_anchors:
-  - "file:.claude/audit/records.jsonl"
-  - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
-  - "tool:bash:rollback command output"
+  - {ref: "audit:audit_20240115_config", kind: record}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
+  - {ref: "file:.checkpoints/chk_20240115_150000_config/manifest.json", kind: file}
+  - {ref: "tool:bash:rollback command output", kind: tool}
 assumptions: []
 ```
 
@@ -320,7 +1296,10 @@ Apply the following verification patterns:
 - Preserve original timestamps (do not alter history)
 - Include failed actions, not just successes
 - Redact sensitive information (credentials, PII) from audit output
-- Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log`
+- Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log` (the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call, checked by `tools/verify_audit_log.py`, and a foreign line would break the chain)
+- Only step 6's append writes the records file. Any other Bash command that names the records file, `.claude` or the audit directory (or runs there, or holds a glob that may match the file) only reads: the skill's hook refuses one that redirects output to a file, runs a program but `cat`, `echo`, `printf`, `jq`, `ls`, `head`, `tail`, `wc`, `grep`, `cut`, `tr`, `base64`, `sha256sum`, `shasum`, `md5sum`, `date`, `hostname`, `sleep`, `test`, `true`, `false`, `pwd`, `cd`, `stat`, `basename`, `dirname`, `mkdir`, `openssl dgst` and the `mv` that moves the file aside, or substitutes a command (`$(...)`); so compute the HMAC and run `hostname -s` in commands of their own, and write values literally. An Edit or a Write of the file is refused too
+- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one, read with its JSON escapes resolved, or any value but a placeholder (`<ref>`) under a member named for a credential (`"password": "hunter2"`, `"token": 4111111111111111`) (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
+- A literal record (§5.18.10): the hook reads the record only in step 6's form, one JSON object on one line with no single quote, and refuses (F504) any other command naming the records file that holds `$` (but in `${CLAUDE_PROJECT_DIR:-.}`), a backtick, `\`, `<` or `>`, which could build its text when the command runs. Compute the HMAC, and a moved-aside file's time, in commands of their own, then write them literally
 
 ## Composition Patterns
 

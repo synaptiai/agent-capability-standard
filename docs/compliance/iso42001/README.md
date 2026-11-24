@@ -22,13 +22,4 @@ framework to NIST's functions.
 
 These documents cite settings of the domain profiles (`block_autonomous`,
 `require_human`, `require_review`, confidence thresholds, required anchor
-types). A domain profile is informative data for hosts and workflow authors.
-Standard 1.1.0 does not say how one is applied, and no shipped component
-loads or selects one: the validator, the executor and the plugin hooks do not
-use a profile, and the Python package applies only a profile's
-`trust_weights`, when a caller passes them to `grounded_agency/trust.py`. A
-profile setting is a control only where the organization's host implements it or
-where it is written into a workflow. What is enforced today rests on the
-ontology's safety flags, through the validator, the reference executor, the
-Python adapter and the plugin hook. See
-[Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+types). A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`, and the Standard Agents binding, `groundedTool({profiles})`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does); its grounding policy (`require_grounding`, with `required_anchor_types` as the anchor kinds that count, §5.20) fails a step or call whose output is not grounded (F505), and an output whose confidence is below `minimum_confidence` fails too (F504; the adapter checks the outputs of every MCP tool bound to a capability: a tool `create_grounded_mcp_server` serves checks its own result, and the PostToolUse hook checks another server's; Claude Code's own tools return no capability output, so these rules do not reach them, and a warning is logged once for each such tool a rule would cover); a profile only tightens, and one with an error is refused. A rule an implementation does not put in force refuses the profile instead of being dropped. Its destination policy (`allowed_destinations`, §4.4.2) is in force beside the host's own: the executor fails a `send` step it does not allow, and the adapter and the Standard Agents binding refuse such a `send` call (F504), before approval; no shipped profile sets one. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).

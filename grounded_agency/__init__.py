@@ -25,7 +25,13 @@ from ._types import (
     HookContext,
 )
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
+from .capabilities.bindings import ToolBinding, check_offered, load_bindings
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
+from .capabilities.output import (
+    CapabilityOutputError,
+    decode_capability_output,
+    encode_capability_output,
+)
 from .capabilities.registry import CapabilityRegistry
 from .client import GroundedClient
 from .coordination import (
@@ -52,6 +58,16 @@ from .coordination import (
     SyncStrategy,
     TaskLifecycleError,
 )
+from .coordination.families import is_model_family, model_family
+from .coordination.inquiry import AnswerError, match_answers
+from .coordination.manifest import (
+    check_agent_manifest,
+    check_task,
+    join_maxima,
+    load_agent_manifest,
+    manifest_maxima,
+    target_maxima,
+)
 from .discovery import (
     CapabilityGap,
     CapabilityMatch,
@@ -64,6 +80,7 @@ from .discovery import (
     TaskRequirement,
     WorkflowSynthesizer,
 )
+from .entities import EntityId, parse_entity_id
 from .errors import (
     ErrorCode,
     Severity,
@@ -71,19 +88,43 @@ from .errors import (
     format_error,
     format_errors_response,
 )
+from .grounding import GroundingPolicy, GroundingResult
+from .grounding import check_output as check_grounding_output
 from .mcp import create_grounded_mcp_server
+from .profiles import AppliedProfiles, ProfileError, load_profile
 from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
-from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.evidence_store import (
+    EvidenceAnchor,
+    EvidenceRecord,
+    EvidenceStore,
+    EvidenceStoreProtocol,
+    StoreInfo,
+)
+from .state.jsonl_evidence_store import JsonlEvidenceStore
+from .state.memory import MemoryContext, MemoryStore
+from .state.memory import MemoryError as MemoryStoreError
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+from .state.redaction import Redactor
+from .state.snapshots import FileSnapshotStore
+from .trust import Candidate, Resolution, merge_trust_weights
+from .trust import resolve as resolve_conflict
+from .versions import CitedVersionError
+from .workflows.domains import (
+    UnsupportedDomain,
+    is_domain_id,
+    select_implementation,
+)
 from .workflows.engine import (
     BindingError,
     StepStatus,
+    UnboundedDelegation,
     WorkflowDefinition,
     WorkflowEngine,
     WorkflowStep,
     WorkflowStepResult,
 )
+from .workflows.idempotency import IdempotencyLog
 from .workflows.tracer import ConformanceReport, StepTrace, WorkflowTracer
 
 # Configure package-level logger
@@ -107,11 +148,34 @@ __all__ = [
     "ToolCapabilityMapper",
     "ToolMapping",
     "UNCLASSIFIED_TOOL",
+    # Tool bindings and text-only outputs (STANDARD 1.2.0 section 5.18)
+    "ToolBinding",
+    "load_bindings",
+    "check_offered",
+    "encode_capability_output",
+    "decode_capability_output",
+    "CapabilityOutputError",
     # State management
     "CheckpointTracker",
     "Checkpoint",
     "EvidenceStore",
     "EvidenceAnchor",
+    # Evidence records, stores and redaction (STANDARD v1.2 §6.5-§6.7)
+    "EvidenceRecord",
+    "EvidenceStoreProtocol",
+    "JsonlEvidenceStore",
+    "StoreInfo",
+    "Redactor",
+    # Checkpoint content, memory and sends (STANDARD v1.2 §4.4.1-§4.5)
+    "FileSnapshotStore",
+    "MemoryStore",
+    "MemoryContext",
+    "MemoryStoreError",
+    "IdempotencyLog",
+    # Grounding (STANDARD v1.2 §3.1, §5.20)
+    "GroundingPolicy",
+    "GroundingResult",
+    "check_grounding_output",
     "RateLimiter",
     "RateLimitConfig",
     # Types
@@ -138,6 +202,22 @@ __all__ = [
     "DelegationProtocol",
     "DelegationTask",
     "DelegationResult",
+    # Agent manifests, model families, inquiry answers and step domains
+    # (STANDARD v1.2 §5.15.1, §5.15, §5.13.1, §5.2.4)
+    "check_agent_manifest",
+    "load_agent_manifest",
+    "manifest_maxima",
+    "join_maxima",
+    "target_maxima",
+    "check_task",
+    "UnboundedDelegation",
+    "model_family",
+    "is_model_family",
+    "match_answers",
+    "AnswerError",
+    "select_implementation",
+    "is_domain_id",
+    "UnsupportedDomain",
     "SyncPrimitive",
     "SyncBarrier",
     "SyncResult",
@@ -170,6 +250,17 @@ __all__ = [
     "ValidationError",
     "format_error",
     "format_errors_response",
+    # Domain profiles, trust, entity ids and cited versions (Standard 1.2)
+    "AppliedProfiles",
+    "ProfileError",
+    "load_profile",
+    "EntityId",
+    "parse_entity_id",
+    "Candidate",
+    "Resolution",
+    "resolve_conflict",
+    "merge_trust_weights",
+    "CitedVersionError",
     # Logging
     "logger",
 ]

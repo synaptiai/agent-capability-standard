@@ -1,0 +1,55 @@
+{
+  "description": "In a 1.1 workflow, scope is an input the executor passes on, as 1.1 did: a persist step that binds scope session completes on an output that does not echo it (\u00a74.5 applies from 1.2; W616).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "persist",
+          "purpose": "persist step",
+          "store_as": "m",
+          "input_bindings": {
+            "data": {
+              "a": 1
+            },
+            "key": "k",
+            "scope": "session"
+          }
+        }
+      ]
+    }
+  },
+  "header": "1.1.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "inputs": {
+          "scope": "session"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": true,
+          "key": "k",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "step_completed"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "description": "A control-only record names no capability: S303, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "control": true
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "done"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

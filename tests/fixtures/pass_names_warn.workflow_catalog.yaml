@@ -1,0 +1,20 @@
+# Standard version: 1.1.0
+# Workflow names (STANDARD v1.2 §5.1): My Workflow is not an identifier, and
+# a catalog mapping with steps is still a workflow, named by a reserved key.
+# W620 for both.
+My Workflow:
+  goal: Read a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}
+catalog:
+  goal: Read another record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

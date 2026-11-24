@@ -47,6 +47,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "w",
   "inputs": {
     "change": "c1"

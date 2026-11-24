@@ -1,6 +1,6 @@
 import { validateAgentDefinition, type HookToolCall, type PackedExports, type ToolResult } from '@standardagents/spec';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import approvalsGet from '../agents/api/acs/approvals.get.js';
 import approvalsPost from '../agents/api/acs/approvals.post.js';
@@ -12,12 +12,21 @@ import readConfig from '../agents/tools/read_config.js';
 import rollbackConfig from '../agents/tools/rollback_config.js';
 import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
-import { approvalState, decideApproval, readApproval, type ApprovalPolicy } from '../src/acs/approval.js';
-import { digest } from '../src/acs/canonical.js';
+import {
+  approvalState,
+  countedDecisions,
+  decideApproval,
+  readApproval,
+  type ApprovalPolicy,
+} from '../src/acs/approval.js';
+import { digest, type Json } from '@synaptiai/acs-core';
+import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
+import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
-import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
-import { readCheckpoints, readTrace } from '../src/acs/records.js';
+import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
+import { bindingProfiles } from '../src/acs/profiles.js';
+import { KEYS, readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
 import annotationSchema from '../../../schemas/interop/standard_agents_annotation.schema.json' with { type: 'json' };
 import manifest from '../package.json' with { type: 'json' };
@@ -60,9 +69,11 @@ describe('classification', () => {
     expect(acsAnnotation(writeConfig)).toEqual({
       standard: STANDARD_VERSION,
       ontology: ONTOLOGY_VERSION,
+      tool: 'write_config',
       capability: 'mutate',
       layer: 'EXECUTE',
       domain: 'config',
+      approval: { expires: '15m' },
       risk: 'high',
       mutation: true,
       requires_checkpoint: true,
@@ -232,6 +243,44 @@ describe('checkpoint before mutation', () => {
     expect((await quick.execute(t.state, {})).error).toMatch(/too long ago/);
   });
 
+  it('records a checkpoint id without the secrets it holds (§6.7)', async () => {
+    // The id is what the checkpoint call returned: here, the model's label.
+    const password = 'Hunter2Hunter2xyz';
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+    const registered = 'RegisteredHostSecretValue9876';
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'x',
+      args: z.object({ label: z.string() }),
+      secrets: async () => [registered],
+      execute: async (_state, args) => ({ checkpoint_id: args.label, evidence_anchors: [] }),
+    });
+    const store = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      flags: { requires_checkpoint: true },
+      description: 'x',
+      args: z.object({}),
+      execute: async () => ({ stored: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    try {
+      data(await save.execute(t.state, { label: `before DB_PASSWORD=${password} and ${token} ${registered}` }));
+      // The checkpoint still authorises the next call, which uses it.
+      data(await store.execute(t.state, {}));
+      const id = 'before DB_PASSWORD=[REDACTED] and [REDACTED] [REDACTED]';
+      const checkpoints = await readCheckpoints(t.state);
+      const trace = await readTrace(t.state);
+      expect(checkpoints).toMatchObject([{ id, valid: false }]);
+      expect(trace.at(-1)).toMatchObject({ status: 'executed', checkpoint_id: id });
+      const kept = JSON.stringify([checkpoints, trace]);
+      for (const secret of [password, token, registered]) expect(kept).not.toContain(secret);
+    } finally {
+      resetLayer();
+    }
+  });
+
   it('refuses a rollback when no checkpoint has run', async () => {
     const t = thread();
     const result = await rollbackConfig.execute(t.state, { checkpoint_id: 'cp-1' });
@@ -338,6 +387,102 @@ describe('approval bound to what was shown', () => {
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
   });
 
+  it('decides nothing with a request asked under a weaker policy than the tool has at the call', async () => {
+    // A deployment tightens a tool's policy; thread values outlive the old
+    // definition. A request the old one made, decided before or after the
+    // change, authorises no call under the new one (§5.18.7): the call opens
+    // a new round under its own policy.
+    let clock = 1_000_000;
+    const release = (approval: ApprovalPolicy) =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval,
+        args: z.object({ version: z.string() }),
+        now: () => clock,
+        execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+      });
+    const strict = { min_approvers: 2, role: 'admin', expires_ms: 60_000 };
+
+    // A pending request, decided by bob (no role) after the change.
+    const t = thread();
+    const d = digestOf(await release({}).execute(t.state, { version: '1.2.0' }));
+    await decideApproval(t.state, user('bob'), d, 'approved', clock, 1);
+    const tightened = await release(strict).execute(t.state, { version: '1.2.0' });
+    expect(tightened).toMatchObject({ error_code: 'F502', error_data: { state: 'pending', round: 2 } });
+    expect(await readApproval(t.state, d)).toMatchObject({ min_approvers: 2, role: 'admin', expires_ms: 60_000 });
+    await expect(decideApproval(t.state, user('bob'), d, 'approved', clock, 2)).rejects.toThrow(/admin/);
+
+    // A request approved with no expiry, used a month after a role and an
+    // expiry were added.
+    const u = thread();
+    const e = digestOf(await release({}).execute(u.state, { version: '1.2.0' }));
+    await decideApproval(u.state, user('bob'), e, 'approved', clock, 1);
+    clock += 30 * 24 * 3600 * 1000;
+    expect(await release({ role: 'admin', expires_ms: 60_000 }).execute(u.state, { version: '1.2.0' })).toMatchObject({
+      error_code: 'F502',
+      error_data: { state: 'pending', round: 2 },
+    });
+    expect((await readTrace(u.state)).filter((x) => x.status === 'executed')).toEqual([]);
+
+    // Control: a request asked under a policy at least as strict stays, and
+    // its decisions count.
+    const v = thread();
+    const f = digestOf(await release(strict).execute(v.state, { version: '1.2.0' }));
+    await decideApproval(v.state, user('alice', ['admin']), f, 'approved', clock, 1);
+    await decideApproval(v.state, user('carol', ['admin']), f, 'approved', clock, 1);
+    expect(data(await release({ role: 'admin' }).execute(v.state, { version: '1.2.0' }))).toMatchObject({ success: true });
+  });
+
+  it('records who approved a call as attested identities', async () => {
+    const release = () =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval: { role: 'release-manager' },
+        args: z.object({ version: z.string() }),
+        execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+      });
+    const alice = {
+      principal: 'sa-user:alice',
+      kind: 'human',
+      role: 'release-manager',
+      authenticated_by: 'x-acs.sa-caller',
+    };
+    // The approvers are principals, and their identities as the deployment
+    // attests them (STANDARD v1.2.0 §5.17).
+    const t = thread();
+    const tool = release();
+    const d = digestOf(await tool.execute(t.state, { version: '1.2.0' }));
+    await decideApproval(t.state, user('alice', ['release-manager']), d, 'approved', Date.now());
+    data(await tool.execute(t.state, { version: '1.2.0' }));
+    expect((await readTrace(t.state)).at(-1)?.approval).toEqual({
+      digest: d,
+      approvers: ['sa-user:alice'],
+      approver_identities: [alice],
+      decision_ids: [expect.any(String)],
+    });
+    // The thread's owner approving is of trust class `owner`.
+    const u = thread();
+    const owned = release();
+    const e = digestOf(await owned.execute(u.state, { version: '1.2.1' }));
+    await decideApproval(u.state, user('alice', ['release-manager']), e, 'approved', Date.now(), undefined, {
+      ownerId: 'alice',
+    });
+    data(await owned.execute(u.state, { version: '1.2.1' }));
+    expect((await readTrace(u.state)).at(-1)?.approval?.approver_identities).toEqual([
+      { ...alice, trust_class: 'owner' },
+    ]);
+    // A caller without the requested role cannot decide at all.
+    const v = thread();
+    const f = digestOf(await release().execute(v.state, { version: '1.2.2' }));
+    await expect(decideApproval(v.state, user('mallory'), f, 'approved', Date.now())).rejects.toThrow(
+      /release-manager/,
+    );
+  });
+
   it('refuses, when the tool is defined, an approval policy §5.14 does not allow', () => {
     const define = (approval: ApprovalPolicy) => () =>
       groundedTool({
@@ -418,6 +563,33 @@ describe('approval bound to what was shown', () => {
     await decideApproval(t.state, user('alice'), late, 'approved', clock);
     clock += 60_001;
     expect(await tool.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
+  });
+
+  it('records only the approvers whose approvals still count when the call runs', async () => {
+    let clock = 0;
+    const tool = groundedTool({
+      name: 'release',
+      capability: 'execute',
+      description: 'Run the release.',
+      approval: { expires_ms: 60 },
+      args: z.object({ version: z.string() }),
+      now: () => clock,
+      execute: async () => ({ result: 'released', evidence_anchors: [] }),
+    });
+    const t = thread();
+    const d = digestOf(await tool.execute(t.state, { version: '1' }));
+    await decideApproval(t.state, user('alice'), d, 'approved', 0);
+    await decideApproval(t.state, user('bob'), d, 'approved', 50);
+    // At 70 Alice's approval has lapsed (given at 0, for 60) and Bob's
+    // counts: the request is approved by Bob alone, and the record says so.
+    clock = 70;
+    const request = await readApproval(t.state, d);
+    expect(countedDecisions(request!, clock).map((x) => x.approver)).toEqual(['bob']);
+    data(await tool.execute(t.state, { version: '1' }));
+    const approval = (await readTrace(t.state)).at(-1)?.approval;
+    expect(approval?.approvers).toEqual(['sa-user:bob']);
+    expect(approval?.approver_identities?.map((i) => i.principal)).toEqual(['sa-user:bob']);
+    expect(approval?.decision_ids).toHaveLength(1);
   });
 
   it('takes no approval after the deadline, so later approvers cannot extend the window', async () => {
@@ -530,7 +702,7 @@ describe('the approval endpoint', () => {
 
     data(await writeConfig.execute(t.state, CHANGE));
     const entry = (await readTrace(t.state)).at(-1);
-    expect(entry?.approval).toMatchObject({ digest: d, approvers: ['alice'] });
+    expect(entry?.approval).toMatchObject({ digest: d, approvers: ['sa-user:alice'] });
   });
 
   it('refuses an anonymous caller, a malformed body and an unknown request', async () => {
@@ -541,6 +713,21 @@ describe('the approval endpoint', () => {
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), decision: 'approved' })).status).toBe(400);
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 0, decision: 'approved' })).status).toBe(400);
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 1, decision: 'approved' })).status).toBe(404);
+  });
+
+  it('takes a digest in either case, as §5.14 compares them', async () => {
+    const t = thread();
+    await checkpointConfig.execute(t.state, { label: 'one' });
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    const response = await post(t, user('alice'), { digest: d.toUpperCase(), round: 1, decision: 'approved' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ digest: d, state: 'approved' });
+    // The same decision sent again in uppercase is answered as the first.
+    expect((await post(t, user('alice'), { digest: d.toUpperCase(), round: 1, decision: 'approved' })).status).toBe(200);
+    data(await writeConfig.execute(t.state, CHANGE));
+    expect((await readTrace(t.state)).at(-1)?.approval).toMatchObject({ digest: d, approvers: ['sa-user:alice'] });
+    // Anything but 64 hexadecimal digits is still refused.
+    expect((await post(t, user('alice'), { digest: `${d.slice(1)}g`, round: 1, decision: 'approved' })).status).toBe(400);
   });
 
   it('applies a decision only to the round the approver was shown', async () => {
@@ -685,10 +872,38 @@ describe('evidence and audit trail', () => {
     const t = thread();
     // Half of a surrogate pair: JSON.parse and z.string() accept it; RFC 8785 does not.
     const result = await tool.execute(t.state, { text: 'ok \ud83d' });
-    expect(result).toMatchObject({ status: 'error' });
+    expect(result).toMatchObject({ status: 'error', error_code: 'R407' });
     expect(result.error).toMatch(/unpaired surrogate/);
     expect(runs).toBe(0);
-    expect((await readTrace(t.state)).at(-1)).toMatchObject({ action: 'note', status: 'failed' });
+    const entry = (await readTrace(t.state)).at(-1);
+    expect(entry).toMatchObject({ action: 'note', status: 'failed', code: 'R407' });
+    // The layer's own failure names the layer too (§5.18.8).
+    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+  });
+
+  it.each([
+    ['a lone surrogate', { key: 'retries', value: 'ok \ud83d' }],
+    ['an integer beyond 2^53', { key: 'retries', value: '5', n: 2 ** 60 }],
+  ])('refuses a call that needs approval with arguments that are not I-JSON (%s): F502', async (_why, args) => {
+    // §5.18.7: no decision can bind to them. Nothing is asked or used.
+    const loose = groundedTool({
+      name: 'write_config',
+      capability: 'mutate',
+      description: 'x',
+      args: z.object({ key: z.string(), value: z.string() }).passthrough(),
+      execute: async () => ({ success: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    data(await checkpointConfig.execute(t.state, { label: 'one' }));
+    const result = await loose.execute(t.state, args);
+    expect(result).toMatchObject({ status: 'error', error_code: 'F502' });
+    expect(result.error).toMatch(/^F502 APPROVAL_REQUIRED: The arguments of write_config are not I-JSON/);
+    expect(await t.state.getValue(KEYS.pendingApprovals)).toBeNull();
+    const entry = (await readTrace(t.state)).at(-1);
+    expect(entry).toMatchObject({ action: 'write_config', capability: 'mutate', status: 'refused', code: 'F502' });
+    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+    // The checkpoint is still there for a call with I-JSON arguments.
+    expect((await readCheckpoints(t.state)).filter((c) => c.valid)).toHaveLength(1);
   });
 
   it('records every call, including refusals, with its evidence', async () => {
@@ -709,7 +924,7 @@ describe('evidence and audit trail', () => {
       [5, 'write_config', 'mutate', 'executed', null],
       [6, 'verify_config', 'verify', 'executed', null],
     ]);
-    expect(trace[4]).toMatchObject({ checkpoint_id: cp['checkpoint_id'], approval: { approvers: ['alice'] } });
+    expect(trace[4]).toMatchObject({ checkpoint_id: cp['checkpoint_id'], approval: { approvers: ['sa-user:alice'] } });
     expect(trace[4]?.evidence_anchors).toHaveLength(2);
     expect(trace[0]?.args_digest).toBe(await digest({}));
   });
@@ -740,7 +955,7 @@ describe('evidence and audit trail', () => {
       action: 'send_report',
       status: 'started',
       checkpoint_id: cp['checkpoint_id'],
-      approval: { approvers: ['alice'] },
+      approval: { approvers: ['sa-user:alice'] },
     });
 
     // A later call to the same tool finishes (refused: the approval is used).
@@ -918,11 +1133,23 @@ describe('the agent definition', () => {
       ['V102', 'rollback_config'],
     ]);
 
-    // A tool defined with plain defineTool is reported as unclassified.
+    // A tool defined with plain defineTool is unbound: W617 (STANDARD 1.2.0 §5.18.2).
     const plain = { ...tools, web_search: { annotations: { agentbuilder: {} } } };
     expect(lintPromptTools('config_steward', plain)).toEqual([
-      expect.objectContaining({ code: 'unclassified', severity: 'warning', location: { prompt: 'config_steward', tool: 'web_search' } }),
+      expect.objectContaining({
+        code: 'W617',
+        name: 'UNBOUND_TOOL',
+        severity: 'warning',
+        location: { prompt: 'config_steward', tool: 'web_search' },
+      }),
     ]);
+  });
+
+  it('reports an annotation with an unknown member, which does not load (security round 3)', () => {
+    // A misspelt member was dropped, so the lint passed a send read as a
+    // retrieve; the record is S303, so the tool is unbound (W617).
+    const lookup = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] } } };
+    expect(lintPromptTools('p', { lookup }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'lookup']]);
   });
 
   it('reports a tool whose stated name is not the name it is offered under', () => {
@@ -937,10 +1164,10 @@ describe('the agent definition', () => {
     });
     expect(lintPromptTools('records', { purge_record: purge }).map((d) => [d.code, d.severity, d.location, d.message])).toEqual([
       [
-        'misnamed_tool',
+        'V111',
         'error',
         { prompt: 'records', tool: 'purge_record', capability: 'execute' },
-        "tool 'purge_record' states the name 'archive_record', which is what an approver is shown and the trace records",
+        "the host offers 'purge_record' with the binding of 'archive_record'; a binding's tool must be the name the tool is offered under",
       ],
     ]);
   });
@@ -962,13 +1189,81 @@ describe('the agent definition', () => {
       sideB: { human: true },
     } as const;
     expect(lintAgentBindings(ending, tools).map((d) => [d.code, d.severity, d.location])).toEqual([
-      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'stopTool', tool: 'rollback_config', capability: 'rollback' }],
-      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'sessionStop', tool: 'write_config', capability: 'mutate' }],
+      ['F506', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'stopTool', tool: 'rollback_config', capability: 'rollback' }],
+      ['F506', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'sessionStop', tool: 'write_config', capability: 'mutate' }],
     ]);
     expect(lintAgentBindings(ending, tools).map((d) => d.message)).toEqual([
-      "agent 'ends_on_write' binds stopTool to 'rollback_config' (rollback), which is refused without a 'checkpoint' call; the binding acts on the call, not on its result",
-      "agent 'ends_on_write' binds sessionStop to 'write_config' (mutate), which is refused without approval and a 'checkpoint' call; the binding acts on the call, not on its result",
+      "agent 'ends_on_write' ties stopTool to 'rollback_config' (rollback): host action 'stopTool' takes effect whenever 'rollback_config' is called, and 'rollback_config' can be refused for want of a checkpoint, approval or a prerequisite; tie it to a control-only tool",
+      "agent 'ends_on_write' ties sessionStop to 'write_config' (mutate): host action 'sessionStop' takes effect whenever 'write_config' is called, and 'write_config' can be refused for want of a checkpoint, approval or a prerequisite; tie it to a control-only tool",
     ]);
+
+    // A tool with no binding is unbound: F506 too, since a host policy or
+    // the strictest case can refuse it.
+    const unbound = { ...ending, sideA: { prompt: 'config_steward', stopTool: 'web_search' } } as const;
+    expect(lintAgentBindings(unbound, { ...tools, web_search: {} }).map((d) => [d.code, d.location.tool])).toEqual([
+      ['F506', 'web_search'],
+    ]);
+  });
+
+  // Security round 5, batch 5: the lint read each tool's flags from its
+  // record alone, so a tool whose domain profiles (its own or the layer's)
+  // raise `requires_approval` or `requires_checkpoint` (§5.21.3: effective
+  // flags) passed F506 and V102, and its call was refused while the stop
+  // action still fired.
+  describe('flags the applied profiles raise (security round 5, batch 5)', () => {
+    afterEach(() => resetLayer());
+    const profiles = (flags: (c: CapabilityId) => Partial<ProfileFlags>) =>
+      bindingProfiles(
+        {
+          checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+          profileFlags: (_p: Json[], c: CapabilityId): ProfileFlags => ({ ...effectiveFlags(c).flags, person: false, ...flags(c) }),
+          profilePolicy: (): ProfilePolicy => ({ minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} }),
+        },
+        [{ domain: 'core' }],
+      );
+    const human = profiles(() => ({ requires_approval: true, person: true }));
+    const always = profiles((c) => (c === 'checkpoint' ? {} : { requires_checkpoint: true }));
+    const finishing = { name: 'finisher', sideA: { prompt: 'p', stopTool: 'finish' }, sideB: { human: true } } as const;
+    const finishOf = (capability: 'classify' | 'retrieve', given?: ReturnType<typeof profiles>) =>
+      groundedTool({
+        name: 'finish',
+        capability,
+        description: 'finish',
+        args: z.object({}).passthrough(),
+        ...(given !== undefined ? { profiles: given } : {}),
+        execute: async () => ({ labels: ['done'], data: 1, confidence: 1, evidence_anchors: [] }) as never,
+      });
+
+    it("reports F506 for a stop tool a tool's own profiles make need approval, which its call is refused for", async () => {
+      const finish = finishOf('classify', human);
+      expect(acsAnnotation(finish)?.requires_approval).toBe(true);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it("reports F506 for a stop tool the layer's profiles make need approval", async () => {
+      configureLayer({ profiles: human });
+      const finish = finishOf('retrieve');
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it('reports F506 for a stop tool the profiles make need a checkpoint, and V102 when no checkpoint tool is offered', async () => {
+      const finish = finishOf('retrieve', always);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect(lintPromptTools('p', { finish }).map((d) => [d.code, d.location])).toEqual([
+        ['V102', { prompt: 'p', tool: 'finish', capability: 'retrieve', prerequisite: 'checkpoint' }],
+      ]);
+      expect(lintPromptTools('p', { finish, checkpoint_config: checkpointConfig })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F501');
+    });
+
+    it('reports nothing for a stop tool no profile raises (control)', async () => {
+      const finish = finishOf('retrieve', profiles(() => ({})));
+      expect(lintAgentBindings(finishing, { finish })).toEqual([]);
+      expect(lintPromptTools('p', { finish })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).status).toBe('success');
+    });
   });
 
   it('offers only grounded tools, each with an annotation the schema accepts', () => {

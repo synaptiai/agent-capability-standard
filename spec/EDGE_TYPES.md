@@ -1,8 +1,8 @@
 # Edge Types in the Capability Ontology
 
-**Version:** 1.1.0
-**Status:** Standard (accompanies [STANDARD-v1.1.0](STANDARD-v1.1.0.md) §4.3)
-**Date:** 2026-10-27
+**Version:** 1.2.0
+**Status:** Standard (accompanies [STANDARD-v1.2.0](STANDARD-v1.2.0.md) §4.3)
+**Date:** 2026-11-15
 
 ---
 
@@ -14,8 +14,9 @@ This document defines the 7 edge types supported by the ontology.
 
 **Runs before.** Throughout, step A *runs before* step B when A comes earlier
 in the workflow's step list **and is not in the same `parallel_group`** as B.
-Steps of one parallel group run concurrently, so neither completes before the
-other starts.
+Steps of one parallel group are not ordered: an executor may run them in any
+order or concurrently (STANDARD §5.2.3), so neither can be relied on to
+complete before the other starts.
 
 **Changes in 1.1.0.** `precedes`, `conflicts_with` and `soft_requires` were
 under-specified in 1.0.0 and implementations disagreed. 1.1.0 states their
@@ -45,7 +46,7 @@ This means: a `checkpoint` MUST exist before any `mutate` operation.
 
 **Transitivity:** No. If A requires B and B requires C, A does not automatically require C.
 
-**Coexistence with `precedes`:** Some capability pairs have both a `requires` and a `precedes` edge. For example, `checkpoint → mutate` has both: `requires` enforces the safety invariant (mutations need a prior checkpoint), while `precedes` enforces temporal ordering. These serve complementary roles: `requires` demands the checkpoint's presence before every mutation, while `precedes` only orders the two when both appear. A workflow that mutates with a checkpoint running concurrently in the same parallel group violates both.
+**Coexistence with `precedes`:** Some capability pairs have both a `requires` and a `precedes` edge. For example, `checkpoint → mutate` has both: `requires` enforces the safety invariant (mutations need a prior checkpoint), while `precedes` enforces temporal ordering. These serve complementary roles: `requires` demands the checkpoint's presence before every mutation, while `precedes` only orders the two when both appear. A workflow that puts a mutation and its checkpoint in the same parallel group, where they are not ordered, violates both.
 
 ---
 
@@ -140,11 +141,20 @@ absent, nothing orders A and C.
 **Purpose:** Express that two capabilities cannot run at the same time.
 
 **Semantics:**
-- The `from` and `to` capabilities MUST NOT share a `parallel_group`
+- The `from` and `to` capabilities MUST NOT share a `parallel_group` of one
+  workflow
 - In sequence they are allowed: a `rollback` after a `mutate` is the normal
   recovery pattern
 - Validators MUST reject concurrent pairs (F504, once per group and pair)
 - Represents state that two operations would race on
+- The rule does not reach across runs or agents: runs a host executes at the
+  same time (`overlap: allow_all`, event-triggered runs, or runs it starts
+  itself) and a delegate the workflow does not wait for. A host that lets them
+  act on the same state SHOULD serialise a `rollback` with every `mutate` and
+  `persist` on the state it restores (STANDARD v1.2.0 §4.3); W623 flags an
+  `allow_all` trigger on a workflow that exercises both capabilities of a
+  pair, counting the workflows it invokes and `rollback` gate and
+  failure-mode actions
 
 **Example:**
 ```json
@@ -219,7 +229,7 @@ This means: `classify` is a specialized form of `detect` that assigns categories
 | `soft_requires` | SHOULD (any-of per target) | No | No | Best practice recommendations |
 | `enables` | Informational | No | No | Workflow composition patterns |
 | `precedes` | MUST, when both present | Via present steps | No | Temporal ordering |
-| `conflicts_with` | MUST, within a parallel group | No | Yes | No concurrency |
+| `conflicts_with` | MUST, within a parallel group | No | Yes | No concurrency within a workflow (§4.3) |
 | `alternative_to` | Informational | No | Yes | Substitutability |
 | `specializes` | Informational | Yes | No | Inheritance hierarchy |
 
@@ -229,21 +239,19 @@ This means: `classify` is a specialized form of `detect` that assigns categories
 
 ### L1 Validation (Basic)
 
-Validators at L1 conformance MUST, in time linear in the number of steps:
+Validators at L1 conformance MUST, and SHOULD in time linear in the number
+of steps (STANDARD §4.3):
 - Check `requires` edges (V102)
 - Check `precedes` edges (V102)
 - Check `conflicts_with` edges within parallel groups (F504)
 - Warn when a `soft_requires` group is unmet (W601)
 
-### L2 Validation (Schema)
+### L2 and L3 Validation
 
-No additional edge checks.
-
-### L3 Validation (Contracts)
-
-Validators at L3 conformance MUST additionally:
-- Verify `specializes` relationships maintain contract compatibility
-- Check `alternative_to` capabilities have compatible I/O schemas
+No additional edge checks: `enables`, `alternative_to` and `specializes`
+have no rule (STANDARD §4.3). That a specialization keeps its parent's
+contract, or that alternatives have compatible inputs and outputs, is a
+matter for the ontology's authors, which no validator checks.
 
 ---
 
@@ -358,12 +366,14 @@ Rolling back after a failed mutation, in sequence, is allowed.
 
 ## Versioning
 
-Edge types follow semantic versioning:
-- Adding new edge types: MINOR version bump
-- Changing edge type semantics: MAJOR version bump, except clarifications
-  of under-specified semantics, which a MINOR release states as errata (as
-  1.1.0 does for `precedes`, `conflicts_with` and `soft_requires`)
-- Adding edges of existing types: PATCH version bump
+[STANDARD §11.6](STANDARD-v1.2.0.md#116-ontology-versions) classifies
+ontology changes, edges included: adding or removing a `requires`,
+`precedes` or `conflicts_with` edge is MAJOR, adding or removing a
+`soft_requires`, `enables`, `alternative_to` or `specializes` edge is MINOR,
+and removing or renaming an edge type is MAJOR. Changing an edge type's
+semantics is MAJOR, except a clarification of under-specified semantics,
+which a MINOR release states as errata (as 1.1.0 does for `precedes`,
+`conflicts_with` and `soft_requires`).
 
 ---
 

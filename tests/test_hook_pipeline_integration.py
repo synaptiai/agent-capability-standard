@@ -225,7 +225,9 @@ class TestCrossProcessPersistence:
     """Verify state survives across tracker instances (simulates process restart)."""
 
     def test_checkpoint_survives_restart(self, project_dir: Path) -> None:
-        """Checkpoint created by one tracker instance is visible to another."""
+        """Checkpoint created by one tracker instance is visible to another,
+        which finds it (to restore it) but takes no authority from it: it
+        was taken in another scope (STANDARD 1.2.0 section 5.18.5)."""
         chk_dir = project_dir / ".checkpoints"
         chk_dir.mkdir()
         marker_dir = project_dir / ".claude"
@@ -236,8 +238,9 @@ class TestCrossProcessPersistence:
 
         # Process 2 (new instance, same dirs)
         tracker2 = CheckpointTracker(checkpoint_dir=chk_dir, marker_dir=marker_dir)
-        assert tracker2.has_valid_checkpoint()
-        assert tracker2.get_active_checkpoint_id() == chk_id
+        assert tracker2.find_checkpoint(chk_id) is not None
+        assert not tracker2.has_valid_checkpoint()
+        assert tracker2.get_active_checkpoint_id() is None
 
     def test_consumed_state_survives_restart(self, project_dir: Path) -> None:
         """Consumed state is visible to a new tracker instance."""
@@ -329,8 +332,8 @@ class TestAuditLogIntegrity:
 
         entry = json.loads(lines[-1])
         assert entry["tool"] == "Skill"
-        assert entry["skill"] == "test-skill"
-        assert "ts" in entry
+        assert entry["details"]["skill"] == "test-skill"
+        assert "timestamp" in entry
         assert "hmac" in entry
         assert "args" not in entry, "skill arguments are not written"
 
@@ -439,7 +442,7 @@ class TestAuditLogIntegrity:
         assert verify_log(log_file, key) == (3, 3, [])
 
         entries = [json.loads(line) for line in log_file.read_text().splitlines()]
-        assert [(e["event"], e["tool"]) for e in entries] == [
+        assert [(e["details"]["event"], e["tool"]) for e in entries] == [
             ("PostToolUse", "Bash"),
             ("PostToolUse", "Skill"),
             ("PostToolUseFailure", "Read"),

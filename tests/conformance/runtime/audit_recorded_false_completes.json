@@ -1,0 +1,52 @@
+{
+  "description": "Without require_record an audit step that did not record completes, as in 1.1 (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "a",
+          "input_bindings": {
+            "event": {
+              "what": "deploy"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": false,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "a": {
+        "recorded": false
+      }
+    }
+  },
+  "trace_kinds": []
+}

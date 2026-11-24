@@ -1,0 +1,128 @@
+{
+  "description": "A rollback after a plain delegation restores the delegator's checkpoint only: the executor sends Rollback for cp1, and the host lists the delegate's change as not covered (delegated) (\u00a75.15.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "report_state"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "input_bindings": {
+            "task": {
+              "fix": "x"
+            },
+            "agent": "a"
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "conditions": [
+              "fixed"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "not fixed",
+              "when": "${v.passed} == false",
+              "action": "rollback"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "idempotency_key": "run-1:2"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "checkpointed": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "step": 2,
+        "checkpoint_id": "cp1"
+      },
+      "respond": {
+        "kind": "RolledBack",
+        "not_covered": [
+          {
+            "item": "task t1",
+            "reason": "delegated"
+          }
+        ]
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 2
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "rolled_back"
+  ]
+}

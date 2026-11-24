@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
-from ..state.evidence_store import EvidenceAnchor, EvidenceStore
+from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
 from ..workflows.engine import WorkflowEngine
 from .analyzer import TaskAnalyzer
 from .classifier import CapabilityClassifier
@@ -44,7 +44,7 @@ class DiscoveryPipeline:
         engine: WorkflowEngine,
         llm_fn: LLMFunction | None = None,
         domain: str | None = None,
-        evidence_store: EvidenceStore | None = None,
+        evidence_store: EvidenceStoreProtocol | None = None,
         *,
         evidence_include_tool_input: bool = False,
     ) -> None:
@@ -196,7 +196,7 @@ class DiscoveryPipeline:
         # Add original anchors to evidence store (preserves metadata)
         if self._evidence_store is not None:
             for anchor in raw_anchors:
-                self._evidence_store.add_anchor(anchor)
+                self._evidence_store.append(anchor)
 
         # Return dict representations for the DiscoveryResult
         return [a.to_dict() for a in raw_anchors]

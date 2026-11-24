@@ -1,0 +1,67 @@
+{
+  "description": "Record mode actions: a retry is the same pass, so a step that fails after its retries has one failed record (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "retry": {
+            "max": 1
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "action_records": [
+      {
+        "status": "failed",
+        "code": "R402",
+        "capability": "retrieve"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

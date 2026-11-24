@@ -86,8 +86,20 @@ jobs:
       - name: Check generated skill files are in sync
         run: python tools/sync_skill_schemas.py --check
 
+      # The generators below check every fixture against its JSON Schema with
+      # jsonschema, a dev dependency. The steps above run on the package's
+      # own dependencies alone, so they are installed only here.
+      - name: Install the generators' dependencies
+        run: pip install -e ".[dev]" -c constraints.txt
+
       - name: Check runtime fixtures are generated
         run: python scripts/gen_runtime_fixtures.py --check
+
+      - name: Check call-sequence and binding fixtures are generated
+        run: python scripts/gen_call_fixtures.py --check
+
+      - name: Check trigger vectors are generated
+        run: python scripts/gen_trigger_vectors.py --check
 
       - name: Check Standard Agents binding files are generated
         run: python scripts/gen_standard_agents_binding.py --check
@@ -123,8 +135,15 @@ jobs:
       - name: Clippy (Python extension)
         run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features python -- -D warnings
 
+      - name: Clippy (WebAssembly interface)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features wasm -- -D warnings
+
       - name: Tests
         run: cargo +"$RUST_TOOLCHAIN" test --locked
+
+      # The WebAssembly interface's exports and dispatcher, driven natively.
+      - name: Tests (WebAssembly interface)
+        run: cargo +"$RUST_TOOLCHAIN" test --locked --features wasm --test wasm
 
       - name: Builds on the minimum supported Rust version
         run: |
@@ -178,7 +197,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/runtime_fixtures/ scripts/gen_trigger_vectors.py scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py scripts/gen_call_fixtures.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
@@ -294,6 +313,59 @@ jobs:
           path: build/conformance_results.json
           if-no-files-found: warn
 
+  typescript-package:
+    name: TypeScript package (type-check, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/acs-core
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/acs-core/package-lock.json
+
+      # The ./wasm entry is the core built for wasm32-unknown-unknown
+      # (core/src/wasm.rs). RUSTUP_TOOLCHAIN (set for every job above) makes
+      # build-wasm.mjs's cargo use the toolchain installed here with the
+      # target.
+      - name: Install Rust with the wasm32 target
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-wasm-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build the WebAssembly module
+        run: npm run build:wasm
+
+      - name: Build
+        run: npm run build
+
+      - name: Type-check
+        run: npm run check
+
+      # The tests read the conformance vectors in tests/conformance/ in
+      # place, and replay the validator, runtime and expression fixtures and
+      # the profile vectors through the WebAssembly core; package.test.ts
+      # checks `npm pack --dry-run`.
+      - name: Tests
+        run: npm test
+
   standard-agents-binding:
     name: Standard Agents binding (type-check, tests)
     runs-on: ubuntu-latest
@@ -308,7 +380,17 @@ jobs:
         with:
           node-version-file: site/.nvmrc
           cache: npm
-          cache-dependency-path: examples/standard_agents/package-lock.json
+          cache-dependency-path: |
+            packages/acs-core/package-lock.json
+            examples/standard_agents/package-lock.json
+
+      # The binding imports the package's built dist/ (file: dependency);
+      # it uses the plain-TypeScript entry only, so no WebAssembly build.
+      - name: Build the TypeScript package
+        working-directory: packages/acs-core
+        run: |
+          npm ci --ignore-scripts
+          npm run build:ts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts

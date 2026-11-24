@@ -39,6 +39,8 @@ python tools/validate_transform_refs.py
 python tools/validate_benchmark_deps.py
 python tools/sync_skill_schemas.py --check
 python scripts/gen_runtime_fixtures.py --check
+python scripts/gen_call_fixtures.py --check
+python scripts/gen_trigger_vectors.py --check
 python scripts/gen_standard_agents_binding.py --check
 python scripts/gen_capability_json_schemas.py --check
 pytest tests/ -v --tb=short
@@ -50,7 +52,21 @@ Rust core, from `core/`:
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --features python -- -D warnings
+cargo clippy --all-targets --features wasm -- -D warnings
 cargo test
+cargo test --features wasm --test wasm
+```
+
+TypeScript package, from `packages/acs-core/` (build it before the binding;
+`build:wasm` needs the `wasm32-unknown-unknown` target of the toolchain
+`RUSTUP_TOOLCHAIN` names, and the binding needs only `npm run build:ts`):
+
+```bash
+npm ci
+npm run build:wasm
+npm run build
+npm run check
+npm test
 ```
 
 Standard Agents binding, from `examples/standard_agents/`:

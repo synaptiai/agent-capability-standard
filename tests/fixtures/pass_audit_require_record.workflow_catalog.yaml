@@ -1,0 +1,16 @@
+# Standard version: 1.2.0
+# An audit step that must record (STANDARD v1.2 §6.4): require_record is a
+# known input of audit (ontology 2.2.0).
+record_the_release:
+  goal: Record a release, failing the run if the record is not written.
+  risk: low
+  steps:
+  - capability: audit
+    purpose: Record the release.
+    store_as: release_audit
+    input_bindings:
+      event:
+        event_type: release.published
+        version: 1.2.0
+      retention: P365D
+      require_record: true

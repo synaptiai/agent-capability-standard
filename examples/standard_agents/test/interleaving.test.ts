@@ -276,13 +276,15 @@ describe('a store that fails part-way', () => {
     const cp = await checkpointConfig.execute(t.state, { label: 'one' });
 
     const result = await writeConfig.execute(failNextWrite(t, KEYS.checkpoints), CHANGE);
-    expect(result).toMatchObject({ status: 'error', error: 'storage unavailable' });
+    // The layer could not complete its checks: R407 (STANDARD 1.2.0 §5.18.8).
+    expect(result).toMatchObject({ status: 'error', error_code: 'R407' });
+    expect(result.error).toMatch(/^R407 SAFETY_CHECK_FAILED: .*storage unavailable/);
     expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
     expect((await readTrace(t.state)).at(-1)).toMatchObject({
       action: 'write_config',
       status: 'failed',
       error: 'storage unavailable',
-      approval: { digest: d, approvers: ['alice'] },
+      approval: { digest: d, approvers: ['sa-user:alice'] },
       checkpoint_id: JSON.parse(cp.result ?? '{}').checkpoint_id,
     });
   });
@@ -291,7 +293,8 @@ describe('a store that fails part-way', () => {
     const t = thread();
     await readConfig.execute(t.state, {});
     const result = await readConfig.execute(failNextWrite(t, KEYS.traceCount), {});
-    expect(result).toMatchObject({ status: 'error', error: 'storage unavailable' });
+    expect(result).toMatchObject({ status: 'error', error_code: 'R407' });
+    expect(result.error).toMatch(/storage unavailable/);
     await readConfig.execute(t.state, {});
     expect((await readTrace(t.state)).map((e) => [e.seq, e.status])).toEqual([
       [1, 'executed'],

@@ -9,6 +9,7 @@ use super::bindings::{Checker, Mode};
 use super::extensions::{Declared, count, duration_field, enum_field, s303, s304, string_field};
 use super::semantics::{self, Placed};
 use super::{Context, Report, Scope, StepLoc};
+use crate::catalogs::Namespace;
 use crate::diag::{Code, Diagnostic};
 use crate::yaml;
 
@@ -74,6 +75,8 @@ pub(crate) fn check(
         Some(Value::Object(c)) => {
             for (key, v) in c {
                 let field = format!("wait.correlate.{key}");
+                let before = report.diagnostics.len();
+                let tokens = ["wait".to_string(), "correlate".to_string(), key.clone()];
                 // A waiting delegate correlates by its delegation's task_id.
                 if loc.capability == "delegate" && key == "task_id" {
                     report.push(s303(
@@ -81,11 +84,13 @@ pub(crate) fn check(
                         &field,
                         "a waiting delegate's result is matched by its delegation's task_id; do not set it".into(),
                     ));
+                    report.stamp_since(before, &tokens);
                     continue;
                 }
                 if references(v, &field, &at, report) {
-                    checker.scan(v, scope, Mode::Existence, &field, report);
+                    checker.scan_key(v, scope, Mode::Existence, "wait.correlate", key, report);
                 }
+                report.stamp_since(before, &tokens);
             }
         }
         Some(other) => report.push(s303(
@@ -150,10 +155,10 @@ pub(crate) fn delay(step: &Map<String, Value>, declared: &Declared) -> Option<Du
 /// child's handler may wait before the caller retries or recovers, so W608
 /// counts such an `invoke` as a wait. A backward search from the workflows
 /// that wait themselves, over who invokes whom: linear in the catalog.
-pub(crate) fn workflows_that_wait(workflows: &Map<String, Value>) -> HashSet<&str> {
+pub(crate) fn workflows_that_wait<'n>(ns: &'n Namespace<'_>) -> HashSet<&'n str> {
     let mut callers: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut queue: Vec<&str> = Vec::new();
-    for (name, wf) in workflows.iter().filter(|(n, _)| !n.starts_with("x-")) {
+    for (name, wf) in ns.iter() {
         let Some(map) = wf.as_object() else { continue };
         // Declarations are read again only to decide this: their
         // diagnostics come from each workflow's own check.
@@ -170,12 +175,14 @@ pub(crate) fn workflows_that_wait(workflows: &Map<String, Value>) -> HashSet<&st
                 || delay(s, &declared).is_some();
             if s.get("capability").and_then(Value::as_str) == Some("invoke")
                 && let Some((target, _)) = super::invoke::target(s)
+                && let Some(k) = ns.resolver.resolve(name, target).key()
+                && let Some(k) = ns.get_key(k)
             {
-                callers.entry(target).or_default().push(name.as_str());
+                callers.entry(k).or_default().push(name);
             }
         }
         if waits {
-            queue.push(name.as_str());
+            queue.push(name);
         }
     }
     let mut waiting: HashSet<&str> = queue.iter().copied().collect();
@@ -211,12 +218,13 @@ pub(crate) fn check_delay(
     if duration_field(value, "delay", &at, report).is_some_and(|d| d.is_zero()) {
         report.push(s303(&at, "delay", "delay must be longer than zero".into()));
     }
-    // Its group runs at the same time: whether the others wait is unclear.
+    // Its group's members are not ordered (§5.2.3): whether the others
+    // wait is unclear.
     if step.contains_key("parallel_group") {
         report.push(s303(
             &at,
             "delay",
-            "a step in a parallel_group cannot delay: the group runs concurrently".into(),
+            "a step in a parallel_group cannot delay: the group's members are not ordered and may run concurrently".into(),
         ));
     }
 }

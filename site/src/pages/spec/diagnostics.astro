@@ -4,11 +4,14 @@
 // lowercase id, so /spec/diagnostics/#v102 links to it.
 // Visual spec 3.8: the code grid (F-X1) shows each family's codes as tiles,
 // each linking to its row; the table is then given one family at a time,
-// each table a figure whose Code column holds the same tiles.
+// each table a figure whose Code column holds the same tiles. A tile in
+// every row makes the table an enriched table, so the figure-gap check
+// counts it as an information figure (visual spec 4.2, src/lib/runs.ts).
 import BreakCode from '../../components/BreakCode.astro';
 import InlineMd from '../../components/InlineMd.astro';
 import { loadDiagnostics } from '../../data/diagnostics';
 import DocLayout from '../../layouts/DocLayout.astro';
+import { ENRICHED_TABLE_MIN_ROWS } from '../../plugins/rehype-prose-figures';
 import { GENERATED_DESCRIPTIONS, currentStandard, refSlugger, routeByUrl } from '../../lib/generated';
 import { currentStandardText } from '../../lib/spec-figures';
 import { codeGridCaption, diagnosticFamilies, familyRaised, familyRaisedCaption, familyRaisedIsFigure, familyRaisedTitle, familyTableCaption } from '../../lib/spec-tail-figures';
@@ -90,7 +93,7 @@ const figNo = () => ++fig;
             <p>{familyRaisedCaption(f, r)}</p>
           )}
           <TableWrap label={`${f.name} codes of Standard ${std.version}`}>
-            <table class="diagnostics-table">
+            <table class="diagnostics-table" data-info-figure={f.codes.length >= ENRICHED_TABLE_MIN_ROWS ? 'enriched-table' : undefined}>
               <caption>{f.name} codes of Standard {std.version}</caption>
               <thead>
                 <tr>

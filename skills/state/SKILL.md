@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep
 context: fork
 agent: explore
-layer: MODEL
 ---
 
 ## Intent
@@ -90,8 +89,8 @@ state:
     completeness: number  # 0-1 estimate of coverage
 entities: *entities  # Same items as state.entities, for bindings like ${<step>.entities}
 relationships: *relationships  # Same items as state.relationships
-confidence: 0..1  # Overall state model confidence
-evidence_anchors: ["file:line", "observation:id"]
+confidence: number  # probability that the state is accurate (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "observation:id", kind: record}]
 assumptions: []
 ```
 
@@ -106,8 +105,8 @@ assumptions: []
 | `state.meta.completeness` | number | Estimated model completeness |
 | `entities` | array | Identified entities (the same items as `state.entities`) |
 | `relationships` | array | Entity relationships (the same items as `state.relationships`) |
-| `confidence` | number | Overall confidence in state accuracy |
-| `evidence_anchors` | array | References to the observations the state was built from |
+| `confidence` | number | Probability, 0.0-1.0, that the state is accurate (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the observations the state was built from |
 | `assumptions` | array | Assumptions about the modeled system |
 
 ## Examples
@@ -167,9 +166,9 @@ entities: *entities  # Same items as state.entities, for bindings like ${<step>.
 relationships: *relationships  # Same items as state.relationships
 confidence: 0.88
 evidence_anchors:
-  - "config/services.yml:15-45"
-  - "command:docker ps"
-  - "command:redis-cli info"
+  - {ref: "file:config/services.yml:15-45", kind: file}
+  - {ref: "command:docker ps", kind: tool}
+  - {ref: "command:redis-cli info", kind: tool}
 assumptions:
   - "Service discovery reflects actual running state"
   - "Configuration matches deployed state"
@@ -232,8 +231,8 @@ entities: *entities  # Same items as state.entities, for bindings like ${<step>.
 relationships: *relationships  # Same items as state.relationships
 confidence: 0.85
 evidence_anchors:
-  - "src/services/payment_processor.rb:1-145"
-  - "Gemfile:42"
+  - {ref: "file:src/services/payment_processor.rb:1-145", kind: file}
+  - {ref: "file:Gemfile:42", kind: file}
 assumptions:
   - "Static analysis reflects runtime behavior"
   - "No dynamic method definitions"

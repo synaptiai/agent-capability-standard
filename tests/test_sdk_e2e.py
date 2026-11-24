@@ -7,6 +7,7 @@ using the real Claude Agent SDK types.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from grounded_agency import (
     GroundedAgentConfig,
     RateLimitConfig,
 )
+from tests.conftest import pre_tool_use
 
 
 def _is_allowed(result: Any) -> bool:
@@ -63,6 +65,18 @@ def adapter(tmp_path: Path) -> GroundedAgentAdapter:
     )
 
 
+def _medium_risk_call(adapter: GroundedAgentAdapter) -> dict[str, Any]:
+    """A call of a medium-risk tool that needs neither a checkpoint nor
+    approval: an MCP tool bound to `delegate`. (Skill and Agent take the
+    worst case: the commands a skill or a subagent's definition runs reach
+    no hook.)"""
+    adapter.mapper.register_mcp_tool("mcp__team__handoff", capability_id="delegate")
+    mapping = adapter.mapper.map_tool("mcp__team__handoff", {})
+    assert mapping.risk == "medium"
+    assert not mapping.requires_checkpoint and not mapping.requires_approval
+    return {"tool_name": "mcp__team__handoff", "tool_input": {"task": "t"}}
+
+
 class TestWrapOptions:
     async def test_wrapping_twice_charges_the_rate_limit_once(
         self, tmp_path: Path
@@ -77,10 +91,15 @@ class TestWrapOptions:
         )
         once = adapter.wrap_options(ClaudeAgentOptions())
         twice = adapter.wrap_options(once)
-        assert twice.hooks == once.hooks
+        # The other hooks are kept; the safety hook is rebuilt for the
+        # options wrapped last, in place of the first: one, not two.
+        assert {k: v for k, v in twice.hooks.items() if k != "PreToolUse"} == {
+            k: v for k, v in once.hooks.items() if k != "PreToolUse"
+        }
         assert len(twice.hooks["PreToolUse"]) == 1
+        assert len(twice.hooks["PreToolUse"][0].hooks) == 1
 
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
+        call = _medium_risk_call(adapter)
         for n in range(2):
             for entry in twice.hooks["PreToolUse"]:
                 for hook in entry.hooks:
@@ -129,21 +148,23 @@ class TestWrapOptions:
     async def test_listed_tools_are_rate_limited(self, tmp_path: Path) -> None:
         # The SDK approves a tool in allowed_tools without calling
         # can_use_tool, but PreToolUse still runs for it, and that is
-        # where the rate limit lives. Skill is medium-risk; one token, so
-        # the second call is denied.
+        # where the rate limit lives. A delegate tool is medium-risk; one
+        # token, so the second call is denied.
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(
                 checkpoint_dir=str(tmp_path / ".checkpoints"),
                 rate_limit=RateLimitConfig(medium_rpm=1, burst_multiplier=1.0),
             )
         )
-        wrapped = adapter.wrap_options(ClaudeAgentOptions(allowed_tools=["Skill"]))
+        call = _medium_risk_call(adapter)
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(allowed_tools=[call["tool_name"]])
+        )
         pre = wrapped.hooks["PreToolUse"][-1].hooks[0]
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
         assert _pre_decision(await pre(call, "s1", None)) is None
         second = await pre(call, "s2", None)
         assert _pre_decision(second) == "deny"
-        assert "Rate limited" in _pre_reason(second)
+        assert _pre_reason(second).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
 
     async def test_callback_does_not_charge_the_rate_limit(
         self, tmp_path: Path
@@ -167,9 +188,13 @@ class TestWrapOptions:
         adapter.rate_limiter.allow = counting_allow  # type: ignore[method-assign]
         pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
+        call = _medium_risk_call(adapter)
         assert _pre_decision(await pre(call, "s1", None)) is None
-        assert _is_allowed(await callback("Skill", call["tool_input"], None))
+        assert _is_allowed(
+            await callback(
+                call["tool_name"], call["tool_input"], SimpleNamespace(tool_use_id="s1")
+            )
+        )
         assert charged == ["medium"]
 
     async def test_rate_limited_call_reserves_no_checkpoint(
@@ -189,7 +214,7 @@ class TestWrapOptions:
         assert adapter.rate_limiter.allow("high")  # use the only token
         denied = await pre({"tool_name": "Write", "tool_input": {}}, "w1", None)
         assert _pre_decision(denied) == "deny"
-        assert "Rate limited" in _pre_reason(denied)
+        assert _pre_reason(denied).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
         assert adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     def test_preserves_existing_allowed_tools(
@@ -235,12 +260,14 @@ class TestPermissionCallback:
     async def test_allows_write_with_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
-        """Write tool should be allowed with a valid checkpoint."""
+        """Write tool should be allowed with a valid checkpoint. A gated
+        call is named by its tool_use_id, under which the layer holds its
+        checkpoint (STANDARD 1.2.0 §5.18.6)."""
         adapter.create_checkpoint(scope=["*"], reason="test")
         callback = adapter._make_permission_callback()
-        result = await callback(
-            "Write", {"file_path": "/tmp/test.txt", "content": "hello"}, None
-        )
+        args = {"file_path": "/tmp/test.txt", "content": "hello"}
+        await pre_tool_use(adapter, "Write", args, "t1")
+        result = await callback("Write", args, SimpleNamespace(tool_use_id="t1"))
         assert _is_allowed(result)
 
     async def test_allows_read_without_checkpoint(
@@ -248,7 +275,10 @@ class TestPermissionCallback:
     ) -> None:
         """Read tool should always be allowed."""
         callback = adapter._make_permission_callback()
-        result = await callback("Read", {"file_path": "/tmp/test.txt"}, None)
+        await pre_tool_use(adapter, "Read", {"file_path": "/tmp/test.txt"}, "r1")
+        result = await callback(
+            "Read", {"file_path": "/tmp/test.txt"}, SimpleNamespace(tool_use_id="r1")
+        )
         assert _is_allowed(result)
 
     async def test_rate_limiting_blocks_excess(self, tmp_path: Path) -> None:

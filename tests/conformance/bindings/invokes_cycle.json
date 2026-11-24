@@ -1,0 +1,36 @@
+{
+  "description": "A cycle through invokes is V105, and none of its members is loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "a",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "b"
+      ]
+    },
+    {
+      "tool": "b",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "a"
+      ]
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V105",
+        "tool": "a"
+      },
+      {
+        "code": "V105",
+        "tool": "b"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

@@ -13,6 +13,11 @@ hooks:
       hooks:
         - type: prompt
           prompt: |
+            Model-judged additions (STANDARD 1.2.0 §5.18.10): these may refuse
+            the call; the checks the Standard requires (approval, the checkpoint,
+            rollback history, the destination policy, secrets) are made by code,
+            not here.
+
             TRANSFORM SOURCE VALIDATION
 
             The tool call follows this prompt as JSON; the file read for transformation is tool_input.file_path.
@@ -30,18 +35,6 @@ hooks:
             Return ok: true to proceed with reading source.
             Return ok: false, with the reason, if source appears to contain unprotected sensitive data.
           once: true
-  PostToolUse:
-    - matcher: "Read"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[TRANSFORM] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Read | input_sha256: ${DIGEST:-unavailable}" >> .audit/transform-operations.log 2>/dev/null || true
 ---
 
 ## Intent
@@ -136,8 +129,8 @@ changes:  # Applied transformations
     target_field: string
     conversion: string  # What transformation was applied
     reversible: boolean  # Can be converted back?
-confidence: 0..1  # Confidence in transformation correctness
-evidence_anchors: ["source:field", "schema:rule"]
+confidence: number  # probability that the output is a correct transformation of the input (§4.1.1)
+evidence_anchors: [{ref: "source:field", kind: record}, {ref: "schema:rule", kind: record}]
 assumptions: []  # Explicit assumptions
 ```
 
@@ -150,8 +143,8 @@ assumptions: []  # Explicit assumptions
 | `validation` | object | Input and output validation results |
 | `losses` | array | Fields or data not preserved |
 | `changes` | array | Field-level transformations applied (type/format conversions, defaults) |
-| `confidence` | number | 0.0-1.0 based on mapping completeness |
-| `evidence_anchors` | array | Source references and schema rules |
+| `confidence` | number | Probability, 0.0-1.0, that the output is a correct transformation of the input (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Source references and schema rules |
 | `assumptions` | array | Assumptions made during transformation |
 
 ## Examples
@@ -222,9 +215,9 @@ changes:
     reversible: false
 confidence: 0.9
 evidence_anchors:
-  - "source:user_id -> target:id"
-  - "schema:required_fields_present"
-  - "conversion:timestamp_to_iso8601"
+  - {ref: "source:user_id -> target:id", kind: record}
+  - {ref: "schema:required_fields_present", kind: record}
+  - {ref: "conversion:timestamp_to_iso8601", kind: record}
 assumptions:
   - "Unix timestamp is in seconds, not milliseconds"
   - "Timezone is UTC"
@@ -290,8 +283,8 @@ changes:
     reversible: true
 confidence: 0.95
 evidence_anchors:
-  - "source:row_count=2"
-  - "schema:all_required_present"
+  - {ref: "source:row_count=2", kind: record}
+  - {ref: "schema:all_required_present", kind: record}
 assumptions:
   - "CSV uses comma delimiter"
   - "First row is header"

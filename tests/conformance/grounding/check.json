@@ -1,0 +1,1275 @@
+{
+  "standard": "1.2.0",
+  "section": "3.1, 5.20",
+  "status": "normative",
+  "description": "The grounding check of STANDARD v1.2 §5.20 for one host output under one grounding policy, with the evidence anchors of §6.5. An executor that accepts grounding@1, and a safety layer that applies grounding policies, MUST give the status and code each vector expects (§10.3). The policy's require is left out: each vector is an output of a capability the policy requires. Run by core/tests/grounding.rs (grounding::check), tests/test_grounding.py (_core.check_grounding and grounded_agency.grounding.check_output) and packages/acs-core/test/evidence.test.ts (checkGrounding). The message is not compared.",
+  "fields": {
+    "name": "Unique in this file.",
+    "about": "What the vector covers.",
+    "output": "The host's output. It already has every field its capability's contract requires (R402 is checked before grounding).",
+    "policy": "The policy's kinds (a list, or null when the policy has none) and attested.",
+    "bound_refs": "The references the step's input_bindings make, as bodies without ${, } and an annotation; for a call, its argument names.",
+    "evidence_seen": "The Output response's evidence_seen, or null when it is absent.",
+    "expect": "status: grounded, inferred or refused; code: null or F505. For a grounded or inferred output, counted (the anchors that count) and legacy (the items that are not evidence anchors)."
+  },
+  "vectors": [
+    {
+      "name": "grounded_one_anchor",
+      "about": "One evidence anchor counts: the output is grounded.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "grounded_with_inference_method",
+      "about": "A grounded output may carry an inference_method too.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ],
+        "inference_method": "deduction",
+        "confidence": 0.9
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "grounded_with_free_method",
+      "about": "The inference_method of a grounded output is not checked: a value outside the vocabulary passes.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ],
+        "inference_method": "llm-reasoning"
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "empty_not_inferred",
+      "about": "An empty list grounds nothing, and the output is not marked inferred.",
+      "output": {
+        "evidence_anchors": []
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "empty_inferred",
+      "about": "An empty list with a vocabulary method and a confidence: inferred.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "model_knowledge",
+        "confidence": 0.4
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "inferred",
+        "code": null,
+        "counted": 0,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "inferred_needs_confidence",
+      "about": "An inference_method without a confidence does not mark the output inferred.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "model_knowledge"
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "inferred_confidence_out_of_range",
+      "about": "A confidence outside 0 to 1 does not mark the output inferred.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "model_knowledge",
+        "confidence": 1.5
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "inferred_confidence_not_a_number",
+      "about": "A boolean confidence is not a number from 0 to 1.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "model_knowledge",
+        "confidence": true
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "inferred_bad_method",
+      "about": "An ungrounded output whose inference_method is outside the vocabulary is refused.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "llm-reasoning",
+        "confidence": 0.5
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "inferred_vendor_method",
+      "about": "A vendor inference_method (x-...) is in the vocabulary.",
+      "output": {
+        "evidence_anchors": [],
+        "inference_method": "x-acme.rules",
+        "confidence": 0.7
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "inferred",
+        "code": null,
+        "counted": 0,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "anchors_not_a_list",
+      "about": "evidence_anchors that is not a list fails.",
+      "output": {
+        "evidence_anchors": "file:src/app.py",
+        "inference_method": "model_knowledge",
+        "confidence": 0.4
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "action_record_anchor",
+      "about": "An output reporting an action is grounded by a record anchor to the action (§3.1).",
+      "output": {
+        "checkpoint_id": "cp-1",
+        "evidence_anchors": [
+          {
+            "ref": "checkpoint:cp-1",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "legacy_string_only",
+      "about": "A bare string is a legacy form: it does not count, so nothing grounds the output.",
+      "output": {
+        "evidence_anchors": [
+          "file:a.txt"
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "legacy_string_and_inferred",
+      "about": "A legacy string is not itself a failure: the output stands as inferred.",
+      "output": {
+        "evidence_anchors": [
+          "file:a.txt"
+        ],
+        "inference_method": "model_knowledge",
+        "confidence": 0.4
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "inferred",
+        "code": null,
+        "counted": 0,
+        "legacy": 1
+      }
+    },
+    {
+      "name": "anchor_without_kind",
+      "about": "An object without a kind is a legacy form.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_empty_ref",
+      "about": "An object with an empty ref is not an evidence anchor.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_unknown_kind",
+      "about": "A kind outside the vocabulary (the SDK's former tool_output) is a legacy form.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "tool:Read:toolu_01",
+            "kind": "tool_output"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_bad_digest",
+      "about": "An object whose digest is not sha256: and 64 lower-case hex digits is not an evidence anchor.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": "sha256:ABC"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_null_digest",
+      "about": "An object whose digest is null is not an evidence anchor: a digest that is present has §6.5's form.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": null
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_null_digest_beside_anchor",
+      "about": "An object whose digest is null does not count, and is no reason to refuse the output: it is a legacy item.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": null
+          },
+          {
+            "ref": "file:b.txt",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 1
+      }
+    },
+    {
+      "name": "legacy_object_and_anchor",
+      "about": "A legacy object beside an anchor: the anchor counts, the legacy item does not.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "a"
+          },
+          {
+            "ref": "file:b.txt",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 1
+      }
+    },
+    {
+      "name": "anchor_vendor_kind",
+      "about": "A vendor kind (x-...) is a kind.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "lab:42",
+            "kind": "x-lab_result"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "anchor_good_digest",
+      "about": "An anchor with a digest of §6.5's form.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "kinds_excludes",
+      "about": "Under kinds [file], a log anchor does not count.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "log:app#42",
+            "kind": "log"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": [
+          "file"
+        ],
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "kinds_includes",
+      "about": "Under kinds [file, log], a log anchor counts.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "log:app#42",
+            "kind": "log"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": [
+          "file",
+          "log"
+        ],
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_bound_root",
+      "about": "A citation of a path under a bound root is covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_path_under_bound",
+      "about": "A citation that goes on past the bound path is covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data[0]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.data"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_index_in_bound_slice",
+      "about": "An index within a bound slice, counted from the start of the array, is covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[3].url",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items[2:5]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_index_outside_bound_slice",
+      "about": "An index outside a bound slice is not covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[7]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items[2:5]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_open_slice",
+      "about": "A slice without an end covers every index from its start.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[40]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items[2:]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_slice_within_slice",
+      "about": "A slice within a bound slice is covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[2:4]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items[0:10]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_slice_beyond_slice",
+      "about": "A slice that ends past the bound slice is not covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[1:5]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items[0:3]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_sibling_path_unbound",
+      "about": "A sibling of a bound path is not covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.secret",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.data.x"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_parent_of_bound",
+      "about": "A parent of a bound value is not covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:search_out.results",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "search_out.results[0]"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_unbound_root",
+      "about": "A root the step does not bind is not covered.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:other",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_wrong_kind",
+      "about": "A citation of a workflow value is of kind record, even under kinds [file].",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": [
+          "file"
+        ],
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_without_kind",
+      "about": "A citation of a workflow value without a kind fails.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_annotated",
+      "about": "A citation with a type annotation is not a reference body.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data: string",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_malformed",
+      "about": "A citation whose rest does not parse fails.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.[",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_index_at_ijson_max",
+      "about": "An acs: reference may hold an index up to 2^53 - 1 (I-JSON), which a bound slice covers.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[9007199254740991]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_index_above_ijson",
+      "about": "An acs: reference whose index is above 2^53 - 1 is not a reference body (I-JSON): every implementation reads it so.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[9007199254740993]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_argument_of_call",
+      "about": "Outside a workflow, acs:<argument> names an argument of the call.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:path",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "path"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_not_in_evidence_seen",
+      "about": "evidence_seen applies to other anchors: a covered acs: citation is established without it.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": [],
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "seen_lists_anchor",
+      "about": "An anchor evidence_seen lists counts.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": [
+        "file:src/app.py"
+      ],
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "seen_omits_anchor",
+      "about": "An anchor evidence_seen does not list fails: its producer did not have it.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": [
+        "file:b.txt"
+      ],
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "seen_absent_counts",
+      "about": "An absent evidence_seen attests nothing: the anchor counts, as the host's word.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "seen_empty_fails",
+      "about": "An empty evidence_seen attests that the producer saw nothing: an anchor fails.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": [],
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "seen_does_not_cover_legacy",
+      "about": "evidence_seen does not apply to a legacy item: it does not count and does not fail.",
+      "output": {
+        "evidence_anchors": [
+          "file:a.txt"
+        ],
+        "inference_method": "model_knowledge",
+        "confidence": 0.4
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": [],
+      "expect": {
+        "status": "inferred",
+        "code": null,
+        "counted": 0,
+        "legacy": 1
+      }
+    },
+    {
+      "name": "attested_unattested_not_inferred",
+      "about": "Under attested, an unattested anchor does not count; not marked inferred, the output fails.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": true
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "attested_unattested_inferred",
+      "about": "Under attested, an unattested anchor does not count; marked inferred, the output passes.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ],
+        "inference_method": "model_knowledge",
+        "confidence": 0.4
+      },
+      "policy": {
+        "kinds": null,
+        "attested": true
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "inferred",
+        "code": null,
+        "counted": 0,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "attested_acs_counts",
+      "about": "Under attested, a covered acs: citation counts.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.data",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": true
+      },
+      "bound_refs": [
+        "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "attested_seen_counts",
+      "about": "Under attested, an anchor evidence_seen lists counts.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": true
+      },
+      "bound_refs": [],
+      "evidence_seen": [
+        "file:src/app.py"
+      ],
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "counted_two",
+      "about": "Every anchor that counts is counted.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:src/app.py",
+            "kind": "file"
+          },
+          {
+            "ref": "https://example.org/a",
+            "kind": "url"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 2,
+        "legacy": 0
+      }
+    }
+  ]
+}

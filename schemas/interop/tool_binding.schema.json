@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/schemas/interop/tool_binding.schema.json",
+  "title": "Tool binding",
+  "description": "A record that states which ontology capability a tool performs and which safety flags it declares (Agent Capability Standard 1.2.0, section 5.18.1). The record describes; a safety layer computes the effective flags from its ontology and enforces them. Checks that need the ontology (V101, V105, V107, V109, V110, W602) are made by the code that loads records, not by this schema.",
+  "type": "object",
+  "required": ["tool", "ontology"],
+  "properties": {
+    "tool": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The name the host offers the tool under."
+    },
+    "standard": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "description": "The Standard version the record was written against (section 11.6); optional. A loader refuses one it does not support (V109)."
+    },
+    "ontology": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "description": "The capability ontology version the record was written against (meta.version; section 11.6). A loader refuses another major (V109)."
+    },
+    "destination": {
+      "type": "string",
+      "pattern": "^(/([^~/]|~[01])*)*$",
+      "description": "For a tool that performs send: an RFC 6901 pointer to the argument that holds the destination, which a safety layer checks against the destination policies in force (section 4.4.2)."
+    },
+    "capability": {
+      "$ref": "#/$defs/capability_id",
+      "description": "The capability the tool performs: its worst case when a classifier applies."
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]*(\\.[a-z0-9][a-z0-9_]*)*$",
+      "description": "The capability's domain parameter, a domain id (Standard 1.2.0 section 5.2.4), e.g. `config` or `image.object`; a value of another form is S303."
+    },
+    "flags": {
+      "$ref": "#/$defs/flags"
+    },
+    "additional_capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability_id" },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Other capabilities the same call performs."
+    },
+    "classifier": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Names the classifier a layer applies to each call; the record's capability and flags are then the worst case."
+    },
+    "invokes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Names (`tool`) of the bindings the tool may call while it runs."
+    },
+    "approval": {
+      "$ref": "#/$defs/approval"
+    },
+    "control": {
+      "const": true,
+      "description": "The tool only signals the host: no capability, never gated."
+    }
+  },
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": ["capability"],
+      "not": { "required": ["control"] }
+    },
+    {
+      "required": ["control"],
+      "not": {
+        "anyOf": [
+          { "required": ["capability"] },
+          { "required": ["domain"] },
+          { "required": ["flags"] },
+          { "required": ["additional_capabilities"] },
+          { "required": ["classifier"] },
+          { "required": ["invokes"] },
+          { "required": ["approval"] },
+          { "required": ["destination"] }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "capability_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "flags": {
+      "type": "object",
+      "description": "Declared safety flags (section 5.2.1). Each is combined with the ontology's; a weaker one has no effect (W602).",
+      "properties": {
+        "risk": { "enum": ["low", "medium", "high"] },
+        "mutation": { "type": "boolean" },
+        "requires_checkpoint": { "type": "boolean" },
+        "requires_approval": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "description": "How approval of a call is counted (section 5.18.7).",
+      "properties": {
+        "min_approvers": { "type": "integer", "minimum": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "expires": {
+          "type": "string",
+          "pattern": "^(\\d+(ms|s|m|h|d)|P(\\d+D)?(T(\\d+H)?(\\d+M)?(\\d+(\\.\\d{1,9})?S)?)?)$",
+          "description": "A duration (section 5.10.1) longer than zero and of at most 2^53 - 1 milliseconds. The loader also rejects an ISO form with no component or a bare T, a zero duration and a longer one (S303)."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

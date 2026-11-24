@@ -69,13 +69,17 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 Return a structured object:
 
 ```yaml
+inquiry_id: "inq-7c2e"
 questions:
-  - question: "Which database should this operation target?"
+  - id: "q1"
+    question: "Which database should this operation target?"
     parameter: "target_database"
+    answer_type: choice
     options: ["production", "staging", "development"]
-  - question: "Should this include archived records?"
+  - id: "q2"
+    question: "Should this include archived records?"
     parameter: "include_archived"
-    options: ["yes", "no"]
+    answer_type: boolean
 ambiguity_analysis:
   missing_parameters: ["target_database", "date_range"]
   conflicting_interpretations:
@@ -85,7 +89,7 @@ ambiguity_analysis:
       confidence: 0.4
   confidence_without_clarification: 0.3
 confidence: 0.85  # How confident we are that clarification is needed
-evidence_anchors: ["input:users", "context:previous_query_was_active_only"]
+evidence_anchors: [{ref: "input:users", kind: human_note}, {ref: "context:previous_query_was_active_only", kind: record}]
 assumptions: []  # No assumptions made - we're asking for clarification
 ```
 
@@ -93,16 +97,19 @@ assumptions: []  # No assumptions made - we're asking for clarification
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `inquiry_id` | string | Names this inquiry; the items that answer it carry it, so a wait can correlate on it (Standard v1.2 §5.13.1) |
 | `questions` | array | Clarifying questions with optional bounded answers |
+| `questions[].id` | string | Unique within the inquiry; an answer names it as its `question_id` |
 | `questions[].question` | string | The clarifying question text |
 | `questions[].parameter` | string | What parameter this question resolves |
-| `questions[].options` | array | Suggested answers if the question has bounded options |
+| `questions[].answer_type` | string | `text`, `choice` (one of `options`), `boolean` or `number`: the type of the answer |
+| `questions[].options` | array | Suggested answers if the question has bounded options; for `choice`, the answers allowed |
 | `ambiguity_analysis` | object | Analysis of what makes the input ambiguous |
 | `ambiguity_analysis.missing_parameters` | array | Parameters required but not provided |
 | `ambiguity_analysis.conflicting_interpretations` | array | Different valid interpretations |
 | `ambiguity_analysis.confidence_without_clarification` | number | How confident we could be if we just guessed |
-| `confidence` | number | 0.0-1.0 confidence that clarification is needed |
-| `evidence_anchors` | array | References to ambiguous elements |
+| `confidence` | number | Probability, 0.0-1.0, that clarification is needed (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to ambiguous elements |
 | `assumptions` | array | Assumptions made (typically empty for inquire) |
 
 ## Examples
@@ -135,7 +142,7 @@ ambiguity_analysis:
   conflicting_interpretations: []
   confidence_without_clarification: 0.1
 confidence: 0.95
-evidence_anchors: ["input:the user's", "input:email"]
+evidence_anchors: [{ref: "input:the user's", kind: human_note}, {ref: "input:email", kind: human_note}]
 assumptions: []
 ```
 
@@ -174,7 +181,7 @@ ambiguity_analysis:
       confidence: 0.2
   confidence_without_clarification: 0.5
 confidence: 0.7
-evidence_anchors: ["input:the report", "context:available_reports:3", "context:last_viewed:sales"]
+evidence_anchors: [{ref: "input:the report", kind: human_note}, {ref: "context:available_reports:3", kind: record}, {ref: "context:last_viewed:sales", kind: record}]
 assumptions: []
 ```
 
@@ -183,7 +190,10 @@ assumptions: []
 ## Verification
 
 - [ ] Output contains at least one question when confidence > 0.5
-- [ ] Each question has a non-empty `parameter` field
+- [ ] Each question has a non-empty `id`, unique in the inquiry
+- [ ] The output has an `inquiry_id`
+- [ ] Each question has an `answer_type`, and a `choice` question its `options`
+- [ ] Each question has a non-empty `parameter` field where it resolves one
 - [ ] Options array is provided for bounded-choice questions
 - [ ] Evidence anchors reference specific input elements
 - [ ] Confidence is justified by ambiguity analysis

@@ -1,0 +1,303 @@
+{
+  "description": "Which events start a run of an event trigger (STANDARD 1.2.0 section 5.10.2), normative under section 10.3. Each case gives a trigger's 'event' block and a sequence of canonical events delivered to the host, all admitted by its sender policy (the policy is the host's and is not a vector); 'expect' gives, per event, 'start' (a run starts, with the event as the input delivers_to names), 'no_match' (event_type, or source.kind against source_kind, differs) or 'duplicate' (an event with this event_id already started a run of this trigger).",
+  "standard": "1.2.0",
+  "status": "normative",
+  "cases": {
+    "type_matches": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "start"
+      ]
+    },
+    "type_differs": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.started",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "no_match"
+      ]
+    },
+    "source_kind_differs": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "source_kind": "agent",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "human",
+            "name": "ops"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "no_match"
+      ]
+    },
+    "source_kind_matches": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "source_kind": "agent",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "start"
+      ]
+    },
+    "redelivered_starts_once": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        },
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        },
+        {
+          "event_id": "e2",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e2",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "start",
+        "duplicate",
+        "start"
+      ]
+    },
+    "no_match_does_not_consume_id": {
+      "trigger": {
+        "event_type": "deploy.finished",
+        "delivers_to": "ev"
+      },
+      "events": [
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.started",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        },
+        {
+          "event_id": "e1",
+          "timestamp": "2026-11-15T12:00:00Z",
+          "source": {
+            "kind": "agent",
+            "name": "ci"
+          },
+          "event_type": "deploy.finished",
+          "raw": {
+            "status": "done"
+          },
+          "canonical": {
+            "status": "done"
+          },
+          "anchors": [
+            {
+              "ref": "log:ci/e1",
+              "kind": "log"
+            }
+          ],
+          "provenance": {
+            "transformer": "ci",
+            "transform_version": "1"
+          }
+        }
+      ],
+      "expect": [
+        "no_match",
+        "start"
+      ]
+    }
+  }
+}

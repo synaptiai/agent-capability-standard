@@ -368,7 +368,7 @@ workflow_name:
   spec_version: "1.1"                            # optional; standard version targeted
 ```
 
-A catalog file can instead declare the version for all its workflows with a `# Standard version: 1.1.0` header. A workflow with neither draws a warning (W605); an unsupported version is an error (V109).
+A catalog file can instead declare the version for all its workflows with a `# Standard version: 1.2.0` header. A workflow with neither draws a warning (W605); an unsupported version is an error (V109).
 
 Each step invokes a capability and stores its output:
 
@@ -564,7 +564,7 @@ Resolution strategies:
 
 Entity matching across sources requires:
 
-**Hierarchical Namespaces**: `namespace:type:id`
+**Hierarchical Namespaces**: `<class>:<namespace>/<local_id>` (Standard 1.2.0 §7.1)
 **Alias Scoring**: Weighted confidence for potential matches
 **Merge/Split Rules**: When to combine or divide records
 **Hard Constraints**: Never merge incompatible types
@@ -879,6 +879,6 @@ Production agents require architecture, not vibes. This standard provides that a
 
 ---
 
-*Agent Capability Standard v1.1.0 (Candidate Standard; v1.0.0 still supported)*
+*Agent Capability Standard v1.2.0 (Candidate Standard; v1.1.0 and v1.0.0 still supported)*
 *Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*

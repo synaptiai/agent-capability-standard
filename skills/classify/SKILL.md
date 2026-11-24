@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep
 context: fork
 agent: explore
-layer: UNDERSTAND
 ---
 
 ## Intent
@@ -73,8 +72,8 @@ probabilities:  # Optional: full probability distribution
   label_2: number
 primary_label: string  # Highest confidence label
 ambiguous: boolean  # True if classification is uncertain
-confidence: 0..1  # Overall classification confidence
-evidence_anchors: ["file:line", "characteristic:value"]
+confidence: number  # probability that the labels are right (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "characteristic:value", kind: record}]
 assumptions: []
 ```
 
@@ -86,8 +85,8 @@ assumptions: []
 | `probabilities` | object | Probability for each possible label |
 | `primary_label` | string | Single best classification |
 | `ambiguous` | boolean | Whether classification is uncertain |
-| `confidence` | number | 0.0-1.0 overall confidence |
-| `evidence_anchors` | array | References to the characteristics each label rests on |
+| `confidence` | number | Probability, 0.0-1.0, that the labels are right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the characteristics each label rests on |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -119,8 +118,8 @@ primary_label: "service"
 ambiguous: false
 confidence: 0.92
 evidence_anchors:
-  - "src/services/payment_processor.rb:1"
-  - "src/services/payment_processor.rb:15-45"
+  - {ref: "file:src/services/payment_processor.rb:1", kind: file}
+  - {ref: "file:src/services/payment_processor.rb:15-45", kind: file}
 assumptions:
   - "Directory structure follows Rails conventions"
 ```
@@ -156,8 +155,8 @@ primary_label: "bug"
 ambiguous: true
 confidence: 0.65
 evidence_anchors:
-  - "issue:title"
-  - "issue:body"
+  - {ref: "issue:title", kind: human_note}
+  - {ref: "issue:body", kind: human_note}
 assumptions:
   - "Crash is not expected behavior"
   - "User has attempted normal login flow"

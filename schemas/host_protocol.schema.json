@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/schemas/host_protocol.schema.json",
+  "title": "Agent Capability Standard host protocol",
+  "description": "The actions an executor issues to its host and the responses it accepts (Agent Capability Standard 1.2.0, section 5.19). Every value is I-JSON (RFC 7493). An executor of class EX (section 10.5) issues exactly these actions (a host ignores action members it does not know) and takes every response this schema allows as section 5.19.1 says: response members the protocol does not define are ignored, and a response that validates may still be refused or fail its step. $defs.run_options, $defs.snapshot and $defs.trace_event describe the reference executor's forms and are informative.",
+  "oneOf": [
+    { "$ref": "#/$defs/action" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "time": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799999,
+      "description": "Milliseconds since 1970-01-01T00:00:00Z (section 5.19.3)."
+    },
+    "time_or_null": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+    "step": { "type": "integer", "minimum": 0, "description": "Index of the step in the last workflow of frame." },
+    "strings": { "type": "array", "items": { "type": "string" } },
+    "strings_or_null": { "oneOf": [{ "$ref": "#/$defs/strings" }, { "type": "null" }] },
+    "digest": { "type": "string", "pattern": "^[0-9A-Fa-f]{64}$" },
+    "reason": {
+      "type": "string",
+      "pattern": "^(x-[a-z0-9][a-z0-9_.-]{0,61}|unsupported_capability|unsupported_domain|not_recorded|outcome_unknown|key_conflict|destination_not_allowed|unsupported_scope|unsupported_ttl|over_capacity|secret_in_data|below_minimum_confidence|invalid_confidence)$",
+      "description": "Section 5.19.7: a token the Standard defines, or an x- vendor token."
+    },
+    "agent_identity": {
+      "type": "object",
+      "required": ["principal", "kind"],
+      "properties": {
+        "principal": { "type": "string" },
+        "kind": { "enum": ["agent", "human", "service"] }
+      },
+      "description": "schemas/agent_identity_schema.yaml#/agent_identity (section 5.17)."
+    },
+    "action_record": {
+      "type": "object",
+      "required": ["action_id", "timestamp", "actor", "intent", "status"],
+      "properties": {
+        "status": { "enum": ["planned", "approved", "rejected", "expired", "executed", "failed", "rolled_back", "cancelled"] }
+      },
+      "description": "schemas/world_state_schema.yaml#/types/ActionRecord (section 6.4)."
+    },
+    "deferral": {
+      "type": "object",
+      "required": ["frame", "step", "store_as", "reason", "action_id"],
+      "additionalProperties": false,
+      "properties": {
+        "frame": { "$ref": "#/$defs/strings" },
+        "step": { "$ref": "#/$defs/step" },
+        "store_as": { "type": ["string", "null"] },
+        "reason": { "type": "string" },
+        "action_id": { "type": ["string", "null"] }
+      },
+      "description": "A deferred step (section 5.14)."
+    },
+    "head": {
+      "type": "object",
+      "required": ["run_id", "id", "frame", "kind"],
+      "properties": {
+        "run_id": { "type": "string", "description": "Section 5.19.1: the run the action belongs to (section 5.19.2); with id, the action's delivery key (section 5.19.4)." },
+        "id": { "type": "integer", "minimum": 1 },
+        "frame": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "kind": { "type": "string" }
+      }
+    },
+    "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/InvokeCapability" },
+        { "$ref": "#/$defs/CreateCheckpoint" },
+        { "$ref": "#/$defs/Rollback" },
+        { "$ref": "#/$defs/RequestApproval" },
+        { "$ref": "#/$defs/RecheckSource" },
+        { "$ref": "#/$defs/AwaitEvent" },
+        { "$ref": "#/$defs/Sleep" },
+        { "$ref": "#/$defs/Completed" },
+        { "$ref": "#/$defs/Failed" }
+      ]
+    },
+    "InvokeCapability": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step", "capability", "store_as", "domain", "inputs", "deadline", "attempt", "idempotency_key"],
+      "properties": {
+        "kind": { "const": "InvokeCapability" },
+        "step": { "$ref": "#/$defs/step" },
+        "capability": { "type": "string" },
+        "store_as": { "type": ["string", "null"] },
+        "domain": { "type": ["string", "null"] },
+        "inputs": { "type": "object" },
+        "deadline": { "$ref": "#/$defs/time_or_null" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "replaces": { "description": "The task_id of the delegation this one replaces (section 5.13)." },
+        "idempotency_key": { "type": "string", "description": "Section 4.4.2: <run_id>:<n>, n the id of the pass's first InvokeCapability; the same for every attempt of the pass. A pending action restored from a state that predates keys gets <run_id>:<its id> (section 5.19.4)." }
+      },
+      "unevaluatedProperties": false
+    },
+    "CreateCheckpoint": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step"],
+      "properties": { "kind": { "const": "CreateCheckpoint" }, "step": { "$ref": "#/$defs/step" } },
+      "unevaluatedProperties": false
+    },
+    "Rollback": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step", "checkpoint_id"],
+      "properties": {
+        "kind": { "const": "Rollback" },
+        "step": { "$ref": "#/$defs/step" },
+        "checkpoint_id": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "RequestApproval": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step", "approver", "mode", "shown", "digest", "expires_at"],
+      "properties": {
+        "kind": { "const": "RequestApproval" },
+        "step": { "$ref": "#/$defs/step" },
+        "approver": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["human", "standing_mandate"] },
+            "role": { "type": "string" },
+            "min_approvers": { "type": "integer", "minimum": 1 },
+            "mandate_ref": { "type": "string" },
+            "always_ask": { "const": true },
+            "sender_check": { "$ref": "#/$defs/strings" },
+            "accept_trust_classes": { "$ref": "#/$defs/strings" }
+          }
+        },
+        "mode": { "enum": ["in_session", "out_of_band"] },
+        "shown": { "type": "array" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "expires_at": { "$ref": "#/$defs/time_or_null" },
+        "queued_action_id": { "type": "string", "description": "Section 5.14.1: the queued action a resumed run asks about." }
+      },
+      "unevaluatedProperties": false
+    },
+    "RecheckSource": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step", "source", "compare"],
+      "properties": {
+        "kind": { "const": "RecheckSource" },
+        "step": { "$ref": "#/$defs/step" },
+        "source": { "type": "string" },
+        "compare": { "enum": ["version", "digest"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "AwaitEvent": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["step", "event_type", "source_kind", "correlate", "accept_from", "sender_check", "accept_trust_classes", "liveness", "deadline"],
+      "properties": {
+        "kind": { "const": "AwaitEvent" },
+        "step": { "$ref": "#/$defs/step" },
+        "event_type": { "type": "string" },
+        "source_kind": { "type": ["string", "null"] },
+        "correlate": { "type": "object" },
+        "accept_from": { "$ref": "#/$defs/strings_or_null" },
+        "sender_check": { "$ref": "#/$defs/strings_or_null" },
+        "accept_trust_classes": { "$ref": "#/$defs/strings_or_null" },
+        "delegate_principal": { "type": "string" },
+        "liveness": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["mode", "interval"],
+              "properties": {
+                "mode": { "enum": ["push", "probe"] },
+                "interval": { "type": "string" },
+                "failure_threshold": { "type": "integer", "minimum": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "deadline": { "$ref": "#/$defs/time_or_null" }
+      },
+      "unevaluatedProperties": false
+    },
+    "Sleep": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["until"],
+      "properties": { "kind": { "const": "Sleep" }, "until": { "$ref": "#/$defs/time" } },
+      "unevaluatedProperties": false
+    },
+    "Completed": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["outcome", "cause", "outputs", "action_records", "deferred"],
+      "properties": {
+        "kind": { "const": "Completed" },
+        "outcome": { "enum": ["completed", "escalated", "deferred", "replan_required"] },
+        "cause": { "type": ["string", "null"] },
+        "ended": {
+          "type": "object",
+          "required": ["step", "message"],
+          "properties": { "step": { "$ref": "#/$defs/step" }, "message": { "type": ["string", "null"] } }
+        },
+        "outputs": { "type": "object" },
+        "action_records": { "type": "array", "items": { "$ref": "#/$defs/action_record" } },
+        "deferred": { "type": "array", "items": { "$ref": "#/$defs/deferral" } }
+      },
+      "unevaluatedProperties": false
+    },
+    "Failed": {
+      "allOf": [{ "$ref": "#/$defs/head" }],
+      "required": ["code", "step", "message", "action_records", "deferred"],
+      "properties": {
+        "kind": { "const": "Failed" },
+        "code": { "type": "string", "pattern": "^[RF][0-9]{3}$" },
+        "step": { "oneOf": [{ "$ref": "#/$defs/step" }, { "type": "null" }] },
+        "message": { "type": "string" },
+        "reason": { "$ref": "#/$defs/reason" },
+        "checkpoint_id": { "type": "string" },
+        "action_records": { "type": "array", "items": { "$ref": "#/$defs/action_record" } },
+        "deferred": { "type": "array", "items": { "$ref": "#/$defs/deferral" } }
+      },
+      "unevaluatedProperties": false
+    },
+    "response": {
+      "description": "A response. Members the protocol does not define are allowed and ignored (section 5.19.1), as in 1.1, so no response sets additionalProperties to false.",
+      "oneOf": [
+        { "$ref": "#/$defs/Output" },
+        { "$ref": "#/$defs/Error" },
+        { "$ref": "#/$defs/Checkpoint" },
+        { "$ref": "#/$defs/RolledBack" },
+        { "$ref": "#/$defs/Decision" },
+        { "$ref": "#/$defs/Current" },
+        { "$ref": "#/$defs/Event" },
+        { "$ref": "#/$defs/LivenessLost" }
+      ]
+    },
+    "Output": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "Output" },
+        "value": { "description": "The capability's output: an object with the fields its contract requires, else the step fails R402." },
+        "evidence_seen": { "type": "array", "items": { "type": "string" }, "description": "The refs of the evidence the host attests the output's producer had for this answer; absent, it attests nothing (section 3.1, 5.20)." }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": ["kind", "code"],
+      "properties": {
+        "kind": { "const": "Error" },
+        "code": { "type": "string" },
+        "message": { "type": "string", "default": "" },
+        "reason": { "description": "Section 5.19.7: a defined token or an x- vendor token ($defs.reason); any other value is ignored, as if absent." }
+      }
+    },
+    "Checkpoint": {
+      "type": "object",
+      "required": ["kind", "checkpoint_id"],
+      "properties": { "kind": { "const": "Checkpoint" }, "checkpoint_id": { "type": "string" } }
+    },
+    "RolledBack": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "RolledBack" },
+        "not_covered": { "type": "array", "items": { "$ref": "#/$defs/not_covered_item" } }
+      }
+    },
+    "not_covered_item": {
+      "type": "object",
+      "required": ["item", "reason"],
+      "properties": {
+        "item": { "type": "string" },
+        "reason": { "type": "string", "pattern": "^(transmitted|delegated|outside_scope|x-[a-z0-9][a-z0-9_.-]{0,61})$" },
+        "detail": { "type": "string" }
+      },
+      "description": "Section 4.4.1: a change the checkpoint never covered. A member this protocol does not define, and a detail that is not a string, are ignored (section 5.19.1)."
+    },
+    "Decision": {
+      "type": "object",
+      "required": ["kind", "decision_id", "decision", "digest"],
+      "properties": {
+        "kind": { "const": "Decision" },
+        "decision_id": { "type": "string" },
+        "decision": { "type": "string", "description": "approved, rejected or unavailable; any other value refuses the step (F502)." },
+        "approvers": { "$ref": "#/$defs/strings", "default": [] },
+        "digest": { "type": "string" },
+        "approver_identities": {
+          "oneOf": [{ "type": "array", "items": { "$ref": "#/$defs/agent_identity" } }, { "type": "null" }],
+          "description": "identity@1 (section 5.17)."
+        }
+      }
+    },
+    "Current": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": { "kind": { "const": "Current" }, "value": {} }
+    },
+    "Event": {
+      "type": "object",
+      "required": ["kind", "event"],
+      "properties": {
+        "kind": { "const": "Event" },
+        "event": {},
+        "principal": { "type": ["string", "null"] },
+        "identity": { "oneOf": [{ "$ref": "#/$defs/agent_identity" }, { "type": "null" }] }
+      }
+    },
+    "LivenessLost": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "const": "LivenessLost" } }
+    },
+    "run_options": {
+      "type": "object",
+      "required": ["workflow", "inputs", "attendance", "run_id", "now_ms", "header"],
+      "additionalProperties": false,
+      "properties": {
+        "workflow": { "type": "string" },
+        "inputs": { "type": "object" },
+        "attendance": { "enum": ["attended", "unattended"] },
+        "run_id": { "type": "string" },
+        "now_ms": { "$ref": "#/$defs/time" },
+        "actor_identity": { "$ref": "#/$defs/agent_identity" },
+        "records": { "enum": ["approvals", "actions"], "default": "approvals" },
+        "header": {
+          "oneOf": [
+            { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+            { "type": "null" }
+          ],
+          "description": "Informative: the version the catalog's header declares, or null for a catalog without one (section 11.5). Always given."
+        },
+        "profiles": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Informative: the domain profiles the host applies (section 5.21)."
+        },
+        "grounding": {
+          "type": "array",
+          "items": { "$ref": "workflow_catalog.schema.json#/$defs/grounding" },
+          "description": "Informative: the grounding policies the host applies (section 5.20)."
+        },
+        "destinations": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "description": "Section 4.4.2: the destination policies in force; empty or absent, none."
+        },
+        "catalogs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["catalog", "header"],
+            "properties": {
+              "catalog": { "type": "object" },
+              "header": {
+                "oneOf": [
+                  { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+                  { "type": "null" }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Informative: further catalogs of the run's catalog set (section 5.1.1), each with its header's version."
+        },
+        "agents": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Informative: agent manifests (section 5.15.1)."
+        }
+      },
+      "description": "Informative: what start takes (section 5.19.2)."
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["state", "sha256", "hmac"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "type": "string", "description": "The run state as canonical JSON (RFC 8785); its form is the executor's own." },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "hmac": { "oneOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] }
+      },
+      "description": "Informative: the reference executor's saved state (section 5.19.4)."
+    },
+    "trace_event": {
+      "type": "object",
+      "required": ["seq", "at", "kind", "frame", "step", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 0 },
+        "at": { "$ref": "#/$defs/time" },
+        "kind": { "type": "string" },
+        "frame": { "$ref": "#/$defs/strings" },
+        "step": { "oneOf": [{ "$ref": "#/$defs/step" }, { "type": "null" }] },
+        "detail": { "type": "object" }
+      },
+      "description": "Informative: one event of the reference executor's trace (docs/guides/RUNNING_WORKFLOWS.md). Kinds added in 1.2: run_resumed and invoke_resumed (section 5.14.1), run_cancelled (section 5.19.5), grounding (section 5.20) and person_required (section 5.21.3)."
+    }
+  }
+}

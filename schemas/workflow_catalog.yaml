@@ -104,7 +104,7 @@ monitor_and_replan:
     failure_modes: []
   - capability: detect
     purpose: Detect assumption violations that affect plan validity.
-    domain: plan-invalidation
+    domain: plan_invalidation
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -427,7 +427,7 @@ debug_code_change:
     - condition: The fix command failed or timed out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and no audit is recorded.
+      recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
   - capability: verify
     purpose: Run targeted verification and return PASS/FAIL.
     risk: medium
@@ -454,7 +454,7 @@ debug_code_change:
     - condition: Verification could not run (timed out or failed after its retries)
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and no audit is recorded.
+      recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
   - capability: rollback
     purpose: If verify FAIL, revert safely.
     risk: medium
@@ -1127,7 +1127,7 @@ digital_twin_sync_loop:
     - condition: The mutation failed or timed out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       target: "twin_state"
       operation:
@@ -1151,7 +1151,7 @@ digital_twin_sync_loop:
     - condition: The verification suite failed or timed out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       code: "run_verification_suite"
     gates:
@@ -1173,7 +1173,7 @@ digital_twin_sync_loop:
     - condition: Verification could not run (timed out or failed after its retries)
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       target: "${execute_out: object}"
       conditions: ["drift_resolved", "no_policy_violation"]
@@ -1727,7 +1727,7 @@ multi_agent_orchestration:
     - condition: Subtask result fails validation
       when: ${verify_out.passed} == false
       action: request_more_context
-      recovery: The failed results are not merged and no audit is recorded; the run ends R402 (failure mode fired), and the subtasks can be returned to their agents with the verdict's details before the workflow is run again.
+      recovery: The failed results are not merged, and the audit step does not run (the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure); the run ends R402 (failure mode fired), and the subtasks can be returned to their agents with the verdict's details before the workflow is run again.
   - capability: integrate
     purpose: Merge results from multiple agents into unified output.
     risk: low
@@ -1890,7 +1890,7 @@ data_quality_pipeline:
     - condition: Verification could not run (timed out or failed after its retries)
       on_error: [R401, R402]
       action: stop
-      recovery: The raw data was never modified, so nothing is rolled back; the run ends with the verify step's error, and no audit is recorded.
+      recovery: The raw data was never modified, so nothing is rolled back; the run ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
   - capability: audit
     purpose: Record all transformations applied, quality metrics, and the verification verdict.
     risk: low
@@ -2013,7 +2013,7 @@ model_deployment:
     - condition: Deployment script fails or times out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back to the checkpoint taken before the deployment; the run then ends with the execute step's error, and no audit is recorded.
+      recovery: Roll back to the checkpoint taken before the deployment; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
   - capability: verify
     purpose: Validate deployment success (health checks, endpoint availability).
     risk: medium
@@ -2033,7 +2033,7 @@ model_deployment:
     - condition: Health checks could not run (timed out or failed after their retries)
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll the deployment back to the checkpoint so no unverified deployment stays in place; the run then ends with the verify step's error, and no audit is recorded.
+      recovery: Roll the deployment back to the checkpoint so no unverified deployment stays in place; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
   - capability: measure
     purpose: Check model performance metrics post-deployment.
     domain: performance

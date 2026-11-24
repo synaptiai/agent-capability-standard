@@ -92,8 +92,8 @@ anomalies:  # Unusual findings (same item shape, without type)
     location: string
 methodology: string  # How discovery was conducted
 search_space: string  # What was explored
-confidence: number  # 0.0-1.0 confidence in discoveries
-evidence_anchors: array[string]  # References to supporting evidence
+confidence: number  # probability that the discoveries are real (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # References to supporting evidence; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Conditions that affect findings
 ```
 
@@ -109,8 +109,8 @@ assumptions: array[string]  # Conditions that affect findings
 | `*[].novelty` | enum | How unexpected the finding is (every discovery) |
 | `methodology` | string | Exploration approach used |
 | `search_space` | string | Scope of exploration |
-| `confidence` | number | 0.0-1.0 overall discovery confidence |
-| `evidence_anchors` | array[string] | References to evidence |
+| `confidence` | number | Probability, 0.0-1.0, that the discoveries are real (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to evidence |
 | `assumptions` | array[string] | Conditions that could change findings |
 
 ## Examples
@@ -162,10 +162,10 @@ methodology: "Static analysis of import statements, grep for class instantiation
 search_space: "src/ directory (156 TypeScript files)"
 confidence: 0.85
 evidence_anchors:
-  - "src/services/UserService.ts:12"
-  - "src/services/AuthService.ts:8"
-  - "src/services/PaymentService.ts:45"
-  - "tests/:directory-listing"
+  - {ref: "file:src/services/UserService.ts:12", kind: file}
+  - {ref: "file:src/services/AuthService.ts:8", kind: file}
+  - {ref: "file:src/services/PaymentService.ts:45", kind: file}
+  - {ref: "file:tests/:directory-listing", kind: file}
 assumptions:
   - "Standard TypeScript import resolution"
   - "Test files follow *Spec.ts or *.test.ts convention"
@@ -217,9 +217,9 @@ methodology: "Directory structure analysis, pattern matching on file organizatio
 search_space: "Full repository (312 files, 4 top-level directories)"
 confidence: 0.75
 evidence_anchors:
-  - "/admin/controllers/:pattern-sample"
-  - "/core/domain/:ddd-structure"
-  - "/core/adapters/legacy/LegacyAdapter.ts:1-50"
+  - {ref: "file:/admin/controllers/:pattern-sample", kind: file}
+  - {ref: "file:/core/domain/:ddd-structure", kind: file}
+  - {ref: "file:/core/adapters/legacy/LegacyAdapter.ts:1-50", kind: file}
 assumptions:
   - "Directory structure reflects intentional architecture"
   - "Pattern differences are deliberate, not accidental"

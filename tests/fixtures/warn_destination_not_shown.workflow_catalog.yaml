@@ -1,0 +1,39 @@
+# Standard version: 1.2.0
+# A send whose destination comes from the request, with an approval whose
+# shows leaves it out: the approver would not see where the data goes
+# (STANDARD v1.2 §4.4.2): W625.
+deliver_report:
+  goal: Deliver a report where the request says.
+  risk: high
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [approval@1]
+  inputs:
+    request:
+      type: object
+      required: true
+    draft:
+      type: object
+      required: true
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point for the agent's own state.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: report_state
+  - capability: constrain
+    purpose: Check the destination against the allowed destinations.
+    store_as: policy_out
+    input_bindings:
+      target: "${request.url: string}"
+      constraints:
+      - allowed_destinations: ["https://hooks.example.com/*"]
+  - capability: send
+    purpose: Deliver the report.
+    store_as: send_out
+    input_bindings:
+      destination: "${request.url: string}"
+      payload: "${draft.body: string}"
+    approval:
+      approver: {kind: human, role: ops}
+      shows: ["${draft.body}"]

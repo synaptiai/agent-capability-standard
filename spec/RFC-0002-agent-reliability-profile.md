@@ -1,6 +1,6 @@
 # RFC-0002: Cross-session agent behavioural reliability
 **Status:** Draft
-**Target:** Standard v1.2.0
+**Target:** A later Standard 1.x, after 1.2.0
 **Date:** 2026-08-29
 **Tracking issue:** [#104](https://github.com/synaptiai/agent-capability-standard/issues/104)
 

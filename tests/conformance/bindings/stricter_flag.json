@@ -1,0 +1,26 @@
+{
+  "description": "A declared flag stricter than the ontology's takes effect, with no diagnostic.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "retrieve",
+      "flags": {
+        "requires_approval": true
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "look": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true
+      }
+    }
+  }
+}

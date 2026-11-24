@@ -1,0 +1,61 @@
+{
+  "description": "An output whose confidence is below the applied minimum fails its step: F504, reason below_minimum_confidence.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "classify",
+          "purpose": "classify step",
+          "store_as": "c",
+          "input_bindings": {
+            "item": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [
+            "a"
+          ],
+          "confidence": 0.5,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F504",
+    "step": 0,
+    "reason": "below_minimum_confidence"
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "profiles": [
+    {
+      "domain": "confident",
+      "version": "1.0.0",
+      "evidence_policy": {
+        "minimum_confidence": 0.9
+      }
+    }
+  ]
+}

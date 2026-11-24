@@ -1,0 +1,94 @@
+{
+  "description": "Two profiles each apply: require_review: medium does not cover a low-risk retrieve, require_human: low does, so a person is asked.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "executed",
+        "person_required": true
+      }
+    ]
+  },
+  "trace_kinds": [
+    "person_required",
+    "approval_requested"
+  ],
+  "profiles": [
+    {
+      "domain": "review-medium",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "require_review": "medium"
+      }
+    },
+    {
+      "domain": "human-low",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "require_human": "low"
+      }
+    }
+  ]
+}

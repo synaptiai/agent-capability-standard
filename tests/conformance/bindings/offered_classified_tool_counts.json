@@ -1,0 +1,42 @@
+{
+  "description": "An offered tool with a classifier counts as able to perform any capability, a checkpoint included.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "shell",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "classifier": "shell"
+    }
+  ],
+  "offered": {
+    "write": "write",
+    "shell": "shell"
+  },
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      },
+      "shell": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

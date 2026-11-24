@@ -1,0 +1,74 @@
+{
+  "description": "A delegate step that waits: the output its host returns when it accepts the delegation becomes the step's output once the result arrives, so its confidence is checked at once; below the minimum, the step fails with F504 (below_minimum_confidence) and no result is awaited.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "timeout": "1h",
+          "wait": {
+            "event_type": "review.done"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "agent": "a",
+          "confidence": 0.5,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F504",
+    "step": 0,
+    "reason": "below_minimum_confidence"
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "profiles": [
+    {
+      "domain": "confident",
+      "version": "1.0.0",
+      "evidence_policy": {
+        "minimum_confidence": 0.9
+      }
+    }
+  ]
+}

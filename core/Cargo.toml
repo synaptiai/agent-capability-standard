@@ -15,6 +15,9 @@ crate-type = ["rlib", "cdylib"]
 # Builds the `grounded_agency._core` Python extension module. maturin enables
 # it (see pyproject.toml); plain `cargo build`/`cargo test` leave it off.
 python = ["dep:pyo3"]
+# Builds the JSON-in, JSON-out WebAssembly interface (src/wasm.rs). Used with
+# --target wasm32-unknown-unknown; adds no dependency.
+wasm = []
 
 [dependencies]
 indexmap = "2.14.2"
@@ -24,6 +27,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
 pyo3 = { version = "0.30.1", optional = true, features = ["abi3-py314"] }
 chrono-tz = { version = "0.10.4", default-features = false }
+chrono = { version = "0.4.45", default-features = false }
 hmac = "0.13.0"
 ryu-js = "1.0.3"
 sha2 = "0.11.1"

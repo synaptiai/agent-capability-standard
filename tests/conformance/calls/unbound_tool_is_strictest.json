@@ -1,0 +1,95 @@
+{
+  "description": "A call of a tool with no binding needs a checkpoint and approval.",
+  "ontology": "2.2.0",
+  "needs": [
+    "unbound_calls"
+  ],
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "other",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F501"
+      }
+    },
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "other",
+      "args": {
+        "path": "b"
+      },
+      "expect": {
+        "refuse": "F502"
+      }
+    },
+    {
+      "call": "other",
+      "args": {
+        "path": "b"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": "run"
+    }
+  ]
+}

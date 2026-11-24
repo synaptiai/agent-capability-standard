@@ -12,7 +12,7 @@ The multi-modal domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 7 (Multi-modal)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image-to-text, text-to-video, speech recognition, visual question answering, and cross-modal transformations.
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -52,19 +52,37 @@ block_autonomous:
   - send                # Never autonomously distribute generated content
 ```
 
-The profile does not list `generate`: the ontology rates it low risk, and the profile asks instead for a checkpoint before content generation (`before_content_generation: always`).
+The profile does not list `generate`: the ontology rates it low risk, and the profile asks instead for a checkpoint before generated content is written out (`persist: always`).
 
 ### Checkpoint Policy
 
-Multi-modal workflows require checkpoints before any action that:
-- Converts content between modalities
-- Generates new content in any modality
-- Makes cross-modal alignment decisions
-- Processes large batch transformations
+The profile requires a checkpoint before each step or call that:
+- Writes converted or generated content out (`persist`)
+- Carries medium or high risk, such as a large batch transformation
+
+Converting or generating content in memory (`transform`, `generate`) and
+comparing modalities need none until the result is written out. The
+profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_modality_conversion and before_content_generation -> persist;
+  # before_alignment_decision -> none (comparing changes no state);
+  # before_batch_transformation (high_risk) and during_pipeline_stages
+  # (medium_risk) -> "*": medium_risk.
+  persist: always
+  "*": medium_risk
+```
 
 ## Capability Usage
 
-The 36 atomic capabilities apply to multi-modal work through domain parameterization:
+The 36 atomic capabilities apply to multi-modal work through domain
+parameterization. Each output's `evidence_anchors` are evidence anchors
+(Standard 1.2.0 §6.5): a `kind`, which the profile's `required_anchor_types`
+count, and a `ref` in the forms of the [modality guide](../../guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality),
+one anchor per contributing modality; an `acs:` ref names a value the step
+was given, such as its text (§5.20). Scores stay out of the anchors.
 
 ### Detection (Cross-modal)
 
@@ -79,12 +97,10 @@ detect:
     alignment_score: 0.87
     misaligned_elements: []
     evidence_anchors:
-      - type: source_modality
-        ref: "image: s3://dataset/scene_042.jpg"
-      - type: target_modality
-        ref: "text: A red car parked..."
-      - type: alignment_score
-        value: 0.87
+      - kind: file
+        ref: "image:s3://dataset/scene_042.jpg:full_frame"
+      - kind: record
+        ref: "acs:text"
 ```
 
 ### Transformation (Image-to-Text)
@@ -99,15 +115,10 @@ transform:
     detail_level: "detailed"
   output:
     caption: "A manufacturing floor with three conveyor belts..."
+    confidence: 0.84
     evidence_anchors:
-      - type: source_modality
-        ref: "image: camera://scene/frame-1042.jpg"
-      - type: target_modality
-        ref: "text caption"
-      - type: confidence_score
-        value: 0.84
-      - type: modality_hash
-        source: "sha256:abc..."
+      - kind: sensor
+        ref: "image:camera://scene/frame-1042.jpg:full_frame"
 ```
 
 ### Transformation (Text-to-Image)
@@ -125,12 +136,8 @@ transform:
   output:
     image_ref: "generated://diagram-uuid-789.png"
     evidence_anchors:
-      - type: source_modality
-        ref: "text prompt"
-      - type: target_modality
-        ref: "generated image"
-      - type: modality_hash
-        value: "sha256:def..."
+      - kind: record
+        ref: "acs:source"
 ```
 
 ### Classification (Visual Question Answering)
@@ -147,12 +154,10 @@ classify:
     explanation: "The line chart shows consistent upward movement..."
     confidence: 0.91
     evidence_anchors:
-      - type: source_modality
-        ref: "image: s3://dataset/chart_017.png"
-      - type: source_modality
-        ref: "text question"
-      - type: confidence_score
-        value: 0.91
+      - kind: file
+        ref: "image:s3://dataset/chart_017.png:full_frame"
+      - kind: record
+        ref: "acs:question"
 ```
 
 ## Available Workflows
@@ -264,11 +269,10 @@ trust_weights:
   text_input: 0.92             # Extracted text
   layout_analysis: 0.85        # Document layout models
 evidence_policy:
-  required_anchor_types:
-    - source_modality
-    - target_modality
-    - page_reference            # Page and region in document
-    - confidence_score
+  required_anchor_types:        # Anchor kinds (Standard 1.2.0 §6.5)
+    - file                      # The source document
+    - x-page_region             # A vendor kind: page and region
+  require_grounding: [transform, integrate]
 ```
 
 ### Adjusting for Video Understanding
@@ -280,11 +284,10 @@ trust_weights:
   audio_track: 0.85            # Extracted audio
   subtitle_track: 0.80         # Subtitle/caption data
 evidence_policy:
-  required_anchor_types:
-    - source_modality
-    - time_segment              # Video timestamp range
-    - frame_reference           # Specific frame
-    - confidence_score
+  required_anchor_types:        # Anchor kinds (Standard 1.2.0 §6.5)
+    - file                      # The source video
+    - x-video_frame             # A vendor kind: timestamp and frame
+  require_grounding: [detect, classify]
 ```
 
 ## Safety Considerations

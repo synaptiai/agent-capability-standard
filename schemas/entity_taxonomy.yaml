@@ -1,9 +1,9 @@
 schema:
   name: canonical_entity_taxonomy
-  version: 1.0.0
+  version: 1.1.0
   generated_at: '2026-01-24T02:46:43.275637Z'
   description: Canonical entity taxonomy for real+digital world modeling with hierarchical
-    namespaces and stable IDs.
+    namespaces and stable IDs (Standard v1.2 §7.1).
   principles:
   - IDs are stable and globally unique within a world_id namespace.
   - Entity IDs encode class + local identifier (human-readable).
@@ -11,6 +11,12 @@ schema:
   - Entity types are extensible via subtypes and labels.
 id_convention:
   format: <class>:<namespace>/<local_id>
+  # Standard v1.2 §7.1. class: a class name or alias below, or x-<name>;
+  # namespace: one or more '/'-separated segments, outermost first; a segment
+  # has no '/', ':', white space or control character. The class names them
+  # (U+0000-U+0020, U+007F-U+00A0 and the other white space of JSON Schema's
+  # \s), so the pattern means the same under every regular expression dialect.
+  pattern: '^[a-z][a-z0-9_-]*:[^/:\x00-\x20\x7f-\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+(/[^/:\x00-\x20\x7f-\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+)+$'
   examples:
   - svc:acme/payments/prod/api
   - db:acme/payments/prod/postgres-main
@@ -19,6 +25,7 @@ id_convention:
   - doc:acme/payments/specs/prd-v2
   - asset:acme/factory/line-3/robot-12
   - sensor:acme/factory/line-3/temp-02
+  - person:org.company/user/12345
   namespace_components:
   - org
   - domain

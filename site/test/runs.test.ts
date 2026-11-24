@@ -5,9 +5,11 @@
 // rows and the enforced scope are typed from the spec's table in 3.12 and
 // the scope list in 4.2.
 import { readFileSync } from 'node:fs';
+import { slug } from 'github-slugger';
 import { describe, expect, it } from 'vitest';
 import { assertMeasured, reportLines, standardUrlFrom, summarise } from '../scripts/check-runs.mjs';
 import { loadVersions } from '../src/data/versions';
+import { currentStandardText } from '../src/lib/spec-figures';
 import {
   CURRENT_STANDARD,
   EXEMPT_RUNS,
@@ -22,6 +24,37 @@ import {
 } from '../src/lib/runs';
 
 const fixture = JSON.parse(readFileSync('test/fixtures/runs-page.json', 'utf8')) as { geometry: PageGeometry };
+
+/**
+ * `text` with its HTML comments cut out, read once from left to right: a
+ * comment runs from `<!--` to the next `-->` or `--!>`, and one left open
+ * runs to the end. It checks Markdown the repository holds, and whatever
+ * remains counts as text, so a cut never hides anything from the check.
+ */
+function withoutComments(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    if (open < 0) return kept + text.slice(at);
+    kept += text.slice(at, open);
+    const ends = [text.indexOf('-->', open + 4), text.indexOf('--!>', open + 4)].filter((i) => i >= 0);
+    if (ends.length === 0) return kept;
+    const end = Math.min(...ends);
+    at = end + (text.startsWith('--!>', end) ? 4 : 3);
+  }
+}
+
+describe('withoutComments', () => {
+  it('cuts comments on one line or several, and one left open', () => {
+    expect(withoutComments('a<!-- x -->b')).toBe('ab');
+    expect(withoutComments('a<!-- x\ny -->b\nc')).toBe('ab\nc');
+    expect(withoutComments('a<!-- x --!>b')).toBe('ab');
+    expect(withoutComments('a<!-- x')).toBe('a');
+    // Text either side of a cut stays text, even where it spells a comment.
+    expect(withoutComments('<!<!-- x -->-- y -->')).toBe('<!-- y -->');
+  });
+});
 
 describe('measureRuns on the fixture page', () => {
   const runs = measureRuns(fixture.geometry);
@@ -90,6 +123,13 @@ describe('exempt runs and scope', () => {
       'appendix-a-layer-reference:c',
       'appendix-b-reserved-identifiers:c',
       'appendix-c-changes-from-100:c',
+      'appendix-d-changes-from-110:c',
+      // Not in the spec's table: added at integration, read from
+      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables), and in
+      // review (§1.1, a reference list as §13.1 is).
+      '98-diagnostic-format:c',
+      '117-artifacts-of-this-version:c',
+      '11-normative-references:c',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',
@@ -140,6 +180,34 @@ describe('exempt runs and scope', () => {
     // Which version is current is not typed here: a later Standard moves the enforced page with it.
     expect(isEnforced('/spec/9.9.9/', 'spec', '/spec/9.9.9/')).toBe(true);
     expect(isEnforced(current, 'spec', '/spec/9.9.9/')).toBe(false);
+  });
+
+  it('exempts a section of the current Standard as unwritten only while it holds no text', () => {
+    // Only its subheadings, one-line comments (the owner's), blank lines and
+    // thematic breaks: once the section has text its entry goes, and its run
+    // is measured.
+    const { source, text } = currentStandardText();
+    const lines = text.split('\n');
+    const heading = (l: string) => /^(#{1,6})\s+(.*?)\s*$/.exec(l);
+    const unwritten = EXEMPT_RUNS.filter((e) => e.unwritten);
+    for (const e of unwritten) {
+      expect([e.page, e.category], e.anchor).toEqual([CURRENT_STANDARD, 'a']);
+      const start = lines.findIndex((l) => heading(l) !== null && slug(heading(l)![2]!) === e.anchor);
+      expect(start, `${source}: no heading #${e.anchor}`).toBeGreaterThanOrEqual(0);
+      const level = heading(lines[start]!)![1]!.length;
+      const section: string[] = [];
+      for (const l of lines.slice(start + 1)) {
+        const h = heading(l);
+        if (h !== null && h[1]!.length <= level) break;
+        if (h === null) section.push(l);
+      }
+      // Comments (on one line or several), blank lines and thematic breaks
+      // are not text.
+      const body = withoutComments(section.join('\n'))
+        .split('\n')
+        .filter((l) => !/^\s*$|^---\s*$/.test(l));
+      expect(body, `${source} #${e.anchor} has text: remove its unwritten entry from EXEMPT_RUNS`).toEqual([]);
+    }
   });
 
   it('limits a run to two 900px viewports, measured 1440px wide', () => {

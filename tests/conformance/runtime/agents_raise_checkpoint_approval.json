@@ -1,0 +1,115 @@
+{
+  "description": "In a workflow that declares agents, a delegation to an agent that may mutate takes its manifest's maxima: the step needs the checkpoint before it and is put to an approver before the host is asked (\u00a75.15.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "write",
+          "input_bindings": {
+            "agent": "db-writer",
+            "task": {
+              "table": "t"
+            }
+          }
+        }
+      ],
+      "agents": [
+        "db-writer"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "c1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "inputs": {
+          "agent": "db-writer"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {},
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [],
+  "agents": [
+    {
+      "agent": "db-writer",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "checkpoint",
+        "mutate"
+      ],
+      "task": {
+        "table": {
+          "type": "string",
+          "required": true
+        },
+        "rows": {
+          "type": "array"
+        }
+      }
+    }
+  ]
+}

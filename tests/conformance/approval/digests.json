@@ -1,14 +1,18 @@
 {
   "generated_by": "scripts/gen_standard_agents_binding.py",
-  "standard": "1.1.0",
-  "section": "5.14",
-  "status": "informative",
-  "description": "Approval digests computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each vector is one approval request. STANDARD v1.1.0 section 5.14 states that a decision is valid only if the SHA-256 digest of the canonical JSON (RFC 8785) of the shown values matches. What is shown when a step declares no `shows`, and the object added when a step asks again after a recheck, are the reference executor's behaviour; the Standard does not state them. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
+  "standard": "1.2.0",
+  "section": "5.14, 5.18.7",
+  "status": "normative",
+  "description": "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7, normative under section 10.3), computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each `step` vector is one approval request of a workflow step; each `tool_call` vector is the approval of a tool call. The shown values are a JSON array; the digest is the SHA-256 of the UTF-8 encoding of their canonical JSON (RFC 8785), as 64 lowercase hexadecimal digits, compared regardless of case. An implementation that computes or checks approval digests produces each vector's `canonical` text and `digest` from its `shown` values; an executor shows each `step` vector's `shown` values, given its `inputs` or `bindings` and any `recheck_read`, and a safety layer each `tool_call` vector's. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
   "fields": {
     "name": "The vector's name, unique in this file.",
+    "kind": "`step`: an approval request of a workflow step, with `approval`; without `shows`, `inputs`; with `shows`, `bindings`; asked again after a recheck, `recheck_read`. `tool_call`: the approval of a tool call (STANDARD v1.2.0 \u00a75.18.7), with `call`.",
     "about": "What the vector covers.",
-    "approval": "The `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
-    "inputs": "The step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "approval": "For a `step` vector: the `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
+    "inputs": "For a `step` vector: the step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "bindings": "For a `step` vector whose step declares `shows`: the values its references resolve against, by root name: the workflow input `setting` and the store `current` of the step before it, so that `${current.data}` resolves to `bindings.current.data`. A reference to something they do not hold resolves to null.",
+    "recheck_read": "For a `step` vector asked again after a recheck: the value the recheck read, which differs from the value approved before (the recheck `source` resolved against `bindings`). The vector is the request asked again; the first request showed the `shows` values alone.",
+    "call": "For a `tool_call` vector: the call, `{action, capability, args}`; `shown` is `[call]`.",
     "shown": "The JSON array of shown values that the approval request carries.",
     "canonical": "The RFC 8785 (JCS) serialization of `shown`. It is held here as a JSON string: the canonical text is the value a JSON parser returns for it.",
     "digest": "The SHA-256 of the UTF-8 encoding of the canonical text, in lowercase hexadecimal: the digest the request carries and a decision repeats."
@@ -16,6 +20,7 @@
   "vectors": [
     {
       "name": "object",
+      "kind": "step",
       "about": "An object with a nested object. Members are written in the order of their names, whatever order the value had.",
       "approval": {
         "approver": {
@@ -24,6 +29,21 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "action": "write_config",
+            "capability": "mutate",
+            "args": {
+              "key": "a",
+              "value": "b"
+            }
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -40,6 +60,7 @@
     },
     {
       "name": "member_order",
+      "kind": "step",
       "about": "Member names sort by UTF-16 code unit: the empty name first, an uppercase letter before a lowercase one, a name before a longer name that begins with it. Array elements keep their order.",
       "approval": {
         "approver": {
@@ -48,6 +69,24 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "b": 2,
+            "a": 1,
+            "A": 0,
+            "aa": [
+              3,
+              2,
+              1
+            ],
+            "": null
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -67,7 +106,8 @@
     },
     {
       "name": "numbers",
-      "about": "Numbers are written as ECMAScript writes the binary64 value, so -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1, 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section 5.14 gives for integers.",
+      "kind": "step",
+      "about": "Numbers are written as ECMAScript writes the binary64 value, so -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1, 1e+21 and 1e-7. 9007199254740992 is 2^53, the largest magnitude section 5.14 allows for an integer, a number written without a fraction or an exponent. 1e+21 is written with an exponent, so it is a binary64 value and that bound does not apply to it.",
       "approval": {
         "approver": {
           "kind": "human"
@@ -75,6 +115,30 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "numbers": [
+              0,
+              -0.0,
+              1,
+              -1,
+              1.5,
+              1e+21,
+              1e-07,
+              123456789012,
+              0.1,
+              100,
+              1.0,
+              4.5e-10,
+              9007199254740992
+            ]
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -100,6 +164,7 @@
     },
     {
       "name": "string_escapes",
+      "kind": "step",
       "about": "A string with a line feed, a tab, quotation marks, a backslash, U+0001, U+007F, U+00E9, U+20AC and U+1F600. The canonical text escapes the first five (U+0001 as `\\u0001`, in lowercase) and holds the other four as themselves.",
       "approval": {
         "approver": {
@@ -108,6 +173,16 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "text": "line\nbreak\ttab \"quote\" back\\slash \u0001 \u007f \u00e9 \u20ac \ud83d\ude00"
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -119,6 +194,7 @@
     },
     {
       "name": "member_order_non_ascii",
+      "kind": "step",
       "about": "The member names of the sorting example in RFC 8785 section 3.2.3. U+1F600 is the surrogate pair D83D DE00 in UTF-16, so it sorts before U+FB33, although its code point is higher.",
       "approval": {
         "approver": {
@@ -127,6 +203,22 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "\u20ac": "Euro",
+            "\r": "CR",
+            "\ufb33": "Dalet",
+            "1": "One",
+            "\ud83d\ude00": "Emoji",
+            "\u0080": "Control",
+            "\u00f6": "o umlaut"
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -144,6 +236,7 @@
     },
     {
       "name": "nesting",
+      "kind": "step",
       "about": "Objects and arrays nested, with true, false, null, an empty array and an empty object.",
       "approval": {
         "approver": {
@@ -152,6 +245,30 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "nested": {
+              "z": {
+                "y": {
+                  "x": [
+                    true,
+                    false,
+                    null,
+                    {
+                      "k": []
+                    },
+                    {}
+                  ]
+                }
+              }
+            }
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -177,6 +294,7 @@
     },
     {
       "name": "string_value",
+      "kind": "step",
       "about": "The shown value is a string.",
       "approval": {
         "approver": {
@@ -186,6 +304,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": "a bare string",
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         "a bare string"
       ],
@@ -194,6 +320,7 @@
     },
     {
       "name": "array_value",
+      "kind": "step",
       "about": "The shown value is an array: it is one element of `shown`, not spliced into it.",
       "approval": {
         "approver": {
@@ -202,6 +329,20 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": [
+            1,
+            "two",
+            {
+              "three": 3
+            }
+          ],
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         [
@@ -217,6 +358,7 @@
     },
     {
       "name": "number_value",
+      "kind": "step",
       "about": "The shown value is a number.",
       "approval": {
         "approver": {
@@ -226,6 +368,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": 42,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         42
       ],
@@ -234,6 +384,7 @@
     },
     {
       "name": "null_value",
+      "kind": "step",
       "about": "The shown value is null.",
       "approval": {
         "approver": {
@@ -243,6 +394,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": null,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         null
       ],
@@ -251,6 +410,7 @@
     },
     {
       "name": "empty_list_value",
+      "kind": "step",
       "about": "The shown value is an empty array.",
       "approval": {
         "approver": {
@@ -260,6 +420,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": [],
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         []
       ],
@@ -268,6 +436,7 @@
     },
     {
       "name": "two_values_in_order",
+      "kind": "step",
       "about": "Two references: `shown` keeps the order of `shows`.",
       "approval": {
         "approver": {
@@ -278,6 +447,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": "a",
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         "x",
         "a"
@@ -286,7 +463,40 @@
       "digest": "a95a521a53d30c11d42f491fa7e9fd1447da08c4630d6d4f1befe7a9bd5a4330"
     },
     {
+      "name": "unresolved_reference",
+      "kind": "step",
+      "about": "A `shows` reference that resolves to nothing (here a member the retrieved value does not have) is null in `shown`: one element per reference, in order.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data.absent}",
+          "${current.data}"
+        ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "present": 1
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
+      "shown": [
+        null,
+        {
+          "present": 1
+        }
+      ],
+      "canonical": "[null,{\"present\":1}]",
+      "digest": "99e7dea5839fba85a37460e642ea4f4c3c58c18ed590638453bd3bdf6e58c112"
+    },
+    {
       "name": "empty_shows",
+      "kind": "step",
       "about": "`shows` is an empty list: `shown` is the empty array.",
       "approval": {
         "approver": {
@@ -294,12 +504,21 @@
         },
         "shows": []
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": null,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [],
       "canonical": "[]",
       "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
     },
     {
       "name": "no_shows",
+      "kind": "step",
       "about": "The `approval` field has no `shows`: the reference executor shows the step's resolved inputs, wrapped in an array.",
       "approval": {
         "approver": {
@@ -325,6 +544,7 @@
     },
     {
       "name": "no_approval_field",
+      "kind": "step",
       "about": "The step has no `approval` field and needs approval by the ontology: the reference executor shows the step's resolved inputs, wrapped in an array, as for `no_shows`.",
       "approval": null,
       "inputs": {
@@ -346,6 +566,7 @@
     },
     {
       "name": "asked_again_after_recheck",
+      "kind": "step",
       "about": "The recheck read a changed source, so the reference executor asks again (`on_change: reask`, the default). `shown` gains one object whose `recheck` member holds the value approved before (`previous`) and the value read now (`current`).",
       "approval": {
         "approver": {
@@ -357,6 +578,19 @@
         "recheck": {
           "source": "${current.data}"
         }
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "version": 1
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
+      "recheck_read": {
+        "version": 2
       },
       "shown": [
         {
@@ -375,6 +609,54 @@
       ],
       "canonical": "[{\"version\":1},{\"recheck\":{\"current\":{\"version\":2},\"previous\":{\"version\":1}}}]",
       "digest": "d9efbc9d6b1b077d74f38f9e2d3ef28f7d0990341300e363e46f2c3e8a88cc99"
+    },
+    {
+      "name": "tool_call",
+      "kind": "tool_call",
+      "about": "A tool call: shown is [{action, capability, args}] (STANDARD 1.2.0 section 5.18.7).",
+      "call": {
+        "action": "write_config",
+        "capability": "mutate",
+        "args": {
+          "key": "a",
+          "value": "b"
+        }
+      },
+      "shown": [
+        {
+          "action": "write_config",
+          "capability": "mutate",
+          "args": {
+            "key": "a",
+            "value": "b"
+          }
+        }
+      ],
+      "canonical": "[{\"action\":\"write_config\",\"args\":{\"key\":\"a\",\"value\":\"b\"},\"capability\":\"mutate\"}]",
+      "digest": "e3cf33cccce568634c5c6dab7d7988d66f94b8b9cc34ed4eec1006edfd88879b"
+    },
+    {
+      "name": "tool_call_unbound",
+      "kind": "tool_call",
+      "about": "A call of a tool with no binding: its capability is null (STANDARD 1.2.0 sections 5.18.2 and 5.18.7).",
+      "call": {
+        "action": "run_script",
+        "capability": null,
+        "args": {
+          "cmd": "x"
+        }
+      },
+      "shown": [
+        {
+          "action": "run_script",
+          "capability": null,
+          "args": {
+            "cmd": "x"
+          }
+        }
+      ],
+      "canonical": "[{\"action\":\"run_script\",\"args\":{\"cmd\":\"x\"},\"capability\":null}]",
+      "digest": "a99d0aa49499be4333be662351a46b3971a038db62e3fa9a631405b84a9ec354"
     }
   ]
 }

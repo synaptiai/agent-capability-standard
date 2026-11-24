@@ -1,0 +1,125 @@
+{
+  "description": "Under a destination policy, a layer locates a send's destination by its binding's RFC 6901 pointer, whose array index is ASCII digits with no leading zero: a pointer whose index is written otherwise (`01`, a digit outside ASCII) locates nothing, so the layer refuses the call with F504 before approval and the checkpoint.",
+  "ontology": "2.2.0",
+  "destination_policy": [
+    "https://hooks.example.com/*"
+  ],
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "lead_zero",
+      "ontology": "2.2.0",
+      "capability": "send",
+      "destination": "/to/01"
+    },
+    {
+      "tool": "arabic_one",
+      "ontology": "2.2.0",
+      "capability": "send",
+      "destination": "/to/\u0661"
+    },
+    {
+      "tool": "second",
+      "ontology": "2.2.0",
+      "capability": "send",
+      "destination": "/to/1"
+    }
+  ],
+  "sequence": [
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "lead_zero",
+      "args": {
+        "to": [
+          "https://elsewhere.example.net/a",
+          "https://hooks.example.com/a"
+        ]
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F504"
+      }
+    },
+    {
+      "call": "arabic_one",
+      "args": {
+        "to": [
+          "https://elsewhere.example.net/a",
+          "https://hooks.example.com/a"
+        ]
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F504"
+      }
+    },
+    {
+      "call": "second",
+      "args": {
+        "to": [
+          "https://elsewhere.example.net/a",
+          "https://hooks.example.com/a"
+        ]
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": "run"
+    }
+  ]
+}

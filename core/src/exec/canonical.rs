@@ -1,5 +1,7 @@
 //! Canonical JSON (RFC 8785, JCS) and the digests built on it: approval
-//! bindings (STANDARD v1.1 §5.14) and run snapshots (design-114 §16.5).
+//! digests (STANDARD v1.2 §5.14: the SHA-256 of the shown values' canonical
+//! JSON, as lowercase hex, compared regardless of case) and run snapshots
+//! (design-114 §16.5).
 
 use std::fmt::Write as _;
 
@@ -98,6 +100,13 @@ pub fn sha256_hex(text: &str) -> String {
 /// SHA-256 (hex) of the canonical JSON of `value`.
 pub fn digest(value: &Value) -> String {
     sha256_hex(&canonical(value))
+}
+
+/// One link of a chain over taken items (§5.19.4): the lowercase hex
+/// SHA-256 of `head` followed by the canonical JSON of `item`. A chain
+/// starts from the empty string.
+pub fn chain(head: &str, item: &Value) -> String {
+    sha256_hex(&(head.to_owned() + &canonical(item)))
 }
 
 /// HMAC-SHA-256 of `text` under `key`, as lowercase hex.
@@ -208,5 +217,41 @@ mod tests {
         assert!(!same_digest("ab", "ac"));
         assert!(!same_digest("ab", "abc"));
         assert!(same_digest("AB", "ab"));
+    }
+
+    #[test]
+    fn same_digest_ignores_case() {
+        // A decision may repeat a request's digest in either case (§5.14).
+        let d = digest(&json!([{"target": "config"}]));
+        assert_eq!(d, d.to_lowercase());
+        assert!(same_digest(&d.to_uppercase(), &d));
+        assert!(same_digest(&d, &d.to_uppercase()));
+        assert!(!same_digest(&d.to_uppercase(), &digest(&json!([]))));
+    }
+
+    #[test]
+    fn approval_digest_vectors() {
+        // Every vector's `shown` canonicalises to its `canonical` and
+        // digests to its `digest` (what `_core.canonical_json` and
+        // `_core.approval_digest` return).
+        let text = include_str!("../../../tests/conformance/approval/digests.json");
+        let doc: Value = serde_json::from_str(text).unwrap();
+        let vectors = doc["vectors"].as_array().unwrap();
+        assert!(vectors.iter().any(|v| v["name"] == "object"));
+        for v in vectors {
+            let shown = &v["shown"];
+            assert_eq!(
+                canonical(shown),
+                v["canonical"].as_str().unwrap(),
+                "{}",
+                v["name"]
+            );
+            assert_eq!(
+                digest(shown),
+                v["digest"].as_str().unwrap(),
+                "{}",
+                v["name"]
+            );
+        }
     }
 }

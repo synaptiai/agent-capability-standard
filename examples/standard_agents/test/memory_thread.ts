@@ -7,7 +7,11 @@
  * thread file system, and the message queue. It is not a runtime: no model
  * runs, and hooks and endpoints are called by the tests directly.
  */
-import type { QueueMessageInput, ThreadState, ThreadUser } from '@standardagents/spec';
+import type { QueueMessageInput, ThreadState, ThreadUser, ToolResult } from '@standardagents/spec';
+
+/** A tool as `invokeTool` runs it: its `execute` with the thread's state. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Invocable = { execute: (state: ThreadState, args: any) => Promise<ToolResult> };
 
 export interface MemoryThread {
   state: ThreadState;
@@ -20,12 +24,40 @@ export interface MemoryThread {
   nextStep(): void;
   /** Leave any execution: `state.execution` is null, as in a thread endpoint. */
   atRest(): void;
+  /** The tools `state.invokeTool` can run, by name; a test fills it. */
+  tools: Map<string, Invocable>;
+  /** What `state.queueTool` was asked to run. */
+  queuedTools: { name: string; args: Record<string, unknown> }[];
+  /** What `state.emit` sent to the thread's clients, in order. */
+  emitted: { event: string; data: unknown }[];
+  /** When a test sets it, `state.emit` throws it. */
+  emitFails?: Error;
+  /** Each `state.invokeTool` call the runtime received, in order. */
+  invoked: { name: string; args: Record<string, unknown> }[];
+  /** Awaited before the runtime runs an invoked tool, when a test sets it. */
+  beforeInvoke?: (name: string, args: Record<string, unknown>) => Promise<void>;
+  /**
+   * A second state of the same thread outside any execution, as a thread
+   * endpoint or an effect sees it, while the execution goes on.
+   */
+  endpointState(): ThreadState;
+  /**
+   * A top-level call of a tool in the current execution, made while another
+   * call is awaited: a parallel tool call of the same model step.
+   */
+  siblingCall(name: string, args: Record<string, unknown>): Promise<ToolResult>;
 }
 
 export function memoryThread(): MemoryThread {
   const values = new Map<string, string>();
   const files = new Map<string, string>();
   const queued: QueueMessageInput[] = [];
+  const tools = new Map<string, Invocable>();
+  const queuedTools: { name: string; args: Record<string, unknown> }[] = [];
+  const emitted: { event: string; data: unknown }[] = [];
+  const invoked: { name: string; args: Record<string, unknown> }[] = [];
+  // eslint-disable-next-line prefer-const
+  let thread: MemoryThread;
 
   let flow = 1;
   let step = 1;
@@ -59,6 +91,24 @@ export function memoryThread(): MemoryThread {
     queueMessage: async (message: QueueMessageInput): Promise<void> => {
       queued.push(message);
     },
+    // The runtime runs the invoked tool in the same execution, with the
+    // thread's state, and waits for it.
+    invokeTool: async (name: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
+      invoked.push({ name, args });
+      const tool = tools.get(name);
+      if (!tool) throw new Error(`memoryThread: no tool '${name}' to invoke`);
+      await thread.beforeInvoke?.(name, args);
+      return tool.execute(state, args);
+    },
+    queueTool: (name: string, args: Record<string, unknown> = {}): void => {
+      queuedTools.push({ name, args });
+    },
+    // A custom event to the thread's connected clients, delivered at most
+    // once; this one records it.
+    emit: (event: string, data?: unknown): void => {
+      if (thread.emitFails) throw thread.emitFails;
+      emitted.push({ event, data });
+    },
   };
 
   // Any other member is a mistake in a test, so it fails loudly.
@@ -71,11 +121,30 @@ export function memoryThread(): MemoryThread {
     },
   }) as unknown as ThreadState;
 
-  return {
+  // The same thread outside any execution: every member as above, but
+  // `execution` is null.
+  const endpoint = new Proxy(implemented, {
+    get(target, property, receiver) {
+      if (property === 'execution') return null;
+      return Reflect.get(state as object, property, receiver) as unknown;
+    },
+  }) as unknown as ThreadState;
+
+  thread = {
     state,
     values,
     files,
     queued,
+    tools,
+    queuedTools,
+    emitted,
+    invoked,
+    endpointState: () => endpoint,
+    siblingCall: async (name: string, args: Record<string, unknown>) => {
+      const tool = tools.get(name);
+      if (!tool) throw new Error(`memoryThread: no tool '${name}'`);
+      return tool.execute(state, args);
+    },
     newExecution: () => {
       flow += 1;
       step = 1;
@@ -88,6 +157,7 @@ export function memoryThread(): MemoryThread {
       executing = false;
     },
   };
+  return thread;
 }
 
 export function user(id: string, roles: string[] = []): ThreadUser {

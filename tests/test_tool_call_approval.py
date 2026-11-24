@@ -41,10 +41,13 @@ from grounded_agency import (
     RateLimitConfig,
     ToolCapabilityMapper,
     ToolMapping,
+    _core,
 )
 from grounded_agency.capabilities import mapper as mapper_module
 from grounded_agency.capabilities.mapper import UNCLASSIFIED_TOOL
 from grounded_agency.hooks.evidence_collector import create_evidence_collector
+from grounded_agency.state.redaction import Redactor
+from tests.conftest import pre_tool_use
 
 F501 = "F501 CHECKPOINT_REQUIRED: "
 F502 = "F502 APPROVAL_REQUIRED: "
@@ -145,10 +148,10 @@ class TestRegistrationFollowsTheOntology:
         reports = mapper.warnings
         assert {r.code for r in reports} == {ErrorCode.SAFETY_FLAG_DOWNGRADE}
         assert [r.location["field"] for r in reports] == [
-            "risk",
-            "mutation",
-            "requires_checkpoint",
-            "requires_approval",
+            "flags.risk",
+            "flags.mutation",
+            "flags.requires_checkpoint",
+            "flags.requires_approval",
         ]
         for report in reports:
             assert report.severity.value == "warning"
@@ -297,6 +300,11 @@ class TestMapperOntologySources:
                 mutation=node.mutation,
                 requires_checkpoint=node.requires_checkpoint,
                 requires_approval=node.requires_approval,
+                # STANDARD 1.2.0 section 5.18.1: a mapping carries the
+                # capability's `requires` prerequisites.
+                prerequisites=frozenset(
+                    registry.get_required_capabilities(capability_id)
+                ),
             ), tool
 
     def test_a_stricter_ontology_makes_a_static_tool_stricter(
@@ -454,7 +462,7 @@ class TestHookCheckpointRule:
 
         assert _decision(denied) == "deny"
         assert _reason(denied).startswith(F501)
-        assert "mcp__unknown__tool has no capability mapping" in _reason(denied)
+        assert "mcp__unknown__tool has no binding" in _reason(denied)
 
         asking_adapter.create_checkpoint(["*"], "Test")
         assert _decision(await hook(call, "u2", None)) == "ask"
@@ -515,7 +523,7 @@ class TestHookCheckpointRule:
         assert _decision(first) == "ask"
         assert _decision(second) == "deny"
         assert _reason(second).startswith(F501)
-        assert f"checkpoint {checkpoint_id} is reserved" in _reason(second)
+        assert f"checkpoint {checkpoint_id} is held by another call" in _reason(second)
 
     @pytest.mark.asyncio
     async def test_rate_limited_call_is_denied_not_asked(
@@ -535,7 +543,7 @@ class TestHookCheckpointRule:
         result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
 
         assert _decision(result) == "deny"
-        assert "Rate limited" in _reason(result)
+        assert _reason(result).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
 
 
 class TestHookApprovalRule:
@@ -583,6 +591,86 @@ class TestHookApprovalRule:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        "content",
+        [
+            "x\ud83d",  # a lone surrogate
+            2**60,  # an integer beyond ±2^53
+            -(2**53) - 1,
+            2**53 + 1,
+            # canonical JSON writes these as integer literals beyond ±2^53
+            1.8e16,
+            -1.8e16,
+            float(2**53 + 2),
+        ],
+    )
+    async def test_arguments_that_are_not_i_json_are_f502(
+        self, asking_adapter: GroundedAgentAdapter, content: Any
+    ) -> None:
+        """STANDARD 1.2.0 §5.18.7: no decision can bind to arguments with no
+        canonical JSON, so the call is refused with F502, and it keeps
+        nothing: the checkpoint stays valid for the next call."""
+        checkpoint = asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": content},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith(
+            F502 + "the arguments of Write are not I-JSON"
+        )
+        assert asking_adapter.diagnostics[-1].code is ErrorCode.APPROVAL_REQUIRED
+        assert asking_adapter.checkpoint_tracker.validate_and_reserve("c2") == (
+            True,
+            checkpoint,
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_limit_itself_is_i_json(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": 2**53},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+        assert _decision(result) == "ask"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [float(2**53), 1e21, 1.5e300, 0.5])
+    async def test_floats_canonical_json_writes_exactly_are_i_json(
+        self, asking_adapter: GroundedAgentAdapter, content: float
+    ) -> None:
+        """2^53 itself, 1e21 and above (written in exponent form) and any
+        number with a fraction have an exact I-JSON form."""
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": content},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+        assert _decision(result) == "ask"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         ("tool_name", "tool_input"),
         [
             ("Read", {"file_path": "a.txt"}),
@@ -590,9 +678,8 @@ class TestHookApprovalRule:
             ("Glob", {"pattern": "*.py"}),
             ("Bash", {"command": "ls -la"}),
             ("Bash", {"command": "git status && git log"}),
-            ("Skill", {"skill": "checkpoint"}),
             ("TodoWrite", {"todos": []}),
-            ("Agent", {"prompt": "look"}),
+            ("AskUserQuestion", {"questions": []}),
         ],
     )
     async def test_call_that_requires_no_approval_does_not_ask(
@@ -719,6 +806,7 @@ class TestApprovalOff:
 
         assert _denied(await callback("Write", {}, _ctx("w1")))
         adapter.create_checkpoint(["*"], "Test")
+        await pre_tool_use(adapter, "Write", {}, "w2")
         assert _allowed(await callback("Write", {}, _ctx("w2")))
 
     @pytest.mark.asyncio
@@ -772,6 +860,8 @@ class TestPermissionCallbackApproval:
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
         callback = asking_adapter._make_permission_callback()
+        await pre_tool_use(asking_adapter, "Read", {"file_path": "a"}, "r1")
+        await pre_tool_use(asking_adapter, "Bash", {"command": "ls"}, "b1")
 
         assert _allowed(await callback("Read", {"file_path": "a"}, _ctx("r1")))
         assert _allowed(await callback("Bash", {"command": "ls"}, _ctx("b1")))
@@ -784,34 +874,57 @@ class TestPermissionCallbackApproval:
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(host)
         context = _ctx("w1", decision_reason=F502 + "...")
+        await pre_tool_use(asking_adapter, "Write", {"file_path": "a.txt"}, "w1")
 
         result = await callback("Write", {"file_path": "a.txt"}, context)
 
         assert _allowed(result)
         assert host.calls == [("Write", {"file_path": "a.txt"}, context)]
-        # Still reserved for this call, to be consumed after it runs.
+        # Used up when the call was allowed (STANDARD 1.2.0 §5.18.6).
         assert not asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
+        record = asking_adapter.call_records[-1]
+        assert record["decision"] == "allowed"
+        assert record["approvers"] == ["in_session"]
+        assert record["digest"] == _core.approval_digest(
+            [
+                {
+                    "action": "Write",
+                    "capability": "mutate",
+                    "args": {"file_path": "a.txt"},
+                }
+            ]
+        )
 
     @pytest.mark.asyncio
-    async def test_host_rejection_is_returned_and_releases_the_reservation(
+    async def test_host_rejection_is_f502_and_releases_the_reservation(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
+        """A host's denial of a call that requires approval is the layer's
+        F502 refusal (STANDARD 1.2.0 §5.18.8), with the host's message."""
         host = _Host(allow=False)
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(host)
+        await pre_tool_use(asking_adapter, "Write", {}, "w1")
 
         result = await callback("Write", {}, _ctx("w1"))
 
         assert _denied(result)
-        assert result.message == "the reviewer said no"
+        assert result.message == (
+            "F502 APPROVAL_REQUIRED: Write was not approved: the reviewer said no"
+        )
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     @pytest.mark.asyncio
     async def test_host_is_not_asked_about_a_call_without_a_checkpoint(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
+        """The checkpoint the hook held for the call stopped being valid
+        while the call waited (here a boundary): the person is not asked."""
         host = _Host(allow=True)
         callback = asking_adapter._make_permission_callback(host)
+        asking_adapter.create_checkpoint(["*"], "Test")
+        await pre_tool_use(asking_adapter, "Write", {}, "w1")
+        asking_adapter.checkpoint_tracker.end_validity("turn ended")
 
         result = await callback("Write", {}, _ctx("w1"))
 
@@ -827,6 +940,7 @@ class TestPermissionCallbackApproval:
         settle; the adapter does not answer in the host's place."""
         host = _Host(allow=False)
         callback = asking_adapter._make_permission_callback(host)
+        await pre_tool_use(asking_adapter, "Read", {"file_path": "/etc/passwd"}, "r1")
 
         result = await callback("Read", {"file_path": "/etc/passwd"}, _ctx("r1"))
 
@@ -842,6 +956,7 @@ class TestPermissionCallbackApproval:
 
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(broken)
+        await pre_tool_use(asking_adapter, "Write", {}, "w1")
 
         result = await callback("Write", {}, _ctx("w1"))
 
@@ -858,10 +973,14 @@ class TestPermissionCallbackApproval:
 
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(odd)
+        await pre_tool_use(asking_adapter, "Write", {}, "w1")
 
         result = await callback("Write", {}, _ctx("w1"))
 
-        assert result == {"behavior": "allow"}  # the SDK refuses this type
+        # Not an allow, so, for a call that requires approval, the layer's
+        # F502 refusal.
+        assert _denied(result)
+        assert result.message.startswith(F502 + "Write was not approved")
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     @pytest.mark.asyncio
@@ -873,6 +992,7 @@ class TestPermissionCallbackApproval:
 
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(host)
+        await pre_tool_use(asking_adapter, "Write", {}, "w1")
 
         assert _allowed(await callback("Write", {}, _ctx("w1")))
 
@@ -883,6 +1003,7 @@ class TestPermissionCallbackApproval:
         host = _Host(allow=False)
         strict_adapter.create_checkpoint(["*"], "Test")
         callback = strict_adapter._make_permission_callback(host)
+        await pre_tool_use(strict_adapter, "Write", {}, "w1")
 
         assert _denied(await callback("Write", {}, _ctx("w1")))
         assert len(host.calls) == 1
@@ -897,6 +1018,110 @@ def _pre(wrapped: Any) -> Any:
     return wrapped.hooks["PreToolUse"][-1].hooks[0]
 
 
+def _entry_fns(entry: Any) -> list[Any]:
+    return list(entry["hooks"] if isinstance(entry, dict) else entry.hooks)
+
+
+class _LateHost(_Host):
+    """A host whose person answers ``delay`` after being asked."""
+
+    def __init__(self, clock: Any, **delay: float) -> None:
+        super().__init__(allow=True)
+        self.clock = clock
+        self.delay = delay
+
+    async def __call__(
+        self, tool_name: str, tool_input: dict[str, Any], context: Any
+    ) -> Any:
+        self.clock.advance(**self.delay)
+        return await super().__call__(tool_name, tool_input, context)
+
+
+class TestDecisionExpiry:
+    """A binding's approval.expires: a decision that arrives later than
+    that after the request decides nothing (STANDARD 1.2.0 §5.18.7, §5.14).
+    Before, the adapter parsed it and never applied it: a decision ten
+    minutes after a 30-second expiry let the call run."""
+
+    @staticmethod
+    def _adapter(
+        ontology_path: str, tmp_path: Path, clock: Any, capability: str, expires: str
+    ) -> GroundedAgentAdapter:
+        adapter = GroundedAgentAdapter(_config(ontology_path, tmp_path), clock=clock)
+        adapter.mapper.register_mcp_tool(
+            "mcp__pay__transfer", capability, approval={"expires": expires}
+        )
+        return adapter
+
+    @pytest.mark.parametrize("capability", ["execute", "mutate"])
+    @pytest.mark.asyncio
+    async def test_a_late_decision_is_refused(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any, capability: str
+    ) -> None:
+        adapter = self._adapter(
+            ontology_path, tmp_path, fake_clock, capability, "PT30S"
+        )
+        host = _LateHost(fake_clock, minutes=10)
+        wrapped = adapter.wrap_options(ClaudeAgentOptions(can_use_tool=host))
+        adapter.create_checkpoint(["*"], "before")
+        call = {
+            "tool_name": "mcp__pay__transfer",
+            "tool_input": {"amount": 5},
+            "session_id": "s1",
+            "permission_mode": "default",
+        }
+        asked = await _pre(wrapped)(call, "t1", None)
+        assert _decision(asked) == "ask"
+        result = await wrapped.can_use_tool(
+            "mcp__pay__transfer", call["tool_input"], _ctx("t1")
+        )
+        assert _denied(result)
+        assert result.message.startswith(F502)
+        assert "approval.expires" in result.message
+        assert adapter.call_records[-1]["decision"] == "refused"
+        # The call never ran: its checkpoint is still valid for another.
+        assert adapter.checkpoint_tracker.held_by("t1") is None
+        if capability == "mutate":
+            assert adapter.has_valid_checkpoint()
+
+    @pytest.mark.asyncio
+    async def test_a_decision_within_the_expiry_lets_the_call_run(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
+    ) -> None:
+        adapter = self._adapter(ontology_path, tmp_path, fake_clock, "execute", "PT30S")
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(can_use_tool=_LateHost(fake_clock, seconds=29))
+        )
+        call = {"tool_name": "mcp__pay__transfer", "tool_input": {}, "session_id": "s"}
+        assert _decision(await _pre(wrapped)(call, "t1", None)) == "ask"
+        result = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t1"))
+        assert _allowed(result)
+
+    @pytest.mark.asyncio
+    async def test_the_request_is_the_layers_ask(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
+    ) -> None:
+        """The expiry runs from the PreToolUse hook's ask, not from when the
+        host's callback is reached; a call asked about later counts from its
+        own ask, and a callback reached with no ask at all decides nothing
+        (R407: the layer cannot tell what was checked)."""
+        adapter = self._adapter(ontology_path, tmp_path, fake_clock, "execute", "PT30S")
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(can_use_tool=_LateHost(fake_clock, seconds=1))
+        )
+        call = {"tool_name": "mcp__pay__transfer", "tool_input": {}, "session_id": "s"}
+        assert _decision(await _pre(wrapped)(call, "t1", None)) == "ask"
+        fake_clock.advance(seconds=40)
+        late = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t1"))
+        assert _denied(late) and late.message.startswith(F502)
+        assert _decision(await _pre(wrapped)(call, "t2", None)) == "ask"
+        fresh = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t2"))
+        assert _allowed(fresh)
+        unasked = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t3"))
+        assert _denied(unasked)
+        assert unasked.message.startswith("R407 SAFETY_CHECK_FAILED:")
+
+
 class TestWrapOptionsApproval:
     @pytest.mark.asyncio
     async def test_host_can_use_tool_is_chained_not_replaced(
@@ -907,6 +1132,8 @@ class TestWrapOptionsApproval:
         asking_adapter.create_checkpoint(["*"], "Test")
 
         assert wrapped.can_use_tool is not host
+        call = {"tool_name": "Write", "tool_input": {"file_path": "a"}}
+        assert _decision(await _pre(wrapped)(call, "w1", None)) == "ask"
         result = await wrapped.can_use_tool("Write", {"file_path": "a"}, _ctx("w1"))
 
         assert _allowed(result)
@@ -920,6 +1147,8 @@ class TestWrapOptionsApproval:
         once = asking_adapter.wrap_options(ClaudeAgentOptions(can_use_tool=host))
         twice = asking_adapter.wrap_options(once)
         asking_adapter.create_checkpoint(["*"], "Test")
+        call = {"tool_name": "Write", "tool_input": {}}
+        assert _decision(await _pre(twice)(call, "w1", None)) == "ask"
 
         assert _allowed(await twice.can_use_tool("Write", {}, _ctx("w1")))
         assert len(host.calls) == 1
@@ -957,60 +1186,186 @@ class TestWrapOptionsApproval:
         assert _configure_can_use_tool(wrapped) is wrapped  # no ValueError
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_denial_leaves_no_reservation(
-        self, asking_adapter: GroundedAgentAdapter
+    async def test_prompt_tool_refuses_a_call_that_needs_a_checkpoint(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
     ) -> None:
-        """With a permission prompt tool the adapter never hears of a
-        denial, so an asked call reserves nothing: after the prompt tool
-        denies call 1, call 2 is asked about, not refused with F501. A call
-        that then runs takes and uses up the checkpoint."""
-        base = ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
-        wrapped = asking_adapter.wrap_options(base)
-        asking_adapter.create_checkpoint(["*"], "Test")
+        """With a permission prompt tool no callback sees a call allowed, so
+        the layer cannot check again, at the allow, that the checkpoint it
+        held is still valid (STANDARD 1.2.0 §5.18.6): a call that needs a
+        checkpoint is refused with R407, holding nothing. Before, it was
+        asked about and, allowed after the maximum age or after a boundary
+        of another session, ran on that checkpoint with no F501."""
+        adapter = GroundedAgentAdapter(
+            _config(ontology_path, tmp_path), clock=fake_clock
+        )
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
+        )
+        adapter.create_checkpoint(["*"], "Test")
         call = {
             "tool_name": "Write",
             "tool_input": {"file_path": "a.txt", "content": "x"},
             "session_id": "s1",
+            "permission_mode": "default",
         }
-
-        # Call 1 is asked about; the prompt tool denies it, so no Post* event.
-        first = await _pre(wrapped)(call, "w1", None)
-        assert _decision(first) == "ask"
-        assert _reason(first).startswith(F502)
-
-        # Call 2 is asked about too, and this time approved and run.
-        second = await _pre(wrapped)(call, "w2", None)
-        assert _decision(second) == "ask"
+        for case in ("w1", "w2"):
+            refused = await _pre(wrapped)(call, case, None)
+            assert _decision(refused) == "deny"
+            assert _reason(refused).startswith("R407 SAFETY_CHECK_FAILED: ")
+            assert "can_use_tool" in _reason(refused)
+            assert adapter.checkpoint_tracker.held_by(case) is None
+        assert adapter.has_valid_checkpoint()
+        # The cases the verifier ran: the prompt answered past the maximum
+        # age, and after another session's Stop. Nothing was held, so
+        # nothing runs on an ended checkpoint.
+        fake_clock.advance(minutes=31)
         for entry in wrapped.hooks["PostToolUse"]:
             for hook in entry.hooks:
-                await hook({**call, "tool_response": {}}, "w2", None)
-        assert not asking_adapter.has_valid_checkpoint()
-
-        # Call 3 needs a new checkpoint.
-        third = await _pre(wrapped)(call, "w3", None)
-        assert _decision(third) == "deny"
-        assert _reason(third).startswith(F501)
+                await hook({**call, "tool_response": {}}, "w1", None)
+        assert not any(
+            r.get("checkpoint_id")
+            for r in adapter.call_records
+            if r["decision"] == "ran"
+        )
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_failed_call_keeps_the_checkpoint(
+    async def test_prompt_tool_decides_a_call_that_needs_approval_alone(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
-        """A call the prompt tool approved that then fails uses up nothing."""
+        """A call that needs approval and no checkpoint is put to the
+        prompt tool, unless its binding sets approval.expires: this layer
+        cannot see when that tool's decision arrives (§5.18.7), so it is
+        refused with F502."""
+        asking_adapter.mapper.register_mcp_tool("mcp__ops__run", "execute")
+        asking_adapter.mapper.register_mcp_tool(
+            "mcp__ops__pay", "execute", approval={"expires": "PT30S"}
+        )
         wrapped = asking_adapter.wrap_options(
             ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
         )
-        asking_adapter.create_checkpoint(["*"], "Test")
-        call = {
+        run = {"tool_name": "mcp__ops__run", "tool_input": {}, "session_id": "s1"}
+        asked = await _pre(wrapped)(run, "r1", None)
+        assert _decision(asked) == "ask"
+        assert _reason(asked).startswith(F502)
+        pay = {"tool_name": "mcp__ops__pay", "tool_input": {}, "session_id": "s1"}
+        refused = await _pre(wrapped)(pay, "p1", None)
+        assert _decision(refused) == "deny"
+        assert _reason(refused).startswith(F502)
+        assert "approval.expires" in _reason(refused)
+
+    @staticmethod
+    def _rewrap_with_prompt_tool(adapter: GroundedAgentAdapter) -> Any:
+        """Wrap, then set a permission prompt tool (dropping the callback,
+        which the SDK refuses beside it) and wrap again."""
+        from dataclasses import replace
+
+        first = adapter.wrap_options(ClaudeAgentOptions())
+        return adapter.wrap_options(
+            replace(
+                first,
+                can_use_tool=None,
+                permission_prompt_tool_name="mcp__approvals__prompt",
+            )
+        )
+
+    @staticmethod
+    def _safety_hooks(wrapped: Any, adapter: GroundedAgentAdapter) -> list[Any]:
+        return [
+            fn
+            for entry in wrapped.hooks["PreToolUse"]
+            for fn in entry.hooks
+            if getattr(fn, "_grounded_adapter", None) is adapter
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_rewrap_with_a_prompt_tool_refuses_what_it_cannot_recheck(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        """Re-wrapped options that name a prompt tool are held to the same
+        rules as options wrapped once with it: R407 for a call that needs a
+        checkpoint, F502 for a binding that sets approval.expires. Before,
+        the re-wrap kept the first wrap's hook: the Write was asked about,
+        held a checkpoint no callback re-checked, and ran after another
+        session's boundary with no F501."""
+        adapter = GroundedAgentAdapter(_config(ontology_path, tmp_path))
+        adapter.mapper.register_mcp_tool(
+            "mcp__ops__pay", "execute", approval={"expires": "PT30S"}
+        )
+        wrapped = self._rewrap_with_prompt_tool(adapter)
+        assert wrapped.can_use_tool is None
+        assert len(self._safety_hooks(wrapped, adapter)) == 1
+        adapter.create_checkpoint(["*"], "Test")
+        write = {
             "tool_name": "Write",
-            "tool_input": {"file_path": "a.txt", "content": "x"},
+            "tool_input": {"file_path": "a.txt"},
             "session_id": "s1",
+            "permission_mode": "default",
         }
+
+        refused = await _pre(wrapped)(write, "w1", None)
+        assert _decision(refused) == "deny"
+        assert _reason(refused).startswith("R407 SAFETY_CHECK_FAILED: ")
+        assert adapter.checkpoint_tracker.held_by("w1") is None
+        pay = {"tool_name": "mcp__ops__pay", "tool_input": {}, "session_id": "s1"}
+        late = await _pre(wrapped)(pay, "p1", None)
+        assert _decision(late) == "deny"
+        assert "approval.expires" in _reason(late)
+
+    @pytest.mark.asyncio
+    async def test_a_rewrap_takes_the_new_permission_mode(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        """A hook input without a permission mode is read in the mode of
+        the options wrapped last."""
+        from dataclasses import replace
+
+        first = asking_adapter.wrap_options(
+            ClaudeAgentOptions(can_use_tool=_Host(True))
+        )
+        wrapped = asking_adapter.wrap_options(
+            replace(first, permission_mode="bypassPermissions")
+        )
+        asking_adapter.create_checkpoint(["*"], "Test")
+        call = {"tool_name": "Write", "tool_input": {}, "session_id": "s1"}
+        refused = await _pre(wrapped)(call, "w1", None)
+        assert _decision(refused) == "deny"
+        assert "bypassPermissions" in _reason(refused)
+
+    @pytest.mark.asyncio
+    async def test_a_rewrap_without_the_prompt_tool_asks_again(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        from dataclasses import replace
+
+        first = asking_adapter.wrap_options(
+            ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
+        )
+        host = _Host(allow=True)
+        wrapped = asking_adapter.wrap_options(
+            replace(first, permission_prompt_tool_name=None, can_use_tool=host)
+        )
+        asking_adapter.create_checkpoint(["*"], "Test")
+        call = {"tool_name": "Write", "tool_input": {}, "session_id": "s1"}
         assert _decision(await _pre(wrapped)(call, "w1", None)) == "ask"
-        for entry in wrapped.hooks["PostToolUseFailure"]:
-            for hook in entry.hooks:
-                await hook({**call, "error": "disk full"}, "w1", None)
-        assert asking_adapter.has_valid_checkpoint()
-        assert not asking_adapter._unreserved_asks
+        assert _allowed(await wrapped.can_use_tool("Write", {}, _ctx("w1")))
+        assert len(host.calls) == 1
+
+    def test_a_rewrap_keeps_what_shares_the_safety_hooks_entry(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        async def other(*_: Any) -> dict[str, Any]:
+            return {}
+
+        first = asking_adapter.wrap_options(ClaudeAgentOptions())
+        (ours,) = self._safety_hooks(first, asking_adapter)
+        shared = {"matcher": None, "hooks": [other, ours]}
+        merged = ClaudeAgentOptions(hooks={**first.hooks, "PreToolUse": [shared]})
+        wrapped = asking_adapter.wrap_options(merged)
+        fns = [fn for e in wrapped.hooks["PreToolUse"] for fn in _entry_fns(e)]
+        assert other in fns
+        assert ours not in fns
+        assert len([fn for fn in fns if fn is not other]) == 1
+        assert wrapped.hooks["PostToolUse"] == first.hooks["PostToolUse"]
 
     @pytest.mark.asyncio
     async def test_asked_approved_run_and_consumed(
@@ -1048,6 +1403,13 @@ class TestWrapOptionsApproval:
 # =============================================================================
 # Evidence: tool input is kept only when asked for
 # =============================================================================
+
+
+# The command of _bash_call() as the layer keeps it: the bearer token
+# redacted, the rest unchanged (STANDARD v1.2 §6.7).
+_BASH_COMMAND_KEPT = (
+    "curl -H 'Authorization: Bearer [REDACTED]' https://api.example.com"
+)
 
 
 def _bash_call() -> dict[str, Any]:
@@ -1090,7 +1452,8 @@ class TestEvidenceToolInput:
 
         assert store.get_recent() == ["tool:Bash:b1", "command:b1"]
         assert SECRET not in json.dumps(store.to_list())
-        (command,) = store.get_by_kind("command")
+        with pytest.warns(DeprecationWarning):
+            (command,) = store.get_by_kind("command")
         assert command.metadata == {"exit_code": 0}
 
     @pytest.mark.asyncio
@@ -1100,10 +1463,91 @@ class TestEvidenceToolInput:
 
         await hook(_bash_call(), "b1", None)
 
-        (tool_output,) = store.get_by_kind("tool_output")
-        (command,) = store.get_by_kind("command")
-        assert SECRET in tool_output.metadata["tool_input"]["command"]
-        assert SECRET in command.metadata["command"]
+        # Kept, and redacted by the store (STANDARD v1.2 §6.7).
+        with pytest.warns(DeprecationWarning):
+            (tool_output,) = store.get_by_kind("tool_output")
+        with pytest.warns(DeprecationWarning):
+            (command,) = store.get_by_kind("command")
+        for text in (
+            tool_output.metadata["tool_input"]["command"],
+            command.metadata["command"],
+        ):
+            assert text == _BASH_COMMAND_KEPT
+
+    @pytest.mark.asyncio
+    async def test_structured_credentials_in_the_input_are_redacted(self) -> None:
+        """Headers as JSON members, a camelCase credential name and a
+        credential used as a member name never reach the exported record
+        (§6.7: a credential inside a header never goes into evidence)."""
+        store = EvidenceStore()
+        hook = create_evidence_collector(store, include_tool_input=True)
+        token = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+        call = {
+            "tool_name": "mcp__http__get",
+            "tool_input": {
+                "url": "https://api.example.com/v1",
+                "headers": {
+                    "Authorization": "Basic dXNlcjpodW50ZXIyMjIy",
+                    "Cookie": "sessionid=9f8e7d6c5b4a39281706",
+                },
+                "accessToken": "abcd1234efgh",
+                "tokens_by_owner": {token: "ana"},
+            },
+            "tool_response": {"ok": True},
+        }
+
+        await hook(call, "h1", None)
+
+        exported = json.dumps(store.to_list())
+        for secret in (
+            "dXNlcjpodW50ZXIyMjIy",
+            "9f8e7d6c5b4a39281706",
+            "abcd1234efgh",
+            token,
+        ):
+            assert secret not in exported
+        assert "https://api.example.com/v1" in exported
+
+    @pytest.mark.asyncio
+    async def test_header_pairs_in_the_input_are_redacted(self) -> None:
+        """Headers given as name/value pairs (a HAR) or as [name, value]
+        tuples, nested deeper than the metadata keeps as structure, never
+        reach the exported record, nor does a secret registered with the
+        store (§6.7; security round 1, batch 6: the deep value was cut to
+        its first 100 characters of repr before the store redacted it)."""
+        registered = "Zq8fK2mVx9LpR4tW"
+        store = EvidenceStore(redactor=Redactor([registered]))
+        hook = create_evidence_collector(store, include_tool_input=True)
+        call = {
+            "tool_name": "mcp__http__get",
+            "tool_input": {
+                "request": {
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "value": "Basic dXNlcjpodW50ZXIyMDI2",
+                        },
+                        {"name": "Cookie", "value": "sid=8f3a9c2e7b1d4f60"},
+                    ],
+                    "pairs": [["X-Api-Key", "k3y9f8e7d6c5b4a3"]],
+                    "note": [{"padding": "p" * 120, "key": registered}],
+                },
+            },
+            "tool_response": {"ok": True},
+        }
+
+        await hook(call, "h2", None)
+
+        exported = json.dumps(store.to_list())
+        for secret in (
+            "dXNlcjpodW50ZXIyMDI2",
+            "8f3a9c2e7b1d4f60",
+            "k3y9f8e7d6c5b4a3",
+            registered,
+            registered[:8],
+        ):
+            assert secret not in exported
+        assert "[REDACTED]" in exported
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("keep", [False, True])
@@ -1119,7 +1563,10 @@ class TestEvidenceToolInput:
             for hook in entry.hooks:
                 await hook(_bash_call(), "b1", None)
 
-        assert (SECRET in json.dumps(adapter.evidence_store.to_list())) is keep
+        kept = json.dumps(adapter.evidence_store.to_list())
+        assert (_BASH_COMMAND_KEPT in kept) is keep
+        # Kept only redacted (STANDARD v1.2 §6.7).
+        assert SECRET not in kept
 
     @pytest.mark.asyncio
     async def test_unclassified_tool_is_evidence_of_no_capability(
@@ -1165,6 +1612,7 @@ class TestMcpFactoryDeclarations:
                 self._tool("insert", {"capability_id": "mutate", "risk": "low"}),
                 self._tool("find", {"capability_id": "search", "domain": "orders"}),
                 self._tool("run", None),
+                self._tool("exec", {"capability_id": "execute"}),
             ],
             adapter=asking_adapter,
         )
@@ -1182,14 +1630,19 @@ class TestMcpFactoryDeclarations:
             "low",
             "orders",
         )
-        # No metadata: an execute tool, which requires approval.
-        run = mapper.map_tool("mcp__db__run", {})
-        assert (run.capability_id, run.risk, run.requires_approval) == (
+        # No metadata: unbound (STANDARD 1.2.0 §5.18.2), the strictest case,
+        # reported as W617.
+        assert mapper.map_tool("mcp__db__run", {}) is UNCLASSIFIED_TOOL
+        run_exec = mapper.map_tool("mcp__db__exec", {})
+        assert (run_exec.capability_id, run_exec.risk, run_exec.requires_approval) == (
             "execute",
             "medium",
             True,
         )
-        assert [w.location["tool"] for w in mapper.warnings] == ["mcp__db__insert"]
+        assert sorted((w.code_str, w.location["tool"]) for w in mapper.warnings) == [
+            ("W602", "mcp__db__insert"),
+            ("W617", "mcp__db__run"),
+        ]
 
     def test_stricter_metadata_flags_reach_the_mapping(
         self, asking_adapter: GroundedAgentAdapter

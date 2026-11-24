@@ -1,0 +1,21 @@
+# Standard version: 1.1.0
+# The same delegations in a 1.1 workflow (STANDARD v1.2 §5.15.2): no W621
+# or W622.
+fan_out:
+  goal: Ask two agents.
+  risk: medium
+  inputs:
+    pick: {type: string, required: true}
+  steps:
+  - capability: delegate
+    purpose: Ask agent x.
+    store_as: x_out
+    input_bindings:
+      agent: x
+      task: {draft: d}
+  - capability: delegate
+    purpose: Ask the agent picked.
+    store_as: picked_out
+    input_bindings:
+      agent: "${pick}"
+      task: {draft: d}

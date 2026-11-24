@@ -104,8 +104,8 @@ assumptions:
 caveats:
   - caveat: string  # Limitation or exception
     severity: minor | moderate | significant
-confidence: 0..1
-evidence_anchors: ["file:line", "url", "doc:section"]
+confidence: number  # probability that the explanation is correct (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "https://...", kind: url}, {ref: "doc:section", kind: x-doc}]
 ```
 
 ### Field Definitions
@@ -121,8 +121,8 @@ evidence_anchors: ["file:line", "url", "doc:section"]
 | `chain` | array | Reasoning chain: logical progression from premises to conclusion |
 | `assumptions` | array | Explicit assumptions with impact |
 | `caveats` | array | Limitations and exceptions |
-| `confidence` | number | 0.0-1.0 based on evidence quality |
-| `evidence_anchors` | array | Supporting references |
+| `confidence` | number | Probability, 0.0-1.0, that the explanation is correct (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Supporting references |
 
 ## Examples
 
@@ -212,9 +212,9 @@ caveats:
     severity: moderate
 confidence: 0.9
 evidence_anchors:
-  - "doc:security-requirements:section-2.3"
-  - "doc:data-model-diagram"
-  - "doc:team-skills-inventory"
+  - {ref: "doc:security-requirements:section-2.3", kind: x-doc}
+  - {ref: "doc:data-model-diagram", kind: x-doc}
+  - {ref: "doc:team-skills-inventory", kind: x-doc}
 ```
 
 **Evidence pattern:** Decision traced through causal chain with evidence at each step.
@@ -304,7 +304,7 @@ caveats:
     severity: moderate
 confidence: 0.95
 evidence_anchors:
-  - "example:query-timing-comparison"
+  - {ref: "example:query-timing-comparison", kind: x-doc}
 ```
 
 ## Verification

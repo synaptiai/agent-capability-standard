@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/fixture.schema.json",
+  "title": "Call-sequence fixture (Agent Capability Standard 1.2.0, section 10.4)",
+  "description": "One layer scope with a person present: tool bindings, then a sequence of calls and events, each call with the outcome a conforming safety layer gives it (section 5.18).",
+  "type": "object",
+  "required": ["description", "ontology", "bindings", "sequence"],
+  "additionalProperties": false,
+  "properties": {
+    "description": { "type": "string", "minLength": 1 },
+    "ontology": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "needs": {
+      "type": "array",
+      "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval"] },
+      "uniqueItems": true
+    },
+    "without": {
+      "description": "Features the layer's conformance statement must not list: the fixture pins what a layer without them does (a layer that does not see nested calls, for one). A layer whose statement lists one does not play the fixture.",
+      "type": "array",
+      "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval"] },
+      "uniqueItems": true
+    },
+    "destination_policy": {
+      "description": "A destination policy in force in the scope (section 4.4.2): the patterns a send's destination must match, which a binding's `destination` pointer locates in the call's arguments. An empty list allows no send. Absent, no policy is in force.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "bindings": {
+      "type": "array",
+      "items": { "$ref": "../../../../schemas/interop/tool_binding.schema.json" }
+    },
+    "sequence": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "anyOf": [{ "$ref": "#/$defs/call" }, { "$ref": "#/$defs/event" }] }
+    }
+  },
+  "$defs": {
+    "decided_by": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "call": {
+      "type": "object",
+      "required": ["call", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "call": { "type": "string", "minLength": 1 },
+        "args": { "type": "object" },
+        "approve": { "$ref": "#/$defs/decided_by" },
+        "reject": { "$ref": "#/$defs/decided_by" },
+        "fails": { "const": true },
+        "returns": {
+          "description": "What the tool returns as its output, in place of what its output contract requires (section 5.18.10): any JSON value, null included (a present member, whatever its value, replaces the contract's output), given to the layer in the form its host carries a capability output. A nested call's member applies to that nested call alone."
+        },
+        "nested": { "type": "array", "items": { "$ref": "#/$defs/call" } },
+        "expect": {
+          "oneOf": [
+            { "const": "run" },
+            {
+              "type": "object",
+              "required": ["refuse"],
+              "additionalProperties": false,
+              "properties": { "refuse": { "enum": ["F501", "F502", "F503", "F504", "R407", "V102"] } }
+            },
+            {
+              "description": "The call ran (it used its checkpoint and decision) and the layer refused its output (section 5.18.10).",
+              "type": "object",
+              "required": ["refuse_output"],
+              "additionalProperties": false,
+              "properties": { "refuse_output": { "enum": ["R402"] } }
+            }
+          ]
+        }
+      },
+      "not": { "required": ["fails", "returns"] }
+    },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["boundary"],
+          "additionalProperties": false,
+          "properties": { "boundary": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["expire"],
+          "additionalProperties": false,
+          "properties": { "expire": { "enum": ["checkpoint", "decision"] } }
+        }
+      ]
+    }
+  }
+}

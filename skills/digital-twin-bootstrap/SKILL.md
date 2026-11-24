@@ -39,8 +39,7 @@ A world model captures:
 
 ## Procedure
 
-0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy (the sync loop mutates the twin)
+0) **Take a checkpoint** if mutation might occur (the sync loop mutates the twin): invoke `/checkpoint` with the scope the later steps change; its state-saving command is what the safety layer counts (STANDARD 1.2.0 §5.18.6). Each gated call needs its own.
 
 1) **Invoke `/invoke`** with workflow `world_model_build` and input `user_input`, if `world_state_out` is null, and store output as `world_model_out`
    - Build the initial world model baseline. The invoked workflow's stores land in `world_model_out.result`:
@@ -71,52 +70,52 @@ steps:
         state: object  # The baseline world state
         entities: array[object]
         relationships: array[object]
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       transition_out:
         rules: array[object]
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       attribute_out:
         causes: array[object]
         strengths: object  # Causal strength per cause
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       measure_out:
         value: number
         uncertainty: object  # lower, upper
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       ground_out:
         grounded: boolean
         gaps: array[string]
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       simulate_out:
         outcomes: array[object]
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       explain_out:
         explanation: string
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
     steps_executed: array[string]  # store_as names of the steps that ran, in step order
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   sync_out:  # null when world_state_out was given and the step was skipped
     result:  # digital_twin_sync_loop's stores, keyed by store_as
       state_out:
         state: object  # The synced twin snapshot
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       verify_out:
         passed: boolean
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       audit_out:
         audit_id: string
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
       explain_out:
         explanation: string
-        evidence_anchors: array[string]
+        evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
     steps_executed: array[string]  # store_as names of the steps that ran, in step order
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   sync_existing_out:  # null when the baseline was built (steps 1-2 ran)
     result: object  # digital_twin_sync_loop's stores, as in sync_out
     steps_executed: array[string]  # store_as names of the steps that ran, in step order
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -129,7 +128,7 @@ assumptions: array[string]
 | `steps` | object | Each step's output, keyed by its `store_as`; a skipped step is null |
 | `steps.*.result` | object | The invoked workflow's stores, keyed by their `store_as` |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
-| `evidence_anchors` | array | All evidence references collected |
+| `evidence_anchors` | array of evidence anchors (§6.5) | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during modeling |
 
 ## Examples
@@ -169,14 +168,14 @@ steps:
             predicate: "supplies_to"
             object: "mfg-shenzhen-005"
         evidence_anchors:
-          - "tool:database:supply-chain-db/entities"
-          - "tool:api:logistics.api/shipments"
+          - {ref: "tool:database:supply-chain-db/entities", kind: tool}
+          - {ref: "tool:api:logistics.api/shipments", kind: tool}
       transition_out:
         rules:
           - trigger: "supplier shutdown"
             effect: "downstream inventory drawdown"
         evidence_anchors:
-          - "tool:database:supply-chain-db/orders"
+          - {ref: "tool:database:supply-chain-db/orders", kind: tool}
       attribute_out:
         causes:
           - id: single_source_taiwan
@@ -184,12 +183,12 @@ steps:
         strengths:
           single_source_taiwan: 0.8
         evidence_anchors:
-          - "tool:database:supply-chain-db/suppliers"
+          - {ref: "tool:database:supply-chain-db/suppliers", kind: tool}
       measure_out:
         value: 0.82  # overall confidence in the model
         uncertainty: {lower: 0.75, upper: 0.88}
         evidence_anchors:
-          - "tool:api:logistics.api/shipments"
+          - {ref: "tool:api:logistics.api/shipments", kind: tool}
       ground_out:
         grounded: true
         gaps:
@@ -197,7 +196,7 @@ steps:
           - "Shipping delays (historical average, not real-time)"
           - "Competitor orders affecting supplier allocation"
         evidence_anchors:
-          - "file:state/supply_chain_world.yaml"
+          - {ref: "file:state/supply_chain_world.yaml", kind: file}
       simulate_out:
         outcomes:
           - scenario: "Taiwan supplier shutdown"
@@ -205,14 +204,14 @@ steps:
           - scenario: "Shipping route disruption"
             outcome: "12-day average delay added"
         evidence_anchors:
-          - "file:state/supply_chain_world.yaml"
+          - {ref: "file:state/supply_chain_world.yaml", kind: file}
       explain_out:
         explanation: "Baseline covers 156 suppliers and 23 manufacturers; the largest risk is semiconductor source concentration"
         evidence_anchors:
-          - "file:state/supply_chain_world.yaml"
+          - {ref: "file:state/supply_chain_world.yaml", kind: file}
     steps_executed: [retrieve_out, observe_out, detect_out, classify_out, integrate_out, state_out, transition_out, attribute_out, measure_out, audit_out, ground_out, simulate_out, explain_out]
     evidence_anchors:
-      - "file:state/supply_chain_world.yaml"
+      - {ref: "file:state/supply_chain_world.yaml", kind: file}
   sync_out:
     result:
       state_out:
@@ -220,29 +219,29 @@ steps:
           timestamp: "2024-01-15T10:20:00Z"
           entities: "[1251 entities - 4 new shipments]"
         evidence_anchors:
-          - "tool:api:logistics.api/shipments"
+          - {ref: "tool:api:logistics.api/shipments", kind: tool}
       verify_out:
         passed: true
         evidence_anchors:
-          - "tool:bash:run_verification_suite"
+          - {ref: "tool:bash:run_verification_suite", kind: tool}
       audit_out:
         audit_id: "audit_20240115_102000"
         evidence_anchors:
-          - "file:.claude/audit/records.jsonl"
+          - {ref: "file:.claude/audit/records.jsonl", kind: file}
       explain_out:
         explanation: "First sync ingested 4 shipments; lead-time drift on supplier-taiwan-001 was planned for, passed the policy check and was applied after a checkpoint; verification passed, so rollback was skipped"
         evidence_anchors:
-          - "file:.claude/audit/records.jsonl"
+          - {ref: "file:.claude/audit/records.jsonl", kind: file}
     steps_executed: [receive_out, search_out, transform_out, integrate_out, detect_entity_out, classify_out, state_out, compare_state_out, transition_out, detect_anomaly_out, measure_risk_out, predict_out, plan_out, constrain_out, checkpoint_out, mutate_out, execute_out, verify_out, audit_out, explain_out]  # rollback_out absent: skipped because verify_out.passed was true
     evidence_anchors:
-      - "file:.claude/audit/records.jsonl"
+      - {ref: "file:.claude/audit/records.jsonl", kind: file}
   sync_existing_out: null  # skipped: no world state was passed in
 confidence: 0.82
 evidence_anchors:
-  - "tool:database:supply-chain-db"
-  - "tool:api:logistics.api"
-  - "file:state/supply_chain_world.yaml"
-  - "file:.claude/audit/records.jsonl"
+  - {ref: "tool:database:supply-chain-db", kind: tool}
+  - {ref: "tool:api:logistics.api", kind: tool}
+  - {ref: "file:state/supply_chain_world.yaml", kind: file}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
 assumptions:
   - "Database reflects current operational state"
   - "API provides accurate shipment tracking"
@@ -288,7 +287,7 @@ assumptions:
 - `observe` - After initial data quality assessment
 
 **Commonly precedes:**
-- `digital-twin-sync-workflow` - Later sync iterations start from the bootstrapped twin
+- `digital-twin-sync-loop` - Later sync iterations start from the bootstrapped twin
 - `simulate` - To run what-if scenarios
 - `predict` (domain: risk) - To predict future states
 - `explain` - To generate executive reports

@@ -4,12 +4,12 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Spec](https://img.shields.io/badge/Spec-v1.1.0_Candidate-blue.svg)](spec/STANDARD-v1.1.0.md)
+[![Spec](https://img.shields.io/badge/Spec-v1.2.0_Candidate-blue.svg)](spec/STANDARD-v1.2.0.md)
 [![Plugin](https://img.shields.io/badge/Plugin-v2.0.0-green.svg)](CHANGELOG.md)
 
 **Documentation:** [acs.synapti.ai](https://acs.synapti.ai/) has the specification, a page for every capability, workflow and domain, and search. Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
 
-> **Versioning:** The spec version (v1.1.0, Candidate Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) still supported) tracks the standard itself. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version (v1.2.0, Candidate Standard, accepted by RFC-0005 to RFC-0010; [v1.1.0](spec/STANDARD-v1.1.0.md) and [v1.0.0](spec/STANDARD-v1.0.0.md) still supported) tracks the standard itself. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -119,6 +119,54 @@ This standard makes failures **visible and recoverable**:
 | Complex multi-step agent pipelines | Typed contracts between capabilities |
 | Production systems where failures are costly | Safety by construction, not by hope |
 
+### What Standard 1.2.0 Adds
+
+[Standard 1.2.0](spec/STANDARD-v1.2.0.md) is a Candidate Standard, accepted
+by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to
+[RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md), with
+capability ontology 2.2.0. A workflow valid under 1.1.0 validates and runs
+as before. It adds:
+
+- **Tool-calling hosts** ([§5.18](spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)):
+  the ontology's rules applied to the tool calls a model chooses, a
+  host-neutral tool binding record, and a conformance class for safety
+  layers, SL ([§10.4](spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)),
+  which the [Python SDK adapter](docs/integrations/claude_agent_sdk.md) and
+  the [Standard Agents binding](docs/integrations/standard_agents.md) claim.
+- **The host protocol** ([§5.19](spec/STANDARD-v1.2.0.md#519-host-protocol)):
+  the actions, responses and run operations between an executor and its
+  host as a published schema, with cancellation, run records and a
+  conformance class for executors, EX
+  ([§10.5](spec/STANDARD-v1.2.0.md#105-executor-conformance)).
+- **Approval and delegation**: the approval digest stated in full, attested
+  approvers and resuming a deferred run
+  ([§5.14.1](spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)); agent
+  manifests and delegation targets
+  ([§5.15.2](spec/STANDARD-v1.2.0.md#5152-delegation-targets)); catalog
+  manifests with qualified names
+  ([§5.1.1](spec/STANDARD-v1.2.0.md#511-catalog-manifests-and-qualified-names)).
+- **Evidence and secrets**: one evidence anchor
+  ([§6.5](spec/STANDARD-v1.2.0.md#65-evidence-anchors)), grounding the
+  executor checks ([§5.20](spec/STANDARD-v1.2.0.md#520-grounding)), and
+  secrets kept out of records
+  ([§6.7](spec/STANDARD-v1.2.0.md#67-secrets-in-records)).
+- **Effects**: what a checkpoint captures and a rollback restores
+  ([§4.4.1](spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)),
+  idempotent transmissions with destination policies
+  ([§4.4.2](spec/STANDARD-v1.2.0.md#442-transmissions)), and memory scopes
+  ([§4.5](spec/STANDARD-v1.2.0.md#45-memory)).
+- **Domain profiles that take effect**
+  ([§5.21](spec/STANDARD-v1.2.0.md#521-domain-profiles)): the executor, the
+  safety layers and the validator apply a profile's flags, person
+  requirements, grounding, confidence and destination rules.
+- **[`@synaptiai/acs-core`](packages/acs-core/README.md)**: the ontology,
+  effective flags and approval digest in TypeScript, and the Rust core
+  through WebAssembly.
+
+[Appendix D](spec/STANDARD-v1.2.0.md#appendix-d-changes-from-110) lists
+every change from 1.1.0, and the [CHANGELOG](CHANGELOG.md) says what changes
+for users of the SDK, the plugin and the binding.
+
 ---
 
 ## Quick Start
@@ -171,7 +219,7 @@ python scripts/run_conformance.py
 | **Evaluate** if this fits my needs | [FAQ](docs/FAQ.md) → [Whitepaper](spec/WHITEPAPER.md) |
 | **Use** this in Claude Code | [Quickstart](docs/QUICKSTART.md) (10 min) |
 | **Build** agents with the Python SDK | [SDK Guide](docs/integrations/claude_agent_sdk.md) |
-| **Read** the formal specification | [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) |
+| **Read** the formal specification | [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) |
 | **Create** custom workflows | [Tutorial](docs/TUTORIAL.md) (30 min) |
 | **Contribute** to the standard | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Deploy** in a regulated industry | [Compliance Suite](docs/compliance/) |
@@ -228,31 +276,33 @@ Reference workflow compositions defined in the [workflow catalog](schemas/workfl
 
 ### Domain Profiles
 
-Pre-configured trust weights, risk thresholds, and checkpoint policies for specific industries:
+Example profiles of trust weights, risk thresholds and checkpoint rules for specific industries. A profile takes effect where a host, a safety layer or the validator applies it (Standard v1.2 §5.21): the reference executor, the Python adapter and the Standard Agents binding apply every example below, its grounding policy, minimum confidence and destination policy included ([status](docs/domains/README.md#status-of-domain-profiles)):
 
 | Domain | Key Feature | Profile |
 |--------|------------|---------|
-| Healthcare | Advisory-only, 7-year audit retention | [Guide](docs/domains/healthcare/) |
-| Manufacturing | Sensor trust (0.92-0.95), human-required mutations | [Guide](docs/domains/manufacturing/) |
-| Data Analysis | Lineage grounding, statistical uncertainty | [Guide](docs/domains/data-analysis/) |
-| Personal Assistant | Highest user trust (0.98), never auto-send | [Guide](docs/domains/personal-assistant/) |
+| Healthcare | A person approves every step when applied; declares 7-year audit retention (informative) | [Guide](docs/domains/healthcare/) |
+| Manufacturing | Sensor trust (0.92-0.95); `mutate` and `send` need a person when applied | [Guide](docs/domains/manufacturing/) |
+| Data Analysis | Lineage grounding and a confidence floor when applied | [Guide](docs/domains/data-analysis/) |
+| Personal Assistant | Highest user trust (0.98); `send` needs a person each time when applied | [Guide](docs/domains/personal-assistant/) |
 | Vision / Audio / Multimodal | Cross-modal consistency, spatial/temporal grounding | [Guide](docs/guides/MODALITY_HANDLING.md) |
 
 ### Canonical Schemas
 
 - **Capability Ontology** — 36 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.yaml))
-- **Workflow DSL** — Typed bindings, gates, failure modes and recovery loops (no reference workflow uses a loop; see [STANDARD §5.12](spec/STANDARD-v1.1.0.md#512-recovery-and-escalation))
+- **Workflow DSL** — Typed bindings, gates, failure modes and recovery loops (no reference workflow uses a loop; see [STANDARD §5.12](spec/STANDARD-v1.2.0.md#512-recovery-and-escalation))
 - **World State** — Observations with provenance and uncertainty
 - **Trust Model** — Authority ranking with time decay
 
 ### Safety Hooks
 
-Hooks implementing VERIFY layer capabilities:
+The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
-| Hook | Capability | Purpose |
-|------|------------|---------|
-| `pretooluse_require_checkpoint.sh` | `checkpoint` | Enforce checkpoint before mutations |
-| `posttooluse_log_tool.sh` | `audit` | Log every tool call to the audit trail, with a digest in place of its input |
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool) | Classify the call (an unbound tool, MCP tools included, is a gated `mutate`); one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback` |
+| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Take the checkpoint after a successful `git stash create`: write the marker, with its commit recorded for a later rollback |
+| `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity when a turn or a session ends or starts, filing it under `.claude/checkpoints/ended/` |
+| `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
 
 ## Documentation
 
@@ -273,8 +323,9 @@ Hooks implementing VERIFY layer capabilities:
 
 | Document | Purpose |
 |----------|---------|
-| [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0003](spec/RFC-0003-orchestration-extensions.md) and [RFC-0004](spec/RFC-0004-agent-identity.md)) |
-| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Previous specification (still supported) |
+| [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md)) |
+| [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Previous specification (still supported) |
+| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Earlier specification (still supported) |
 | [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
 | [SECURITY.md](spec/SECURITY.md) | Threat model and mitigations |
 
@@ -308,7 +359,7 @@ Hooks implementing VERIFY layer capabilities:
 
 ```
 agent-capability-standard/
-├── skills/                  # 36 atomic capability skills (flat structure)
+├── skills/                  # 36 capability skills and 6 composed skills (flat structure)
 │   ├── retrieve/SKILL.md    # PERCEIVE layer
 │   ├── search/SKILL.md
 │   ├── observe/SKILL.md
@@ -322,7 +373,7 @@ agent-capability-standard/
 │   ├── checkpoint/SKILL.md
 │   ├── persist/SKILL.md     # REMEMBER layer
 │   ├── delegate/SKILL.md    # COORDINATE layer
-│   └── ...                  # (36 total skills)
+│   └── ...                  # (42 skills: 36 capabilities, 6 composed)
 ├── schemas/                 # Ontology + workflow + world state schemas
 │   ├── capability_ontology.yaml     # 36-capability ontology
 │   ├── workflow_catalog.yaml
@@ -331,6 +382,7 @@ agent-capability-standard/
 │   │   └── oasf_mapping.yaml          # OASF skill code mapping
 │   └── transforms/          # Type coercion mappings
 ├── core/                    # Rust crate: validator and executor, compiled into grounded_agency._core
+├── packages/acs-core/       # TypeScript package: ontology table, flags, digest; the core through WebAssembly
 ├── grounded_agency/         # Python package (SDK integration)
 ├── hooks/                   # Safety hooks (checkpoint, audit)
 ├── tools/                   # Validator CLI (thin wrapper over core/)
@@ -403,7 +455,7 @@ claude plugin install agent-capability-standard
 
 | Component | Description |
 |-----------|-------------|
-| **36 Skills** | Atomic capability implementations organized by cognitive layer |
+| **42 Skills** | 36 atomic capability skills organized by cognitive layer, and 6 composed skills that run workflows |
 | **Workflow Patterns** | Reusable compositions (analyze, mitigate, optimize, orchestrate) |
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
@@ -467,4 +519,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](s
 
 ---
 
-**Status:** Candidate Standard v1.1.0 (accepted by RFC-0003 and RFC-0004; v1.0.0, released 2026-01-24, still supported)
+**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0010; v1.1.0, released 2026-10-28, and v1.0.0, released 2026-01-24, still supported)

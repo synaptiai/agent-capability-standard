@@ -7,6 +7,11 @@ tool is classified as the ontology's `mutate` capability, so every change
 needs a restore point and an approval recorded through an authenticated
 endpoint.
 
+The binding is a safety layer on a tool-calling host under Standard 1.2.0
+([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)), and claims
+its conformance class, SL
+([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its statement is
+[`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json).
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md)
 explains the design, what it guarantees and what it cannot.
 
@@ -15,15 +20,15 @@ explains the design, what it guarantees and what it cannot.
 title: What a grounded tool checks before it runs
 ---
 flowchart TB
-  accDescr: A call to a grounded tool is refused with F502 until a person has approved exactly that call, then refused with F501 or F503 until a checkpoint exists; only when every check passes are the approval and the checkpoint used up and the tool run, and every outcome is written to the thread's trace.
-  call[The model calls a grounded tool] --> appr{"Approved, if the capability needs approval?"}
+  accDescr: A call to a grounded tool is refused with F502 until a person has approved exactly that call, then refused with F501, F503 or V102 until each capability it requires has run and, if it needs one, an unused checkpoint of this execution exists; only when every check passes are the approval and the checkpoint used up and the tool run, its output is returned as I-JSON text or refused with R402, and every outcome is written to the thread's trace.
+  call[The model calls a grounded tool] --> appr{"Approved, if the call needs approval?"}
   appr -->|no| f502["Refused: F502, with the digest to approve"]
-  appr -->|yes| cp{"Checkpoint present, if the capability needs one?"}
-  cp -->|no| f501["Refused: F501 or F503"]
+  appr -->|yes| cp{"Prerequisites ran, and a checkpoint is unused, if needed?"}
+  cp -->|no| f501["Refused: F501, F503 or V102"]
   cp -->|yes| run["Approval and checkpoint used up; the tool runs"]
-  run --> out{"Output has the fields the ontology requires?"}
-  out -->|no| failed["Error result"]
-  out -->|yes| ok["Success result with evidence anchors"]
+  run --> out{"Output has the fields the ontology requires, as I-JSON?"}
+  out -->|no| failed["Error result: R402"]
+  out -->|yes| ok["Success result: the output's JSON text"]
   f502 --> trace[(Thread trace)]
   f501 --> trace
   failed --> trace
@@ -35,12 +40,28 @@ flowchart TB
 Node 22.12 or newer on the 22, 24 or 26 release line (CI uses the version in
 `site/.nvmrc`).
 
+The binding depends on the TypeScript package
+[`@synaptiai/acs-core`](../../packages/acs-core/README.md) of this repository
+(`file:../../packages/acs-core`), which holds the ontology table, effective
+flags, canonical JSON, the digest, the binding checks and the text-only
+output rule. Build it first; the binding imports only its plain-TypeScript
+entry, so `build:ts` is enough (the package's full `npm run build` also
+bundles the schema documents through its WebAssembly core, which
+`npm run build:wasm` builds with Rust first):
+
 ```bash
-cd examples/standard_agents
+cd packages/acs-core
+npm ci
+npm run build:ts   # dist/, which the binding imports
+cd ../../examples/standard_agents
 npm ci
 npm run check   # type-check against the published @standardagents/spec types
 npm test        # the binding's rules, against an in-memory thread
 ```
+
+A packed agent bundles the package with the binding's code: the Standard
+Agents packaging page does not say how a packed agent's npm dependencies are
+resolved.
 
 The tests call the tools, the hook and the endpoints directly with an
 in-memory `ThreadState` (`test/memory_thread.ts`). No model runs and no
@@ -51,13 +72,12 @@ code enforces its rules, not how a particular runtime behaves.
 
 | Path | What it is |
 |------|------------|
-| `src/acs/grounded.ts` | `groundedTool`: defines a function tool for one capability and enforces its safety flags inside the tool |
-| `src/acs/ontology.gen.ts` | Each capability's flags and required output fields, generated from `schemas/capability_ontology.yaml` |
+| `src/acs/grounded.ts` | `groundedTool`: defines a function tool for one capability (and any additional ones, and the tools it invokes) and enforces their safety flags inside the tool. `controlTool`: defines a tool that only signals the host, never refused and always recorded |
+| `src/acs/ontology.ts` | The ontology table, types, effective flags and prerequisites, from `@synaptiai/acs-core`, and the Standard version the binding follows (`STANDARD_VERSION`, 1.2.0) |
 | `src/acs/approval.ts` | Approval requests and decisions, bound to a digest of what the approver was shown |
 | `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook, and records calls no grounded tool recorded |
-| `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, each stating the name the prompt offers it under, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
-| `src/acs/canonical.ts` | RFC 8785 canonical JSON and the SHA-256 digest, equal to the reference executor's |
-| `src/acs/records.ts` | The records kept in the thread's key-value store |
+| `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool bound (W617), each stating the name the prompt offers it under (V111), no prerequisite the prompt can never meet (V102). An agent's stop and session bindings: none names a tool that can be refused (F506) |
+| `src/acs/records.ts` | The records kept in the thread's key-value store, and the refusal codes with their names |
 | `src/acs/serial.ts` | Takes one thread's checks and record writes one at a time, for calls in one JavaScript realm |
 | `src/package.ts` | The example as a packed agent: the entry point exports that Packaging describes |
 | `agents/tools/` | The example's five tools: `retrieve`, `checkpoint`, `mutate`, `verify`, `rollback` |
@@ -96,9 +116,103 @@ wraps `execute` so that the call is refused until the capability's rules are
 met. The return type of `execute` is the capability's output contract: leaving
 out `evidence_anchors`, or returning one that is not an array, is a compile
 error, and an error result at run time. A required `confidence` outside 0 to
-1 is an error result at run time. `name` must be the name the tool is
-registered under: a tool cannot see that name, the approver is shown the one
-stated here, and `lintPromptTools` reports a difference.
+1, or a value with no exact I-JSON form, is an error result at run time
+(R402). The success result is the output's I-JSON text, as Standard 1.2.0
+§5.18.9 requires. `name` must be the name the tool is registered under: a
+tool cannot see that name, the approver is shown the one stated here, and
+`lintPromptTools` reports a difference (V111).
+
+Every refusal is an error result whose text opens with the code and its name,
+for example `F501 CHECKPOINT_REQUIRED: ...`, with the §9.8 diagnostic in
+`error_data`:
+
+| Code | When |
+|---|---|
+| F502 | The call needs an approval that has not been given for exactly these arguments |
+| F501, F503 | No unused checkpoint of this execution; F503 for a rollback when no checkpoint was ever taken |
+| V102 | A capability the call requires (other than `checkpoint`) has not run in the thread |
+| F504 | A composite invoked or queued a tool it does not list in `invokes`, or did so through its state after it returned; it queued a listed plain tool; it invoked a plain tool under a name `registerTools` does not register as that tool, a name registered as another tool than the one listed, or, while a destination policy is in force, a name no tool is registered under; `persist` data or an `audit` record holds a credential; a `send` call's destination is not one the destination policies in force allow, or the tool states none (no `destination` option) while a policy is in force; a nested call's output is below the minimum confidence of a profile applied to its tool or to a composite enclosing it |
+| R402 | The output breaks its contract or is not I-JSON (a nested plain call's too) |
+| R407 | The binding could not complete its checks, or the record of a call that ran |
+
+A tool that calls other tools with `state.invokeTool` lists them in
+`invokes`, which also becomes its `uses`:
+
+```typescript
+groundedTool({
+  name: 'apply_change',
+  capability: 'mutate',
+  invokes: { write_config: writeConfig, verify_config: verifyConfig },
+  // ...
+});
+```
+
+It takes their flags, and a call its own code makes to one of them while it
+runs is covered by its approval and checkpoint (a one-shot nesting token per
+invocation), as far as its own call held them; a call to a tool it does not
+list, or through its state after it returned, is refused. It may queue
+(`state.queueTool`) only a listed grounded or control tool, which checks
+itself when it runs. A listed tool defined with plain `defineTool` and a
+binding record is checked by the composite's state, its output included,
+and runs only under a name registered as that very tool, as does any listed
+tool while a destination policy is in force: register the agent's tools,
+by the names the runtime runs them under, once they are defined:
+
+```typescript
+import { registerTools } from '../../src/acs/layer.js';
+
+registerTools({ write_config: writeConfig, verify_config: verifyConfig, notify });
+```
+
+A stop or session action is bound to a `controlTool`, which is never refused:
+
+```typescript
+controlTool({ name: 'finish', description: 'End the turn.', args: z.object({}) });
+```
+
+Sends go only where the destination policies in force allow (Standard
+1.2.0 §4.4.2). Put the host's policies, and the applied profiles' (the
+core's `profilePolicy`), in force for every grounded `send` tool in the
+module that defines the agent's tools:
+
+```typescript
+import { configureLayer } from '../../src/acs/layer.js';
+
+configureLayer({ destinations: [['https://hooks.example.com/*', '*@example.com']] });
+```
+
+A `send` call whose destination no pattern of a policy matches, or whose
+destination is not a string, is refused with F504 before any approval is
+asked for. A `send` tool says where its destination is with its
+`destination` option, an RFC 6901 pointer into its arguments (`destination:
+'/to'`, stated in its annotation) or a function of them (`(args) =>
+args.to`). One defined without it has a destination the layer cannot tell,
+so every call of it is refused while a policy is in force (§5.18.10): the
+layer does not guess an argument the model can set while the tool's code
+sends elsewhere. Without `configureLayer`, no policy is in force.
+`configureLayer({ secrets })` registers the host's own credentials (§6.7):
+every trace entry the binding writes, the audit hook's included, is
+redacted with them, and `persist` data holding one is refused. A grounded
+tool's own `secrets` join them (an array when the tool is defined, a
+function's values at each call), so they reach every entry too, not only
+that tool's. A tool's `profiles` add
+their `allowed_destinations` for that tool and, given to a composite, for
+the sends its code invokes at any depth (each nested call the binding
+attributes to it, §5.18.4).
+
+`memoryTools()` gives a `persist` and a `recall` tool on the thread's
+key-value store (§4.5): scope `session` (the thread), an envelope with the
+data's `stored_at` and, with a `ttl`, its `expires_at`, after which a recall
+does not find it; data or a key holding a credential is refused
+(`secret_in_data`). What §4.5 asks a host to state, for its one scope:
+entries survive a restart of the host, since the runtime keeps thread values
+in durable per-thread storage that survives process restarts and redeploys
+(Standard Agents Runtime, Durable Key-Value Store); they are retained while
+the thread lasts, unless their `ttl` ends them first, and the binding
+deletes none; a value is limited to `max_value_bytes` (1,000,000 bytes of
+JSON text by default; `over_capacity` above it), and the binding sets no
+limit on the number of entries, so the runtime's own caps on key length,
+value size and key count, which it may set, are the limits.
 
 A restore point counts only in the execution it was taken in, and for ten
 minutes at most, so the order that works is: ask, wait for the approval, then
@@ -120,14 +234,16 @@ Three things the binding cannot do for a deployment:
   nothing else stops a model from repeating a refused call.
 - **Bind stop and session actions to ungated tools.** `stopTool`,
   `sessionStop`, `sessionFail` and `sessionStatus` act when the named tool is
-  called, whatever its result. `lintAgentBindings` reports a bound tool that
-  can be refused.
+  called, whatever its result. Bind each to a `controlTool`;
+  `lintAgentBindings` reports a bound tool that can be refused (F506).
 
 ## Generated files
 
-`src/acs/ontology.gen.ts` and `test/fixtures/approval-digests.json` come from
-this repository's ontology and reference executor. After changing either,
-from the repository root:
+The ontology table the binding uses is the package's
+`packages/acs-core/src/ontology.gen.ts`, generated from this repository's
+ontology; the package's tests read the reference executor's approval digest
+vectors (`tests/conformance/approval/digests.json`) in place. After changing
+the ontology, from the repository root:
 
 ```bash
 python scripts/gen_standard_agents_binding.py

@@ -324,6 +324,7 @@ export function buildRoutes(): Route[] {
     prose('hooks/README.md', '/guides/hooks/', 'Safety hooks'),
     prose('examples/README.md', '/guides/examples/', 'Examples'),
     prose('examples/standard_agents/README.md', '/guides/examples/standard-agents/', 'Standard Agents example'),
+    prose('packages/acs-core/README.md', '/guides/typescript-package/', 'TypeScript package'),
     prose('skills/README.md', '/guides/skills/', 'Skills overview', 'Skills'),
   );
   for (const dir of Object.keys(COMPOSED_SKILLS).sort()) {

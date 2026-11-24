@@ -1,0 +1,13 @@
+# Standard version: 1.2.0
+# require_record is a boolean (STANDARD v1.2 §6.4): a string is B203.
+record_the_release:
+  goal: Record a release.
+  risk: low
+  steps:
+  - capability: audit
+    purpose: Record the release.
+    store_as: release_audit
+    input_bindings:
+      event:
+        event_type: release.published
+      require_record: "yes"

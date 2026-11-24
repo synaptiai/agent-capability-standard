@@ -10,7 +10,7 @@ workflows (step capabilities in order; a domain in brackets):
 ### 1. `monitor_and_replan`
 - **Goal:** Detect world changes that invalidate the current plan and trigger replanning when needed.
 - **Declared risk:** medium
-- **Steps:** observe → state → compare[assumption_validation] → detect[plan-invalidation] → critique → plan → audit
+- **Steps:** observe → state → compare[assumption_validation] → detect[plan_invalidation] → critique → plan → audit
 
 ### 2. `clarify_intent`
 - **Goal:** Resolve ambiguous user requests through targeted clarification questions.
@@ -74,8 +74,8 @@ Four workflows have a skill that runs them step by step:
 | Workflow | Skill Directory | Skill name |
 |----------|-----------------|------------|
 | `debug_code_change` | `skills/debug-workflow/` | `debug-workflow` |
-| `capability_gap_analysis` | `skills/capability-gap-analysis/` | `gap-analysis-workflow` |
-| `digital_twin_sync_loop` | `skills/digital-twin-sync-loop/` | `digital-twin-sync-workflow` |
+| `capability_gap_analysis` | `skills/capability-gap-analysis/` | `capability-gap-analysis` |
+| `digital_twin_sync_loop` | `skills/digital-twin-sync-loop/` | `digital-twin-sync-loop` |
 | `digital_twin_bootstrap` | `skills/digital-twin-bootstrap/` | `digital-twin-bootstrap` |
 
 `world_model_build` has no skill of its own: `digital-twin-bootstrap` runs it

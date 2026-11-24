@@ -25,6 +25,7 @@
       ]
     }
   },
+  "header": null,
   "workflow": "w",
   "inputs": {},
   "attendance": "attended",

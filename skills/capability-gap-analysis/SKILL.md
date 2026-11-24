@@ -1,5 +1,5 @@
 ---
-name: gap-analysis-workflow
+name: capability-gap-analysis
 description: Identify capability gaps and propose new skills with prioritization. Use when analyzing missing capabilities, planning skill development, performing ontology expansion, or assessing coverage.
 argument-hint: "[user_input]"
 disable-model-invocation: false
@@ -32,8 +32,7 @@ Run the composed workflow **capability_gap_analysis** (`reference/workflow_catal
 
 ## Procedure
 
-0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy
+0) **Take a checkpoint** if mutation might occur: invoke `/checkpoint` with the scope the later steps change; its state-saving command is what the safety layer counts (STANDARD 1.2.0 §5.18.6). Each gated call needs its own.
 
 1) **Invoke `/observe`** on `user_input.domain` and store output as `observe_out`
    - Read project docs and current skill coverage
@@ -67,29 +66,29 @@ status: completed | partial | failed
 steps:
   observe_out:
     observation: object
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   attribute_out:
     causes: array[object]
     strengths: object  # Causal strength per cause
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   discover_out:
     patterns: array[object]
     relationships: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   compare_architecture_out:
     ranking: array[object]
     recommendation: string  # The top choice
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   compare_priority_out:
     ranking: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   generate_out:
     content: object  # The implementation plan
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   audit_out:
     recorded: boolean
     audit_id: string
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 gaps_identified:
   total: integer
   by_priority:
@@ -97,10 +96,10 @@ gaps_identified:
     high: array[string]
     medium: array[string]
     low: array[string]
-  evidence_anchors: array[string]
+  evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 audit_log_pointer: string  # Path to the audit record
 confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -114,7 +113,7 @@ assumptions: array[string]
 | `gaps_identified` | object | Missing capabilities organized by priority: the entries of `compare_priority_out.ranking` that are `gap` patterns |
 | `audit_log_pointer` | string | Where the audit record was written |
 | `confidence` | number | 0.0-1.0 based on evidence completeness |
-| `evidence_anchors` | array | All evidence references collected |
+| `evidence_anchors` | array of evidence anchors (§6.5) | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during analysis |
 
 ## Examples
@@ -140,8 +139,8 @@ steps:
       workflows: 12
       review_related_skills: ["critique", "verify", "detect"]
     evidence_anchors:
-      - "file:schemas/capability_ontology.yaml"
-      - "file:skills/critique/SKILL.md"
+      - {ref: "file:schemas/capability_ontology.yaml", kind: file}
+      - {ref: "file:skills/critique/SKILL.md", kind: file}
   attribute_out:
     causes:
       - id: no_merge_gate
@@ -152,7 +151,7 @@ steps:
       no_merge_gate: 0.8
       no_regression_domain: 0.7
     evidence_anchors:
-      - "file:schemas/workflow_catalog.yaml"
+      - {ref: "file:schemas/workflow_catalog.yaml", kind: file}
   discover_out:
     patterns:
       - type: gap
@@ -170,7 +169,7 @@ steps:
         to: "critique"
         note: "Code smells inform critique priorities"
     evidence_anchors:
-      - "file:schemas/capability_ontology.yaml:edges"
+      - {ref: "file:schemas/capability_ontology.yaml:edges", kind: file}
   compare_architecture_out:
     ranking:
       - option: "Domain profiles on existing capabilities"
@@ -179,7 +178,7 @@ steps:
         score: 0.4
     recommendation: "Domain profiles on existing capabilities"
     evidence_anchors:
-      - "file:schemas/profiles/profile_schema.yaml"
+      - {ref: "file:schemas/profiles/profile_schema.yaml", kind: file}
   compare_priority_out:
     ranking:
       - gap: "verify (domain: regression)"
@@ -193,7 +192,7 @@ steps:
       - gap: "generate (domain: review_comment)"
         priority: medium
     evidence_anchors:
-      - "file:schemas/capability_ontology.yaml:nodes"
+      - {ref: "file:schemas/capability_ontology.yaml:nodes", kind: file}
   generate_out:
     content:
       phases:
@@ -208,12 +207,12 @@ steps:
           items: ["generate (domain: review_comment)"]
       estimated_effort: "2-3 sprints"
     evidence_anchors:
-      - "file:templates/SKILL_TEMPLATE_ENHANCED.md"
+      - {ref: "file:templates/SKILL_TEMPLATE_ENHANCED.md", kind: file}
   audit_out:
     recorded: true
     audit_id: "audit_20240115_121500"
     evidence_anchors:
-      - "file:.claude/audit/records.jsonl"
+      - {ref: "file:.claude/audit/records.jsonl", kind: file}
 gaps_identified:
   total: 5
   by_priority:
@@ -227,13 +226,13 @@ gaps_identified:
       - "generate (domain: review_comment)"
     low: []
   evidence_anchors:
-    - "file:schemas/capability_ontology.yaml:nodes"
+    - {ref: "file:schemas/capability_ontology.yaml:nodes", kind: file}
 audit_log_pointer: ".claude/audit/records.jsonl"
 confidence: 0.85
 evidence_anchors:
-  - "file:schemas/capability_ontology.yaml"
-  - "file:schemas/workflow_catalog.yaml"
-  - "file:.claude/audit/records.jsonl"
+  - {ref: "file:schemas/capability_ontology.yaml", kind: file}
+  - {ref: "file:schemas/workflow_catalog.yaml", kind: file}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
 assumptions:
   - "Reference ontology is current and complete"
   - "Existing skills are correctly implemented"

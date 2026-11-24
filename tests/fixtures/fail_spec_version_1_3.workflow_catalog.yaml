@@ -1,0 +1,12 @@
+# A workflow that targets Standard 1.3, which a 1.2 validator does not
+# support (V109, §11.5).
+read_source:
+  goal: Read a source.
+  risk: low
+  spec_version: "1.3"
+  steps:
+  - capability: retrieve
+    purpose: Read the source.
+    store_as: data
+    input_bindings:
+      target: source

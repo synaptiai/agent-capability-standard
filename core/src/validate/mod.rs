@@ -7,18 +7,25 @@
 
 mod approval;
 mod bindings;
+mod catalog;
 mod delegation;
+mod effects;
 mod exprs;
 mod extensions;
+mod grounding;
+mod groups;
 pub(crate) mod identity;
+mod inputs;
 mod invoke;
+mod location;
 mod quorum;
 mod recovery;
-mod semantics;
+pub(crate) mod semantics;
 mod wait;
 
 pub(crate) use extensions::count;
-pub use semantics::header_version;
+pub(crate) use semantics::effective;
+pub use semantics::{Flags, check_cited, header_version};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -27,8 +34,12 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::diag::{Code, Diagnostic};
+use crate::agents::{self, Agents, Target};
+use crate::catalogs::{self, CatalogSet, Namespace};
+use crate::diag::{Code, Diagnostic, Seg};
+use crate::names;
 use crate::ontology::{Ontology, Risk};
+use crate::profile::Policy;
 use crate::refs;
 use crate::schema::{self, SchemaStore};
 use crate::types::{self, Type};
@@ -103,8 +114,27 @@ impl Context {
                 err,
             }
         })?;
-        let ontology = Ontology::from_value(&doc)?;
-        let schemas = SchemaStore::new(schema_root);
+        Context::new(&doc, SchemaStore::new(schema_root))
+    }
+
+    /// A context from values in memory: the parsed ontology and the schema
+    /// documents a contract or a workflow may reference, each keyed by its
+    /// path relative to the schema root (`schemas/event_schema.yaml`).
+    pub fn from_values(
+        ontology: &Value,
+        documents: impl IntoIterator<Item = (String, Value)>,
+    ) -> Result<Context, LoadError> {
+        Context::new(ontology, SchemaStore::in_memory(documents))
+    }
+
+    /// A context from a parsed ontology and a schema store. Every
+    /// capability's contracts are resolved, a same-file `$ref`
+    /// (`#<pointer>`) against `doc`; one that still holds a `$ref` (it
+    /// names nothing, is cyclic, or nests deeper than the limit) is outside
+    /// the schema dialect, and the ontology is refused (STANDARD v1.2
+    /// §4.1.2).
+    pub fn new(doc: &Value, schemas: SchemaStore) -> Result<Context, LoadError> {
+        let ontology = Ontology::from_value(doc)?;
         let mut coercions = Vec::new();
         if let Some(reg) = schemas.document(COERCION_REGISTRY) {
             for c in reg
@@ -145,7 +175,7 @@ impl Context {
                 if !v.is_object() {
                     return Ok(empty());
                 }
-                schemas.resolve_node(v, &mut budget).map_err(|e| {
+                schemas.resolve_node_in(v, doc, &mut budget).map_err(|e| {
                     LoadError::Invalid(format!(
                         "the {which} schema of capability '{}' cannot be used: {e}",
                         cap.id
@@ -156,6 +186,15 @@ impl Context {
                 input: resolve(&cap.input_schema, "input")?,
                 output: resolve(&cap.output_schema, "output")?,
             };
+            for (which, schema) in [("input", &c.input), ("output", &c.output)] {
+                if let Some((r, pointer)) = residual_ref(schema, &mut Vec::new()) {
+                    return Err(LoadError::Invalid(format!(
+                        "the {which} schema of capability '{}' holds the $ref '{r}' at '{pointer}', which names nothing, is cyclic or nests deeper than {} (STANDARD v1.2 §4.1.2)",
+                        cap.id,
+                        schema::MAX_REF_DEPTH
+                    )));
+                }
+            }
             contracts.insert(cap.id.clone(), c);
         }
         Ok(Context {
@@ -164,6 +203,23 @@ impl Context {
             coercions,
             contracts,
         })
+    }
+
+    /// Every capability's contracts with each `$ref` resolved, in ontology
+    /// order: `{<capability>: {"input": <schema>, "output": <schema>}}`.
+    /// These are what validation and the executor read, so a rendering of
+    /// the contracts starts from them (STANDARD v1.2 §4.1.2).
+    pub fn contracts_json(&self) -> Value {
+        let mut out = Map::new();
+        for id in self.ontology.capabilities.keys() {
+            if let Some(c) = self.contracts.get(id) {
+                out.insert(
+                    id.clone(),
+                    json!({"input": c.input.clone(), "output": c.output.clone()}),
+                );
+            }
+        }
+        Value::Object(out)
     }
 
     /// The registry transform turning `actual` into something `expected`
@@ -182,6 +238,45 @@ impl Context {
     }
 }
 
+/// The first `$ref` left in a resolved contract, with its JSON Pointer
+/// (RFC 6901) within the contract: resolution keeps a `$ref` only when it
+/// cannot be followed.
+fn residual_ref(node: &Value, path: &mut Vec<String>) -> Option<(String, String)> {
+    let pointer = |path: &[String]| {
+        path.iter()
+            .map(|p| format!("/{}", p.replace('~', "~0").replace('/', "~1")))
+            .collect::<String>()
+    };
+    match node {
+        Value::Object(m) => {
+            if let Some(Value::String(r)) = m.get("$ref") {
+                return Some((r.clone(), pointer(path)));
+            }
+            for (k, v) in m {
+                path.push(k.clone());
+                let found = residual_ref(v, path);
+                path.pop();
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        Value::Array(a) => {
+            for (i, v) in a.iter().enumerate() {
+                path.push(i.to_string());
+                let found = residual_ref(v, path);
+                path.pop();
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// The result of validating a catalog.
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
@@ -192,6 +287,17 @@ pub struct Report {
 impl Report {
     pub fn push(&mut self, d: Diagnostic) {
         self.diagnostics.push(d);
+    }
+
+    /// Give the diagnostics pushed since `before` that have no segments the
+    /// pointer tokens of their `field`, which holds a key the document
+    /// chose (§9.8).
+    pub(crate) fn stamp_since(&mut self, before: usize, tokens: &[String]) {
+        for d in &mut self.diagnostics[before..] {
+            if d.segments.is_none() && d.location.contains_key("field") {
+                d.segments = Some(tokens.to_vec());
+            }
+        }
     }
 
     pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
@@ -227,13 +333,115 @@ pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, LoadE
     ))
 }
 
+/// [`validate_catalog_file`] with domain profiles applied (§5.21).
+pub fn validate_catalog_file_with(
+    ctx: &Context,
+    path: &Path,
+    profiles: &[Value],
+) -> Result<Report, LoadError> {
+    let load = |err| LoadError::File {
+        what: "workflow catalog",
+        err,
+    };
+    let text = yaml::read_guarded(path, yaml::ONTOLOGY_MAX_BYTES).map_err(load)?;
+    let catalog = yaml::load_str(&text).map_err(load)?;
+    let options = Options {
+        header: header_version(&text),
+        profiles: profiles.to_vec(),
+        ..Options::default()
+    };
+    validate_with(ctx, &catalog, &options)
+}
+
+/// What validation takes besides the catalog (STANDARD v1.2 §5.1.1, §5.15.1,
+/// §5.21, §11.5). The default is one catalog with no header and nothing
+/// else given.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// The version the catalog's `# Standard version:` header declares
+    /// (§11.5), or none for a catalog without one.
+    pub header: Option<String>,
+    /// Domain profiles to apply (§5.21), as given: they are checked
+    /// (§5.21.2), and each workflow is validated with the effective flags
+    /// they raise (§5.21.3). Their diagnostics come first in the report.
+    pub profiles: Vec<Value>,
+    /// Agent manifests (§5.15.1), as given: a `delegate` step's targets are
+    /// checked against them and its flags raised to their maxima (§5.15.2).
+    pub agents: Vec<Value>,
+    /// The further catalogs of a catalog set (§5.1.1), each with its
+    /// header's version: qualified `invoke` targets resolve over them.
+    pub catalogs: Vec<(Value, Option<String>)>,
+}
+
+/// Validate a catalog with `options`: its header, the domain profiles
+/// (§5.21), the other catalogs of its catalog set (§5.1.1) and agent
+/// manifests (§5.15.1). `Err` when the options cannot be used: a set or a
+/// manifest that is refused.
+pub fn validate_with(
+    ctx: &Context,
+    catalog: &Value,
+    options: &Options,
+) -> Result<Report, LoadError> {
+    let agents = Agents::load(&options.agents, &ctx.ontology).map_err(LoadError::Invalid)?;
+    let others: Vec<catalogs::Member<'_>> = options
+        .catalogs
+        .iter()
+        .map(|(doc, header)| (doc, header.as_deref()))
+        .collect();
+    let set = CatalogSet {
+        primary: catalog,
+        header: options.header.as_deref(),
+        others: &others,
+    };
+    validate_profiled(ctx, set, &agents, &options.profiles).map(|(report, _)| report)
+}
+
+/// Validate a catalog set with the agent manifests `agents` and the domain
+/// `profiles` as given: the profiles are loaded (§5.21.2), their
+/// diagnostics come first, and the set is validated with the policy they
+/// make (§5.21.3). Returns the policy too, which the executor runs with.
+/// `Err` when the set is refused.
+pub(crate) fn validate_profiled(
+    ctx: &Context,
+    set: CatalogSet<'_>,
+    agents: &Agents,
+    profiles: &[Value],
+) -> Result<(Report, Policy), LoadError> {
+    let mut report = Report::default();
+    let policy = Policy::load(profiles, &ctx.ontology, &mut report);
+    let rest = validate_set(ctx, set, agents, &policy)?;
+    report.diagnostics.extend(rest.diagnostics);
+    report.suggestions.extend(rest.suggestions);
+    Ok((report, policy))
+}
+
 /// Validate a parsed catalog: a mapping of workflow name to workflow.
 /// `header` is the version from the file's `# Standard version:` comment.
 pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) -> Report {
+    // A single catalog is never refused: only another catalog of a set can be.
+    validate_set(
+        ctx,
+        CatalogSet::single(catalog, header),
+        &Agents::default(),
+        &Policy::default(),
+    )
+    .unwrap_or_default()
+}
+
+/// Validate a catalog set (§5.1.1): every workflow of every catalog, with
+/// the agent manifests `agents` (§5.15.1) and the applied profiles'
+/// `policy` (§5.21). `Err` when the set is refused (another catalog
+/// without a manifest id, two catalogs with one id).
+pub fn validate_set(
+    ctx: &Context,
+    set: CatalogSet<'_>,
+    agents: &Agents,
+    policy: &Policy,
+) -> Result<Report, LoadError> {
     let mut report = Report::default();
-    let workflows = match catalog {
-        Value::Object(m) => m,
-        Value::Null => return report,
+    match set.primary {
+        Value::Object(_) => {}
+        Value::Null if set.others.is_empty() => return Ok(report),
         other => {
             report.push(Diagnostic::new(
                 Code::SchemaValidationFailed,
@@ -242,26 +450,61 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
                     yaml::kind_of(other)
                 ),
             ));
-            return report;
+            if set.others.is_empty() {
+                let ns = Namespace::build(set).map_err(LoadError::Invalid)?;
+                location::finish(&ns, &mut report);
+                return Ok(report);
+            }
         }
-    };
-    let invoked_unattended = approval::invoked_unattended(workflows);
-    let waiting = wait::workflows_that_wait(workflows);
+    }
+    let ns = Namespace::build(set).map_err(LoadError::Invalid)?;
+    for c in 0..ns.len() {
+        catalog::check_manifest(ctx, &ns, c, &mut report);
+    }
+    let invoked_unattended = approval::invoked_unattended(&ns);
+    let waiting = wait::workflows_that_wait(&ns);
+    let exercised = semantics::exercised(&ns);
     let mut schema_budget = schema::MAX_EXPANDED_NODES;
     let mut invocations = Vec::new();
-    for (name, wf) in workflows {
-        // `x-` keys are reserved for vendor data and never validated.
-        if name.starts_with("x-") {
-            continue;
+    for (key, wf) in ns.iter() {
+        let name = ns.name_of(key);
+        if !names::is_workflow_name(name) {
+            let why = if name == "catalog" {
+                "'catalog' is reserved for the catalog's manifest (§5.1.1)".to_string()
+            } else {
+                "a workflow name SHOULD be an identifier [A-Za-z_][A-Za-z0-9_-]*".to_string()
+            };
+            report.push(
+                Diagnostic::new(
+                    Code::NoncanonicalName,
+                    format!("workflow name '{name}' is not canonical: {why}"),
+                )
+                .at("workflow", key),
+            );
+        }
+        if ns.is_set() && name.contains('/') {
+            report.push(
+                Diagnostic::new(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "workflow name '{name}' contains '/', which a catalog validated with others reserves for qualified ids (§5.1.1)"
+                    ),
+                )
+                .at("workflow", key),
+            );
         }
         match wf {
             Value::Object(wf) => invocations.extend(
                 WorkflowCheck {
                     ctx,
-                    name,
+                    name: key,
                     wf,
-                    header,
-                    invoked_unattended: invoked_unattended.contains(name.as_str()),
+                    header: ns.header_of(key),
+                    policy,
+                    ns: &ns,
+                    agents,
+                    exercised: &exercised,
+                    invoked_unattended: invoked_unattended.contains(key),
                     waiting: &waiting,
                     schema_budget: &mut schema_budget,
                     report: &mut report,
@@ -276,42 +519,40 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
                         yaml::kind_of(other)
                     ),
                 )
-                .at("workflow", name.as_str()),
+                .at("workflow", key),
             ),
         }
     }
-    invoke::check(workflows, &invocations, &mut report);
-    // Report in catalog order: by workflow, then step, catalog- and
-    // workflow-level diagnostics first; the sort is stable, so each step's
-    // diagnostics keep the order they were found in.
-    let position: HashMap<&str, usize> = workflows
-        .keys()
-        .enumerate()
-        .map(|(i, k)| (k.as_str(), i))
-        .collect();
+    invoke::check(&ns, &invocations, &mut report);
+    // Report in catalog order: by catalog, then workflow, then step,
+    // catalog- and workflow-level diagnostics first; the sort is stable, so
+    // each step's diagnostics keep the order they were found in.
     report.diagnostics.sort_by_key(|d| {
-        let workflow = d
-            .location
-            .get("workflow")
-            .and_then(Value::as_str)
-            .and_then(|w| position.get(w))
-            .map_or(0, |i| i + 1);
+        let workflow = d.location.get("workflow").and_then(Value::as_str);
+        let catalog = match (workflow, d.location.get("catalog").and_then(Value::as_str)) {
+            (Some(w), _) => ns.catalog_of(w),
+            (None, Some(id)) => ns.index_of_id(id).unwrap_or(0),
+            (None, None) => 0,
+        };
+        let position = workflow.and_then(|w| ns.position(w)).map_or(0, |i| i + 1);
         let step = d
             .location
             .get("step")
             .and_then(Value::as_u64)
             .map_or(0, |s| s + 1);
-        (workflow, step)
+        (catalog, position, step)
     });
-    report
+    location::finish(&ns, &mut report);
+    Ok(report)
 }
 
 /// Names and schemas visible to a binding: earlier steps' outputs and the
 /// workflow's declared inputs.
 #[derive(Default, Clone)]
-pub(crate) struct Scope {
-    /// store_as → resolved producer output schema.
-    pub stores: IndexMap<String, Value>,
+pub(crate) struct Scope<'c> {
+    /// store_as → resolved producer output schema, borrowed from the
+    /// context's contracts: a step does not copy its capability's schema.
+    pub stores: IndexMap<String, &'c Value>,
     /// input name → resolved input schema.
     pub inputs: IndexMap<String, Value>,
     /// Roots that may be absent at runtime: optional inputs and the outputs
@@ -409,6 +650,15 @@ struct WorkflowCheck<'a> {
     name: &'a str,
     wf: &'a Map<String, Value>,
     header: Option<&'a str>,
+    /// The applied profiles (§5.21): they raise steps' flags.
+    policy: &'a Policy,
+    /// The catalog set's workflows (§5.1.1): invoke targets resolve here.
+    ns: &'a Namespace<'a>,
+    /// The agent manifests given (§5.15.1).
+    agents: &'a Agents,
+    /// The capabilities the workflow exercises, with those of the workflows
+    /// it invokes (§4.3, W623).
+    exercised: &'a HashMap<String, semantics::Exercised>,
     /// A workflow that an unattended run can invoke runs unattended too.
     invoked_unattended: bool,
     /// The catalog's workflows that can wait, directly or through ones they
@@ -431,7 +681,18 @@ impl WorkflowCheck<'_> {
         self.check_header();
         let name = self.name;
         let at_wf = |d: Diagnostic| d.at("workflow", name);
-        semantics::unknown_fields(self.wf, semantics::WORKFLOW_KEYS, "", &at_wf, self.report);
+        // `grounding` (grounding@1, §5.20) is a field of a workflow that
+        // targets 1.2 or declares the extension; in any other it is an
+        // unknown field, reported here with the others, as 1.1 reported it.
+        let target = semantics::target(self.wf, self.header);
+        let grounding_field =
+            target.is_some_and(|t| t >= (1, 2)) || extensions::declares(self.wf, "grounding@1");
+        let keys: Vec<&str> = semantics::WORKFLOW_KEYS
+            .iter()
+            .copied()
+            .filter(|k| grounding_field || *k != "grounding")
+            .collect();
+        semantics::unknown_fields(self.wf, &keys, "", &at_wf, self.report);
         semantics::spec_version(self.wf, self.header, &at_wf, self.report);
         if let Some(Value::Object(ext)) = self.wf.get("workflow_extensions") {
             semantics::unknown_fields(
@@ -444,6 +705,20 @@ impl WorkflowCheck<'_> {
         }
         let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
         extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
+        delegation::check_agents_field(self.wf, target, &at_wf, self.report);
+        semantics::concurrent_conflicts(
+            self.ctx,
+            self.wf,
+            self.name,
+            self.ns,
+            self.exercised,
+            &at_wf,
+            self.report,
+        );
+        // The agents the workflow's delegate steps may delegate to (§5.15.2).
+        let delegable = agents::declared(self.wf, target);
+        let targets_1_2 = target.is_some_and(|t| t >= (1, 2));
+        grounding::check(self.ctx, self.wf, &declared, target, &at_wf, self.report);
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut state = Scope {
             inputs,
@@ -482,6 +757,7 @@ impl WorkflowCheck<'_> {
                 groups.entry(g).or_default().push(i);
             }
         }
+        groups::check(self.name, steps, &groups, &plan.handlers, self.report);
         let mut independence = quorum::Independence::new(steps);
         // Steps whose items may be from an always-ask trust class (§5.17).
         let always_ask: HashSet<&str> = steps
@@ -538,6 +814,7 @@ impl WorkflowCheck<'_> {
             if !waits {
                 extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
             }
+            extensions::audit_retention(step, &|d| loc.locate(d), self.report);
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {
@@ -550,9 +827,27 @@ impl WorkflowCheck<'_> {
                 );
                 continue;
             };
-            semantics::flag_downgrades(&loc, step, node, self.report);
+            // A delegate step's target maxima (§5.15.2): the ontology values
+            // it starts from are the stricter of the node's and these.
+            let target_maxima = if cap == "delegate" {
+                agents::target_maxima(self.agents, &self.ctx.ontology, delegable.as_deref(), step)
+            } else {
+                Target::Free
+            };
+            semantics::flag_downgrades(&loc, step, node, target_maxima.maxima(), self.report);
+            // The step's effective flags (§5.2.1), raised by the delegation
+            // targets' maxima (§5.15.2) and the applied profiles (§5.21.3).
+            let effective = semantics::effective(node, step, target_maxima.maxima(), self.policy);
+            let (flags, person) = (effective.flags, effective.person);
             semantics::unknown_inputs(&loc, step, node, self.report);
             semantics::missing_inputs(&loc, step, node, self.report);
+            // Memory, sends (§4.5, §4.4.2).
+            if matches!(cap, "persist" | "recall") {
+                effects::memory_inputs(&loc, step, self.report);
+            }
+            if cap == "send" && target.is_some_and(|t| t >= (1, 2)) {
+                effects::destination_shown(&loc, step, &declared, self.report);
+            }
             // A handler step runs only on escalation, after the step that
             // escalated (which may have failed before producing output),
             // and ends the run: it is outside the normal sequence, and its
@@ -560,13 +855,18 @@ impl WorkflowCheck<'_> {
             let delays = wait::delay(step, &declared).is_some();
             // An invoke waits when the workflow it runs can (W608).
             let nested = cap == "invoke"
-                && invoke::target(step).is_some_and(|(t, _)| self.waiting.contains(t));
+                && invoke::target(step).is_some_and(|(t, _)| {
+                    self.ns
+                        .resolver
+                        .resolve(self.name, t)
+                        .key()
+                        .is_some_and(|k| self.waiting.contains(k))
+                });
             let here = semantics::Placed {
                 index: i,
                 capability: cap,
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
-                requires_checkpoint: node.requires_checkpoint
-                    || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
+                requires_checkpoint: flags.requires_checkpoint,
                 waits: waits_well || delays || nested,
                 delays,
                 nested: nested && !waits_well && !delays,
@@ -643,7 +943,7 @@ impl WorkflowCheck<'_> {
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::Before) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, g.src, scope, &loc, &g.field, self.report);
                 }
             }
             checker.consumer_check(step, &contracts.input, scope, self.report);
@@ -658,7 +958,19 @@ impl WorkflowCheck<'_> {
             );
             wait::check_delay(&loc, step, &declared, self.report);
             approval::check_after_deferral(&loc, step, &declared, self.report);
-            delegation::check(&loc, step, &declared, self.report);
+            delegation::check(&loc, step, &declared, targets_1_2, self.report);
+            if cap == "delegate" {
+                delegation::check_targets(
+                    &loc,
+                    step,
+                    delegable.as_deref(),
+                    self.agents,
+                    &target_maxima,
+                    flags.requires_approval,
+                    targets_1_2,
+                    self.report,
+                );
+            }
             identity::check(&loc, step, &declared, self.report);
             quorum::check(
                 &loc,
@@ -670,13 +982,23 @@ impl WorkflowCheck<'_> {
                 scope,
                 self.report,
             );
-            let requires_approval =
-                node.requires_approval || step.get("requires_approval") == Some(&Value::Bool(true));
+            // Whether an `approval` block applies does not depend on the
+            // profiles applied; whether an unattended run must plan for the
+            // step (W606) does.
+            // Nor on the manifests given: on a delegate step of a workflow
+            // that declares `agents`, the block applies whenever the target
+            // maxima raise `requires_approval` (§5.15.2).
+            let allows_approval = semantics::effective(node, step, None, &Policy::default())
+                .flags
+                .requires_approval
+                || (cap == "delegate" && delegable.is_some());
+            let requires_approval = flags.requires_approval;
             approval::check(
                 &loc,
                 step,
-                requires_approval,
+                allows_approval,
                 &declared,
+                targets_1_2,
                 &checker,
                 scope,
                 self.report,
@@ -700,7 +1022,11 @@ impl WorkflowCheck<'_> {
             // item: it is asked of a person, and no one is present.
             let mandate_only = matches!(step.get("approval"), Some(Value::Object(a))
                 if !a.contains_key("when_unattended") && plan_for_unattended);
-            if requires_approval && unattended && mandate_only && !always_ask.is_empty() {
+            // Nor for a step an applied profile requires a person for
+            // (§5.21.3).
+            if requires_approval && unattended && mandate_only && person {
+                approval::unattended_person(&loc, self.report);
+            } else if requires_approval && unattended && mandate_only && !always_ask.is_empty() {
                 let mut roots = Vec::new();
                 for key in ["input_bindings", "condition", "gates", "approval", "wait"] {
                     if let Some(v) = step.get(key) {
@@ -716,14 +1042,12 @@ impl WorkflowCheck<'_> {
             // so there its output is present; later steps see it as absent
             // if the step can be skipped.
             if let Some(store) = store {
-                scope
-                    .stores
-                    .insert(store.to_string(), contracts.output.clone());
+                scope.stores.insert(store.to_string(), &contracts.output);
                 scope.maybe_absent.remove(store);
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::After) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, g.src, scope, &loc, &g.field, self.report);
                 }
             }
             if let Some(Value::Array(fms)) = step.get("failure_modes") {
@@ -762,6 +1086,11 @@ impl WorkflowCheck<'_> {
         }
         semantics::check_edges(self.ctx, self.name, &placed, &handlers, self.report);
         wait::spans_checkpoint(self.name, &placed, &handlers, self.report);
+        // Checkpoints and memory (§4.4.1, §4.5).
+        if target.is_some_and(|t| t >= (1, 2)) {
+            effects::unchecked_rollbacks(self.name, steps, self.report);
+        }
+        effects::persist_timestamp_refs(self.name, steps, self.report);
         invocations
     }
 
@@ -879,6 +1208,24 @@ impl WorkflowCheck<'_> {
                     .at("field", key),
                 );
             }
+        }
+        // A step's domain is a domain id (§5.2.4); another form is passed to
+        // the host unchanged, but warned about.
+        if let Some(Value::String(domain)) = step.get("domain")
+            && !names::is_domain_id(domain)
+        {
+            let mut d = loc
+                .diag(
+                    Code::NoncanonicalName,
+                    format!(
+                        "domain '{domain}' is not a domain id: lowercase segments [a-z0-9][a-z0-9_]* joined by '.' (§5.2.4); it is passed to the host unchanged"
+                    ),
+                )
+                .at("field", "domain");
+            if let Some(hint) = names::canonical_domain_hint(domain) {
+                d = d.suggest(format!("write it '{hint}'"));
+            }
+            self.report.push(d);
         }
         // The executor reads retry.backoff as one of three strategies:
         // anything else would silently mean no backoff. Null means none.
@@ -1059,7 +1406,7 @@ impl WorkflowCheck<'_> {
                     Code::SchemaValidationFailed,
                     format!("input '{key}' is reserved for injected recovery context"),
                 );
-                self.report.push(d.at("field", field));
+                self.report.push(d.at_field_key("inputs", key));
                 continue;
             }
             let schema = match spec {
@@ -1069,7 +1416,7 @@ impl WorkflowCheck<'_> {
                         Err(e) => {
                             let d = self
                                 .wdiag(Code::InvalidRef, format!("{field} cannot be used: {e}"));
-                            self.report.push(d.at("field", field));
+                            self.report.push(d.at_field_key("inputs", key));
                             empty_object()
                         }
                     },
@@ -1081,7 +1428,11 @@ impl WorkflowCheck<'_> {
                                     Code::InvalidRef,
                                     format!("{field} ref {r} cannot be used: {e}"),
                                 );
-                                self.report.push(d.at("field", format!("{field}.ref")));
+                                self.report.push(d.at_field(&[
+                                    Seg::Key("inputs"),
+                                    Seg::Key(key),
+                                    Seg::Key("ref"),
+                                ]));
                                 empty_object()
                             }
                             _ => {
@@ -1089,7 +1440,11 @@ impl WorkflowCheck<'_> {
                                     Code::InvalidRef,
                                     format!("{field} ref could not be resolved: {r}"),
                                 );
-                                self.report.push(d.at("field", format!("{field}.ref")));
+                                self.report.push(d.at_field(&[
+                                    Seg::Key("inputs"),
+                                    Seg::Key(key),
+                                    Seg::Key("ref"),
+                                ]));
                                 empty_object()
                             }
                         }
@@ -1102,7 +1457,11 @@ impl WorkflowCheck<'_> {
                                 yaml::kind_of(other)
                             ),
                         );
-                        self.report.push(d.at("field", format!("{field}.ref")));
+                        self.report.push(d.at_field(&[
+                            Seg::Key("inputs"),
+                            Seg::Key(key),
+                            Seg::Key("ref"),
+                        ]));
                         empty_object()
                     }
                 },
@@ -1114,7 +1473,7 @@ impl WorkflowCheck<'_> {
                             yaml::kind_of(other)
                         ),
                     );
-                    self.report.push(d.at("field", field));
+                    self.report.push(d.at_field_key("inputs", key));
                     empty_object()
                 }
             };
@@ -1548,7 +1907,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(v102.len(), 2, "{v102:?}");
         assert!(v102[0].contains("missing required prerequisite 'checkpoint'"));
-        assert!(v102[1].contains("runs concurrently in parallel_group 'g'"));
+        assert!(v102[1].contains("shares parallel_group 'g' with it"));
         // soft_requires likewise.
         let c = codes(wf(json!([
             grouped("observe", "o", "g"),
@@ -1850,18 +2209,31 @@ pub(crate) mod tests {
                 .diagnostics
                 .iter()
                 .filter(|d| d.code == Code::VersionFeatureMismatch)
-                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .map(|d| d.location["path"].as_str().unwrap().to_string())
                 .collect::<Vec<_>>()
         };
         // Once per feature, at its first use, in the order met.
         let all = [
-            "workflow_extensions.requires",
-            "steps[0].gates[0].phase",
-            "steps[0].gates[0].action",
-            "steps[0].gates[0].when",
-            "steps[0].failure_modes[0].when",
-            "steps[0].failure_modes[0].on_error",
+            "/w/workflow_extensions/requires",
+            "/w/steps/0/gates/0/phase",
+            "/w/steps/0/gates/0/action",
+            "/w/steps/0/gates/0/when",
+            "/w/steps/0/failure_modes/0/when",
+            "/w/steps/0/failure_modes/0/on_error",
         ];
+        // A use in a step is located at it (§9.8): step, capability and a
+        // field relative to the step.
+        let w = json!({"goal": "g", "risk": "low", "spec_version": "1.0", "steps": [step]});
+        let d = validate_catalog(&ctx(), &json!({"w": w}), None)
+            .diagnostics
+            .into_iter()
+            .find(|d| d.code == Code::VersionFeatureMismatch)
+            .unwrap();
+        assert_eq!(
+            Value::Object(d.location),
+            json!({"workflow": "w", "step": 0, "capability": "search",
+                "field": "gates[0].phase", "path": "/w/steps/0/gates/0/phase"})
+        );
         assert_eq!(w1616(Some("1.0"), None, true), all);
         assert_eq!(w1616(None, Some("1.0.0"), false), all[1..]);
         // spec_version takes precedence over the header.
@@ -1881,6 +2253,91 @@ pub(crate) mod tests {
         // No version, or an unsupported one, says nothing about features.
         assert!(w1616(None, None, true).is_empty());
         assert!(w1616(Some("0.9"), None, true).is_empty());
+    }
+
+    #[test]
+    fn options_carry_the_header_profiles_manifests_and_catalogs() {
+        let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": []}});
+        let codes = |r: &Report| {
+            r.diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        };
+        let with = |header: Option<&str>| Options {
+            header: header.map(str::to_string),
+            ..Options::default()
+        };
+        for header in [None, Some("1.1.0"), Some("2.0")] {
+            let given = validate_with(&ctx(), &catalog, &with(header)).unwrap();
+            assert_eq!(
+                codes(&given),
+                codes(&validate_catalog(&ctx(), &catalog, header))
+            );
+        }
+        assert_eq!(
+            codes(&validate_with(&ctx(), &catalog, &with(None)).unwrap()),
+            ["W605"]
+        );
+        assert!(codes(&validate_with(&ctx(), &catalog, &with(Some("1.2"))).unwrap()).is_empty());
+        // Profiles are applied: a profile's diagnostics come first.
+        let profiled = validate_with(
+            &ctx(),
+            &catalog,
+            &Options {
+                profiles: vec![json!({"domain": "d"})],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(codes(&profiled)[0], "S304");
+        // A malformed manifest, or another catalog without a manifest,
+        // refuses the options.
+        for options in [
+            Options {
+                agents: vec![json!({"agent": "a"})],
+                ..Options::default()
+            },
+            Options {
+                catalogs: vec![(json!({}), None)],
+                ..Options::default()
+            },
+        ] {
+            assert!(validate_with(&ctx(), &catalog, &options).is_err());
+        }
+        // Profiles and manifests apply together: the profile's warning
+        // first, then the delegation's flags raised to its target's maxima
+        // (§5.15.2) and the person the profile requires for it (§5.21.3):
+        // an unattended run with a mandate alone cannot ask one (W606).
+        let writer = json!({"agent": "db-writer", "standard": "1.2", "ontology": "2.2",
+            "capabilities": ["retrieve", "mutate"]});
+        let delegating = json!({"w": {
+            "goal": "g", "risk": "high", "spec_version": "1.2", "agents": ["db-writer"],
+            "triggers": [{"kind": "schedule", "schedule": {"every": "P1D"}}],
+            "workflow_extensions": {"requires": ["triggers@1", "approval@1"]},
+            "steps": [{"capability": "delegate", "purpose": "p", "store_as": "d",
+                "approval": {"approver": {"kind": "standing_mandate", "mandate_ref": "m1"}},
+                "input_bindings": {"agent": "db-writer", "task": {"t": 1}}}]}});
+        let with_profiles = |profiles: Vec<Value>| {
+            validate_with(
+                &ctx(),
+                &delegating,
+                &Options {
+                    profiles,
+                    agents: vec![writer.clone()],
+                    ..Options::default()
+                },
+            )
+            .unwrap()
+        };
+        let both = with_profiles(vec![json!({"domain": "d", "version": "1.0.0", "x_typo": 1,
+            "risk_thresholds": {"block_autonomous": ["delegate"]}})]);
+        let got = codes(&both);
+        assert_eq!(got.first(), Some(&"W604"), "{got:?}");
+        assert!(got.contains(&"F501") && got.contains(&"W606"), "{got:?}");
+        // Without the profile the mandate is a plan: the maxima alone.
+        let maxima = with_profiles(Vec::new());
+        assert_eq!(codes(&maxima), ["F501"]);
     }
 
     #[test]

@@ -163,7 +163,7 @@ Traceability record for claims and transformations. Provenance answers:
 - Who or what made this claim?
 
 ### Grounding
-Anchoring claims to evidence. A grounded claim has explicit references to the observations or sources that support it. Ungrounded claims are explicitly marked as inferred.
+Anchoring claims to evidence its producer had. A grounded output has evidence anchors to the observations or sources that support it; an output that has none is explicitly marked as inferred (STANDARD v1.2 §3.1).
 
 **Why it matters:** Without grounding, agents confidently state hallucinations. When asked "why did you conclude X?", there's no answer. Debugging requires manual verification of every claim.
 
@@ -174,7 +174,7 @@ Anchoring claims to evidence. A grounded claim has explicit references to the ob
 - Hours of debugging to find where bad data entered
 
 ### Evidence Anchor
-A reference to the original source of information. Evidence anchors enable verification by pointing to:
+A reference to one piece of evidence: `{ref, kind}`, with an optional `timestamp`, `excerpt` and `digest` (STANDARD v1.2 §6.5). The `kind` is one of `file`, `url`, `tool`, `log`, `sensor`, `human_note`, `api`, `record` or a vendor kind `x-...`; the `ref` scheme `acs:` names a workflow value. Evidence anchors enable verification by pointing to:
 - Source documents
 - API responses
 - Log entries
@@ -196,15 +196,38 @@ flowchart LR
   claim -->|evidence anchor| sensor[Sensor reading]
 ```
 
+### Evidence Record
+An evidence anchor kept with the context it was recorded in: a `record_id`, the time, and the run, step, capability, tool and call it came from (STANDARD v1.2 §6.6).
+
+### Evidence Store
+Where an implementation keeps evidence records. A store appends and never changes a kept record or reuses an id, answers queries in append order, exports JSON Lines, and states its **durability**: `memory` (lost with its process), `session` (deleted with its session or thread) or `durable` (STANDARD v1.2 §6.6). Evidence that must outlive a session is exported to a durable store when it is written.
+
+### Grounding Policy
+The capabilities whose outputs an executor or a safety layer checks (`require`), optionally the anchor kinds that count (`kinds`) and whether only anchors the host attests count (`attested`). A workflow states one with the extension `grounding@1`; a host applies a list to a run or to calls. An output that fails is F505 (STANDARD v1.2 §5.20).
+
+### Inferred Output
+An output not grounded in evidence that says how it was reached: an `inference_method` (`model_knowledge`, `deduction`, `statistical`, ...) and a `confidence` (STANDARD v1.2 §3.1, §4.1.1).
+
+### Confidence
+The producer's probability, from 0 to 1, that an output's claim is correct (STANDARD v1.2 §4.1.1). Self-reported unless the host documents a calibration; not a trust score. Thresholds belong to gates, conditions and domain profiles.
+
+### Secret
+A value that grants access or proves identity (a password, an API key or token, a session cookie, a private key, a credential in a URL or a header), or that the host classifies as secret. It never enters evidence, records, notifications, diagnostics, traces or stored memory (STANDARD v1.2 §6.7).
+
+### Redaction
+Replacing a secret, or the part of a string that is one, with `[REDACTED]` before a value is written into evidence or a record: a transform with documented loss (STANDARD v1.2 §3.2, §6.7). Memory is not redacted: data that holds a secret is refused.
+
 ---
 
 ## Trust and Identity
 
 ### Trust Score
-Authority-weighted, confidence-weighted, recency-decayed score for a source or claim. Trust scores consider:
-- Source ranking weights (authoritative sources score higher)
-- Time decay (older information scores lower)
-- Field-specific authority preferences
+The weight of a piece of evidence: `score = weight × confidence × decay`, in that order ([Standard 1.2.0 §8.1](../spec/STANDARD-v1.2.0.md#81-trust-score-calculation)). The factors:
+- The static weight of the evidence's source type or sender trust class (the lower of the two with both; §8.3), which a domain profile's `trust_weights` may replace
+- The confidence the source reports (1 when it reports none)
+- A half-life decay of its age, `max(0.5 ** (age / half_life), min_trust)`; an age below zero counts as zero
+
+Evidence without a static weight has no score. Field authority is not a factor: it ranks sources when a conflict is resolved (Conflict Strategy).
 
 **Why it matters:** When sources conflict, you need a principled way to decide which to believe. Trust scores make conflict resolution transparent and consistent instead of arbitrary.
 
@@ -215,12 +238,21 @@ Authority-weighted, confidence-weighted, recency-decayed score for a source or c
 title: What a trust score combines
 ---
 flowchart TB
-  accDescr: Source ranking weights, time decay and field-specific authority preferences combine into a trust score, which decides which source to believe when sources conflict.
-  w[Source ranking weights] --> t[Trust score]
-  d[Time decay] --> t
-  f[Field-specific authority preferences] --> t
+  accDescr: A static weight, the reported confidence and a half-life decay multiply into a trust score, which decides which source to believe when sources conflict.
+  w[Static weight] --> t[Trust score]
+  c[Reported confidence] --> t
+  d[Half-life decay] --> t
   t -->|sources conflict| r[Which source to believe]
 ```
+
+### Conflict Strategy
+How a conflict between values for one field is resolved ([Standard 1.2.0 §8.2](../spec/STANDARD-v1.2.0.md#82-conflict-resolution)): `highest_score` (the default), `prefer_authoritative_sources` (the field's authorities in `field_authority.fields` first, then the highest static weight), `prefer_recent`, `prefer_high_confidence`, `merge_with_uncertainty` or `escalate_to_human`. Ties within 10⁻¹² go through the trust model's `tie_breakers`; a tie that remains is escalated. `grounded_agency.trust.resolve` is the reference.
+
+### Entity Id
+The identifier of an entity of the world state, `<class>:<namespace>/<local_id>`, such as `svc:acme/payments/prod/api` ([Standard 1.2.0 §7.1](../spec/STANDARD-v1.2.0.md#71-entity-identification)): the class is a class or alias of `schemas/entity_taxonomy.yaml` (or a vendor class `x-…`), and the namespace is one or more `/`-separated segments, outermost first.
+
+### Domain Profile
+A document of rules for one domain that tighten flags, checks, evidence, confidence and destinations and replace trust weights ([Standard 1.2.0 §5.21](../spec/STANDARD-v1.2.0.md#521-domain-profiles)). It takes effect where a host applies it to a run, a safety layer to its calls, or a validator is given it; a workflow's `profile` field applies nothing. Examples are under `schemas/profiles/`.
 
 ### Identity Resolution
 Defining entities and resolving aliases across sources. Identity resolution:
@@ -300,30 +332,101 @@ flowchart TB
 ```
 
 ### Parallel Group
-Steps that can execute concurrently. Parallel groups define:
+Steps that are not ordered relative to each other: an executor may run them
+in any order or at the same time, and the reference executor runs them one
+after another, in list order ([STANDARD v1.2 §5.2.3](../spec/STANDARD-v1.2.0.md#523-parallel-groups)).
+Parallel groups define:
 - `parallel_group`: Group identifier
-- `join`: How to wait for completion (all_complete, any_complete)
+- `join`: When the group is complete: `all_complete`, when every member has
+  finished, is the one value defined; any other is W618 and ignored
+
+A member that reads a group mate's store is W619: the mate need not have run
+first.
 
 ```mermaid
 ---
 title: A parallel group
 ---
 flowchart TB
-  accDescr: Steps in one parallel_group run concurrently, and the join, all_complete or any_complete, says when the group is complete.
+  accDescr: The steps of one parallel_group are not ordered relative to each other, and the group joins, all_complete, when every member has finished.
   subgraph pg [parallel_group]
     a[Step A]
     b[Step B]
   end
-  a --> j{"join: all_complete or any_complete"}
+  a --> j{"join: all_complete"}
   b --> j
 ```
+
+### Catalog Manifest
+A catalog's `catalog` entry, when it is a mapping without `steps`: its `id` (dot-separated lowercase segments), its own `version`, optionally the `ontology` it is written against and the workflows other catalogs may invoke (`exports`). Its Standard version is the file's header (STANDARD v1.2 §5.1.1).
+
+### Catalog Set
+A catalog given to a validator or executor together with other catalogs, each of which has a manifest with a unique `id`. Its workflows can invoke each other's exported workflows by qualified id (STANDARD v1.2 §5.1.1).
+
+### Qualified Workflow Id
+A catalog id, `/` and a workflow name (`acs.reference/world_model_build`): a workflow of a given catalog of the set. A bare name always means the invoking workflow's own catalog (STANDARD v1.2 §5.1.1).
+
+### Domain Id
+The value of a step's `domain`: lowercase segments joined by `.`, each `[a-z0-9][a-z0-9_]*` (`image.object`). A host selects the implementation for it exactly, else for its longest prefix at a dot, else the one for no domain (STANDARD v1.2 §5.2.4).
+
+### Agent Manifest
+What an agent that a `delegate` step names may do: the ontology capabilities it may exercise, directly or through its own delegates and invoked workflows, and the task inputs it accepts (`schemas/agent_manifest_schema.yaml`, STANDARD v1.2 §5.15.1).
+
+### Target Maxima
+What a `delegate` step's target may do, from its agent manifest: the highest risk and the OR of `mutation`, `requires_checkpoint` and `requires_approval` over its capabilities (over the non-mutating ones for a `read_only` delegation). In a workflow that declares `agents`, the step's flags are raised to them, and the executor does not delegate when they are unknown (STANDARD v1.2 §5.15.2).
+
+### Model Family
+The lowercase name of a provider's line of models, without version, size, date or variant, compared exactly. A host derives it from the model's identifier by one rule (STANDARD v1.2 §5.15).
+
+---
+
+## Runs and Hosts
+
+### Executor
+What runs a workflow step by step, with no input or output of its own: it
+says what it needs next and acts on the answer
+([STANDARD v1.2 §5.19](../spec/STANDARD-v1.2.0.md#519-host-protocol)).
+
+### Host
+What performs the actions an executor asks for and gives it the time: a
+process, a queue worker, a Standard Agents thread.
+
+### Run
+One execution of a workflow, from its start to its terminal action
+(`Completed` or `Failed`). A run has a `run_id`, unique among the runs whose
+records the host keeps.
+
+### Action
+What a run asks its host to do next (`InvokeCapability`, `RequestApproval`,
+`Sleep`, ...), or how it ended; the host answers with a response.
+
+### Host Protocol
+The actions, responses and run operations (start, next, submit, tick, wake
+at, cancel, save and restore, resume) between an executor and its host,
+with the host's obligations
+([§5.19](../spec/STANDARD-v1.2.0.md#519-host-protocol)).
+
+### Wake-up Time
+The earliest time at which giving a run the time changes it: a `Sleep`'s
+`until`, or one millisecond after a deadline or an approval's expiry
+(`run.wake_at()`).
+
+### Audit Record
+An action record or a canonical event that says what happened
+([§6.4](../spec/STANDARD-v1.2.0.md#64-audit-records)). The executor, safety
+layers, the `audit` capability and hosts' logs write them, or export them.
+
+### Run Record
+The audit record every run leaves, derived from how it ended, failed and
+cancelled runs included; every host keeps it with the run's records
+([§5.19.8](../spec/STANDARD-v1.2.0.md#5198-the-runs-record)).
 
 ---
 
 ## Safety Concepts
 
 ### Checkpoint
-A saved state that enables rollback. A checkpoint step is required before any capability with `requires_checkpoint` or an incoming `requires` edge from `checkpoint` — `mutate`, `send` and `rollback`. Not every mutation needs one: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint.
+A copy, kept by the host, of the state within its scope, from which that state can be restored ([STANDARD §4.4.1](../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)). A host reports what it captured, what it left out (`excluded`) and a `digest`; it never captures the record of what happened (the audit log, the host's checkpoint state). Validity limits what a checkpoint authorises; retention limits what it can restore. A checkpoint step is required before any capability with `requires_checkpoint` or an incoming `requires` edge from `checkpoint` — `mutate`, `send` and `rollback`. Not every mutation needs one: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint.
 
 **Why it matters:** Checkpoints are your safety net. When step 7 fails after steps 1-6 modified state, a checkpoint lets you restore to a known-good state in seconds instead of hours of manual cleanup.
 
@@ -345,7 +448,7 @@ flowchart LR
 ```
 
 ### Rollback
-Reverting to a previous checkpoint. Rollback is triggered when:
+Returning what a checkpoint captured to the state it had then, whoever changed it since ([STANDARD §4.4.1](../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)). It never changes the record of what happened, and cannot recall a transmission or reach a delegate's change elsewhere (it lists those as `not_covered`). `restored` is true only when everything the rollback concerns is back; a rollback step completes either way, so a workflow checks it. Rollback is triggered when:
 - Verification fails
 - Unexpected side effects are detected
 - Gates block execution
@@ -365,6 +468,15 @@ flowchart LR
   g[A gate blocks] --> rb
   rb -->|reverts to| cp[Previous checkpoint]
 ```
+
+### Idempotency Key
+What every attempt of one pass of a step carries (`<run_id>:<n>`), so that a host performs its effect, such as a transmission, at most once: a retry carries the same key, a loop that runs the step again a new one ([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)).
+
+### Destination Policy
+A list of patterns a `send`'s destination must match: an exact destination, a prefix ending in a delimiter (`https://hooks.example.com/*`), or a host or address suffix (`*@example.com`). The host's policies and each applied profile's `allowed_destinations` are in force together; a send they do not allow fails with F504 before approval ([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)).
+
+### Memory Scope
+Who can read an entry `persist` stored, and how long it lasts: `run`, `session`, `user`, `project`, `global` or an `x-` name ([STANDARD §4.5](../spec/STANDARD-v1.2.0.md#45-memory)).
 
 ### Mutation
 A change to external state (files, databases, APIs). Steps inherit `mutation`, `requires_checkpoint`, `requires_approval` and `risk` from the ontology; a step that declares a weaker value is ignored with warning W602 (`audit` alone is `mutation_overridable` and may declare `mutation: false`). Mutating steps:
@@ -423,8 +535,11 @@ The guaranteed structure of data a capability produces. Output schemas enable:
 - Contract verification
 - Documentation
 
+### Schema Dialect
+The JSON Schema keywords capability contracts are written in ([Standard 1.2.0 §4.1.2](../spec/STANDARD-v1.2.0.md#412-schema-dialect)): Draft 2020-12 keywords from a fixed list, plus `type: any`, a union `type: "a|b"`, `$ref` with the keywords beside it merged over its target, `nullable`, and `x-` annotations (`x-acs-` reserved for the Standard). `schemas/capability_ontology.schema.json` checks the ontology against it.
+
 ### Strict Contract Rendering
-The input and output schema of every capability as JSON Schema Draft 2020-12, in [`schemas/generated/capability_contracts.schema.json`](../schemas/generated/capability_contracts.schema.json): `$defs` holds `<capability>.input` and `<capability>.output`. The ontology writes its contracts with two values of `type` that the Draft 2020-12 metaschema does not allow, `any` and a union written `string|object`, so a tool that checks a schema against that metaschema refuses the contracts as the ontology writes them. [`scripts/gen_capability_json_schemas.py`](../scripts/gen_capability_json_schemas.py) generates the rendering from the ontology, which remains the source, and its `--check` option fails when the two differ. A union becomes a type list (`["string", "object"]`). `any` becomes a schema with no `type`, which accepts every value, and carries `"x-acs-type": "any"` so that it stays apart from a slot whose type the ontology does not state. Objects stay open: a contract lists the fields it requires and does not forbid others. Draft 2020-12 says a validator should treat a keyword it does not know as an annotation, so `x-acs-type` constrains nothing. A tool that refuses unknown keywords, as Ajv does in its default strict mode, has to be told about this one. In that mode Ajv also refuses the format `date-time`, which the ontology itself uses, until a format package is added or format validation is turned off.
+The rendering of the schema dialect that §4.1.2 defines: the input and output schema of every capability as JSON Schema Draft 2020-12, in [`schemas/generated/capability_contracts.schema.json`](../schemas/generated/capability_contracts.schema.json): `$defs` holds `<capability>.input` and `<capability>.output`. The ontology writes its contracts with two values of `type` that the Draft 2020-12 metaschema does not allow, `any` and a union written `string|object`, so a tool that checks a schema against that metaschema refuses the contracts as the ontology writes them. [`scripts/gen_capability_json_schemas.py`](../scripts/gen_capability_json_schemas.py) generates the rendering from the ontology, which remains the source, and its `--check` option fails when the two differ. A union becomes a type list (`["string", "object"]`). `any` becomes a schema with no `type`, which accepts every value, and carries `"x-acs-type": "any"` so that it stays apart from a slot whose type the ontology does not state. Objects stay open: a contract lists the fields it requires and does not forbid others. Draft 2020-12 says a validator should treat a keyword it does not know as an annotation, so `x-acs-type` constrains nothing. A tool that refuses unknown keywords, as Ajv does in its default strict mode, has to be told about this one. In that mode Ajv also refuses the format `date-time`, which the ontology itself uses, until a format package is added or format validation is turned off.
 
 ### Type Coercion
 Converting data from one type to another. Coercion is used when:
@@ -583,4 +698,4 @@ The table [Words the two standards use differently](integrations/standard_agents
 
 ---
 
-See also: [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) for formal definitions.
+See also: [STANDARD-v1.2.0.md](../spec/STANDARD-v1.2.0.md) for formal definitions.

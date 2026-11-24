@@ -22,12 +22,33 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 # Add parent to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+
+def demo_config(**kw: object) -> GroundedAgentConfig:
+    """The demo's configuration: the repository's ontology, and a fresh
+    checkpoint directory, so no checkpoint of an earlier run is left."""
+    return GroundedAgentConfig(
+        ontology_path=str(
+            Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
+        ),
+        checkpoint_dir=tempfile.mkdtemp(prefix="acs-demo-"),
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+def call(tool_use_id: str) -> SimpleNamespace:
+    """The context Claude Code passes to ``can_use_tool``: it names the call
+    (``tool_use_id``), which holds the checkpoint it uses. A call without
+    one cannot hold a checkpoint, so it is refused (R407)."""
+    return SimpleNamespace(tool_use_id=tool_use_id)
 
 
 async def approve(tool_name: str, tool_input: dict, context: object) -> object:
@@ -46,6 +67,27 @@ async def approve(tool_name: str, tool_input: dict, context: object) -> object:
     return PermissionResultAllow(updated_input=tool_input)
 
 
+async def decide(
+    adapter: GroundedAgentAdapter,
+    permission_callback: object,
+    tool_name: str,
+    tool_input: dict,
+    tool_use_id: str,
+) -> object:
+    """A call's decision in the order Claude Code reaches it: the adapter's
+    PreToolUse hook, then, unless the hook refused it, the permission
+    callback. The callback decides only on a call the hook checked, with
+    the input it checked (otherwise R407). A hook's refusal is returned as
+    the callback's result would be (``behavior``, ``message``)."""
+    hook = adapter._make_pretooluse_safety_hook()
+    out = (
+        await hook({"tool_name": tool_name, "tool_input": tool_input}, tool_use_id, None)
+    ).get("hookSpecificOutput", {})
+    if out.get("permissionDecision") == "deny":
+        return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+    return await permission_callback(tool_name, tool_input, call(tool_use_id))
+
+
 def is_allowed(result: object) -> bool:
     """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
     return (
@@ -62,12 +104,7 @@ async def demo_checkpoint_enforcement():
 
     # Create adapter in strict mode
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            strict_mode=True,
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config(strict_mode=True)
     )
 
     print(f"Ontology version: {adapter.ontology_version}")
@@ -85,10 +122,12 @@ async def demo_checkpoint_enforcement():
 
     # Simulate permission check for Write tool
     permission_callback = adapter._make_permission_callback(approve)
-    result = await permission_callback(
+    result = await decide(
+        adapter,
+        permission_callback,
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        None,
+        "demo-1",
     )
 
     print(f"Permission result for Write: {result}")
@@ -103,12 +142,7 @@ async def demo_safe_mutation():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            strict_mode=True,
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config(strict_mode=True)
     )
 
     # Create checkpoint FIRST
@@ -123,10 +157,12 @@ async def demo_safe_mutation():
     # so the host's can_use_tool callback (here: approve) decides the call.
     print("\n--- With Checkpoint ---")
     permission_callback = adapter._make_permission_callback(approve)
-    result = await permission_callback(
+    result = await decide(
+        adapter,
+        permission_callback,
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        None,
+        "demo-2",
     )
 
     print(f"Permission result for Write: {result}")
@@ -141,11 +177,7 @@ async def demo_evidence_collection():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config()
     )
 
     # Simulate evidence from tool uses
@@ -201,11 +233,7 @@ async def demo_tool_mapping():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config()
     )
 
     # Test various tools
@@ -245,12 +273,7 @@ async def demo_with_sdk():
         print("Claude Agent SDK is available!")
 
         adapter = GroundedAgentAdapter(
-            GroundedAgentConfig(
-                strict_mode=True,
-                ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-                ),
-            )
+            demo_config(strict_mode=True)
         )
 
         # Create checkpoint
@@ -290,11 +313,7 @@ async def demo_with_sdk():
             can_use_tool: object = None
 
         adapter = GroundedAgentAdapter(
-            GroundedAgentConfig(
-                ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-                ),
-            )
+            demo_config()
         )
 
         base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])

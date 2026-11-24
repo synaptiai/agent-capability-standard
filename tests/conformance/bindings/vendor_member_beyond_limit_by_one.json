@@ -1,0 +1,22 @@
+{
+  "description": "The integer literal 2^53 + 1 has no I-JSON form, though a binary64 reader rounds it to 2^53: S303, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "x-build": 9007199254740993
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "look"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

@@ -1,10 +1,10 @@
 schema:
   name: agent_identity
-  version: 1.0.0
-  description: Who a party is, as the host authenticated it (Standard v1.1 §5.17,
-    RFC-0004). The host reports one with each event a step waits for, and the
-    world state may record one beside ActionRecord.actor and
-    ProvenanceRecord.agent. It says nothing about how reliable a party is.
+  version: 1.1.0
+  description: Who a party is, as the host authenticated it (Standard v1.2 §5.17,
+    RFC-0004, RFC-0007). The host reports one with each event a step waits for, and
+    the world state may record one beside ActionRecord.actor and ProvenanceRecord.agent.
+    It says nothing about how reliable a party is.
 agent_identity:
   type: object
   required:
@@ -28,7 +28,13 @@ agent_identity:
       description: The role it acts in, e.g. reviewer or owner.
     model_family:
       type: string
-      description: For an agent, the model family it ran on.
+      description: For an agent, the family of the model it ran on, derived from the
+        model's identifier and compared by exact (code-point) equality (Standard v1.2
+        §5.15).
+    model_id:
+      type: string
+      description: For an agent, the identifier of the model it ran on, such as acme-large-2
+        (Standard v1.2 §5.17).
     owner:
       type: string
       description: The principal of the person or organisation it acts for.

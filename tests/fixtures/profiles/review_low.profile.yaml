@@ -1,0 +1,5 @@
+# Every step needs approval (Standard v1.2 §5.21.3).
+domain: review-low
+version: "1.0.0"
+risk_thresholds:
+  require_review: low

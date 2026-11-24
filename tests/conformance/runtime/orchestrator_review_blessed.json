@@ -1293,6 +1293,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "review_gate",
   "inputs": {
     "change": {

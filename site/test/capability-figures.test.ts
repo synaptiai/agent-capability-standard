@@ -369,8 +369,11 @@ describe('outputFields (F-C6)', () => {
     const f = outputFields(cap('mutate'), repoText('skills/mutate/SKILL.md'), 'mutate');
     expect(f.skill.filter((x) => x.inContract).map((x) => x.name)).toEqual(['success', 'previous_state', 'new_state', 'evidence_anchors']);
     expect(f.skill.filter((x) => !x.inContract).map((x) => x.name)).toEqual(['target', 'operation', 'diff', 'checkpoint_id', 'rollback_command']);
-    expect(f.missing).toEqual([]);
-    expect(outputFieldsCaption(cap('mutate'), f)).toBe("The skill returns 9 fields: 4 are in mutate's output contract (2 required) and 5 are the skill's own, outside the contract.");
+    // Ontology 2.2.0 gives every output the optional confidence, inference_method and uncertainty (Standard v1.2 §4.1.1).
+    expect(f.missing).toEqual(['confidence', 'inference_method', 'uncertainty']);
+    expect(outputFieldsCaption(cap('mutate'), f)).toBe(
+      "The skill returns 9 fields: 4 are in mutate's output contract (2 required) and 5 are the skill's own, outside the contract; it leaves out 3 contract fields (confidence, inference_method, uncertainty).",
+    );
   });
 
   it('prints a sentence when every field of the fence is in the contract and none is missing', () => {

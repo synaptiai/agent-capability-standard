@@ -1,0 +1,24 @@
+{
+  "description": "An invokes name that no binding of the set has is V107, and the composite is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "a",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "missing"
+      ]
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V107",
+        "tool": "a"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "description": "An approved step that fails is failed, with its code and reason, from the moment it fails: a cancel while its failure mode's Rollback is pending leaves the record failed, not cancelled (\u00a75.19.5, \u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "it fails",
+              "on_error": "R402",
+              "action": "rollback"
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m",
+        "reason": "outcome_unknown"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Rollback",
+        "step": 2
+      }
+    },
+    {
+      "cancel": {
+        "reason": "stop"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "action_records": [
+      {
+        "capability": "mutate",
+        "status": "failed",
+        "code": "R402",
+        "reason_code": "outcome_unknown",
+        "approval": {
+          "decision_id": "d1"
+        }
+      }
+    ]
+  },
+  "trace_kinds": []
+}

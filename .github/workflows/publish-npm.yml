@@ -1,0 +1,86 @@
+name: Publish npm package
+
+# Publishes packages/acs-core (@synaptiai/acs-core) to npm from a tag
+# acs-core-vX.Y.Z on main.
+# - push the tag (on a commit of main); or
+# - run it by hand from main with the tag (workflow_dispatch). A hand run
+#   never publishes the branch it was started from: it checks out the tag.
+# Either way the tag's commit must be on main, and package.json's version
+# must equal the tag's. Publishing needs vars.NPM_PUBLISH_ENABLED == 'true'
+# and secrets.NPM_TOKEN; otherwise (either missing) the job ends with a dry
+# run. A step's `if` cannot read a secret, so the job's env says whether the
+# token is set.
+on:
+  push:
+    tags: ["acs-core-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (acs-core-vX.Y.Z), on main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.99.1" # equal to ci.yml's (tests/test_ci_workflows.py)
+
+jobs:
+  publish:
+    name: Publish @synaptiai/acs-core
+    runs-on: ubuntu-latest
+    # A hand-started publish runs from main, never another branch (release.yml's guard).
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: The tag is on main
+        run: |
+          case "$TAG" in acs-core-v*) ;; *) echo "not an acs-core tag: $TAG" >&2; exit 1 ;; esac
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "refs/tags/$TAG^{commit}" origin/main \
+            || { echo "$TAG is not on main" >&2; exit 1; }
+
+      - name: The version matches the tag
+        working-directory: packages/acs-core
+        run: test "acs-core-v$(node -p "require('./package.json').version")" = "$TAG"
+
+      - name: Install Rust with the wasm32 target
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build and test the tagged commit
+        working-directory: packages/acs-core
+        run: |
+          npm ci --ignore-scripts
+          npm run build:wasm
+          npm run build
+          npm test
+
+      - name: Publish
+        if: vars.NPM_PUBLISH_ENABLED == 'true' && env.HAS_NPM_TOKEN == 'true'
+        working-directory: packages/acs-core
+        run: npm publish --provenance --access public --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run
+        if: vars.NPM_PUBLISH_ENABLED != 'true' || env.HAS_NPM_TOKEN != 'true'
+        working-directory: packages/acs-core
+        run: npm publish --dry-run --ignore-scripts

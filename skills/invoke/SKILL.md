@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep, Bash, Edit, Write
 context: fork
 agent: general-purpose
-layer: COORDINATE
 ---
 
 ## Intent
@@ -81,7 +80,7 @@ result:                     # the invoked workflow's stores, keyed by store_as
 steps_executed:             # store_as names of the steps that ran, in step order
   - string
 duration: string            # Total execution time (optional; a host may report it)
-evidence_anchors: array     # The reference executor returns []; a host may add anchors
+evidence_anchors: array[EvidenceAnchor]  # The reference executor returns []; a host may add anchors; each {ref, kind} (STANDARD v1.2 §6.5)
 ```
 
 ### Field Definitions
@@ -92,7 +91,7 @@ evidence_anchors: array     # The reference executor returns []; a host may add 
 | `result.<store_as>` | object | One step's output (e.g. `result.state_out.state` is the world state the `state_out` step built) |
 | `steps_executed` | array of string | The `store_as` names of the steps that produced output, in step order |
 | `duration` | string | Total execution time (optional) |
-| `evidence_anchors` | array | References supporting the result (empty from the reference executor) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References supporting the result (empty from the reference executor) |
 
 A failed or escalated nested run produces no output: the invoke step fails
 with R402, and the message names the nested code. A deferred nested run
@@ -121,7 +120,7 @@ input:
 result:
   retrieve_out:
     data: {sources: ["docs/auth/architecture.md", "docs/auth/sessions.md"]}
-    evidence_anchors: ["file:docs/auth/architecture.md"]
+    evidence_anchors: [{ref: "file:docs/auth/architecture.md", kind: file}]
     confidence: 0.9
   # ... observe_out, detect_out, classify_out, integrate_out ...
   state_out:
@@ -129,12 +128,12 @@ result:
       world_id: "auth-model-001"
       entities: [{id: "session_service"}, {id: "token_store"}]
     entities: [{id: "session_service"}, {id: "token_store"}]
-    evidence_anchors: ["file:docs/auth/sessions.md:12"]
+    evidence_anchors: [{ref: "file:docs/auth/sessions.md:12", kind: file}]
     confidence: 0.85
   # ... transition_out, attribute_out, measure_out, audit_out, ground_out, simulate_out ...
   explain_out:
     explanation: "Authentication model with 12 entities and 18 relationships"
-    evidence_anchors: ["workflow:world_model_build:state_out"]
+    evidence_anchors: [{ref: "workflow:world_model_build:state_out", kind: record}]
     confidence: 0.85
 steps_executed:
   - retrieve_out
@@ -150,7 +149,7 @@ steps_executed:
   - ground_out
   - simulate_out
   - explain_out
-evidence_anchors: []
+evidence_anchors: []   # composed by the executor: the nested run's anchors with grounding@1 (STANDARD v1.2 §5.20), else empty as in 1.1
 ```
 
 A later step reads the baseline world state as
@@ -173,12 +172,12 @@ input:
 **Output (the planned change was not compliant, so `mutate` was skipped):**
 ```yaml
 result:
-  receive_out: {data: [{type: "battery_low", robot: "r-17"}], source: "fleet-events", evidence_anchors: []}
+  receive_out: {data: [{type: "battery_low", robot: "r-17"}], source: "fleet-events", evidence_anchors: [{ref: "tool:mqtt:fleet-events", kind: tool}]}
   # ... search_out through plan_out ...
-  constrain_out: {compliant: false, violations: ["change_policy"], evidence_anchors: []}
-  checkpoint_out: {checkpoint_id: "chk-0042", evidence_anchors: []}
-  audit_out: {recorded: true, evidence_anchors: []}
-  explain_out: {explanation: "Drift detected; the planned change was blocked by policy", evidence_anchors: [], confidence: 0.8}
+  constrain_out: {compliant: false, violations: ["change_policy"], evidence_anchors: [{ref: "policy:change_policy", kind: record}]}
+  checkpoint_out: {checkpoint_id: "chk-0042", evidence_anchors: [{ref: "checkpoint:chk-0042", kind: record}]}
+  audit_out: {recorded: true, evidence_anchors: [{ref: "audit:a-17", kind: record}]}
+  explain_out: {explanation: "Drift detected; the planned change was blocked by policy", evidence_anchors: [{ref: "policy:change_policy", kind: record}], confidence: 0.8}
 steps_executed:
   - receive_out
   - search_out
@@ -187,7 +186,7 @@ steps_executed:
   - checkpoint_out
   - audit_out
   - explain_out
-evidence_anchors: []
+evidence_anchors: []   # composed by the executor; with grounding@1, the anchors above, each ref once
 ```
 
 With no mutation applied, the verification suite (`execute`), `verify` and
@@ -198,7 +197,7 @@ Nothing was rolled back: there was nothing to undo.
 Had the change been compliant and applied, and a later nested step failed
 (say the verification suite timed out: `execute`'s failure mode rolls the twin
 back to the checkpoint taken before the mutation, then the nested run ends
-with that code and records no audit), the invoke step would fail with
+with that code and its audit step does not run), the invoke step would fail with
 `R402: invoked workflow 'digital_twin_sync_loop' failed with R401: ...`.
 
 ### Example 3: Nested Workflow Invocation
@@ -215,13 +214,13 @@ input:
 ```yaml
 result:
   world_model_out:            # bootstrap's own invoke of world_model_build
-    result: {state_out: {state: {world_id: "payments-001"}, evidence_anchors: [], confidence: 0.8}}
+    result: {state_out: {state: {world_id: "payments-001"}, evidence_anchors: [{ref: "tool:database:payments-db", kind: tool}], confidence: 0.8}}
     steps_executed: [retrieve_out, observe_out, state_out]   # abbreviated
-    evidence_anchors: []
+    evidence_anchors: []      # composed by the executor (§5.20)
   sync_out:                   # its invoke of digital_twin_sync_loop
-    result: {verify_out: {passed: true, evidence_anchors: [], confidence: 0.9}}
+    result: {verify_out: {passed: true, evidence_anchors: [{ref: "tool:bash:pytest", kind: tool}], confidence: 0.9}}
     steps_executed: [receive_out, verify_out]                 # abbreviated
-    evidence_anchors: []
+    evidence_anchors: []      # composed by the executor (§5.20)
 steps_executed:
   - world_model_out
   - sync_out

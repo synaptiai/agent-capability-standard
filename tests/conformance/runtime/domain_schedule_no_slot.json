@@ -255,6 +255,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "schedule_management",
   "inputs": {
     "request": {

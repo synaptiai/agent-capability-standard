@@ -2,7 +2,7 @@
 Grounded Agency -- Standard Error Model
 
 Implements the diagnostic codes and formatting defined in Section 9 of the
-Standard (v1.1.0): error codes in five categories (Validation, Binding,
+Standard (v1.2.0): error codes in five categories (Validation, Binding,
 Schema, Runtime, Safety) and warning codes (W6xx), with a structured JSON
 response format. The list mirrors the Rust core's (``_core.CODES``); a test
 keeps the two identical.
@@ -46,6 +46,8 @@ class ErrorCode(Enum):
     UNRESOLVED_TARGET = "V107"
     INVALID_EXPRESSION = "V108"
     UNSUPPORTED_SPEC_VERSION = "V109"
+    DUPLICATE_BINDING = "V110"
+    TOOL_NAME_MISMATCH = "V111"
 
     # -- 9.3 Binding errors (B2xx) ------------------------------------------
     INVALID_BINDING_PATH = "B201"
@@ -68,6 +70,8 @@ class ErrorCode(Enum):
     RECOVERY_EXHAUSTED = "R404"
     EXPRESSION_ERROR = "R405"
     LIVENESS_LOST = "R406"
+    SAFETY_CHECK_FAILED = "R407"
+    CANCELLED = "R408"
 
     # -- 9.6 Safety errors (F5xx) -------------------------------------------
     CHECKPOINT_REQUIRED = "F501"
@@ -75,6 +79,7 @@ class ErrorCode(Enum):
     ROLLBACK_FAILED = "F503"
     CONSTRAINT_VIOLATED = "F504"
     PROVENANCE_MISSING = "F505"
+    GATED_CONTROL_ACTION = "F506"
 
     # -- Warnings (W6xx) ----------------------------------------------------
     SOFT_REQUIREMENT_UNMET = "W601"
@@ -93,6 +98,16 @@ class ErrorCode(Enum):
     INVALID_DURATION = "W614"
     MISSING_INPUT = "W615"
     VERSION_FEATURE_MISMATCH = "W616"
+    UNBOUND_TOOL = "W617"
+    UNKNOWN_JOIN = "W618"
+    GROUP_MATE_READ = "W619"
+    NONCANONICAL_NAME = "W620"
+    UNBOUNDED_DELEGATION = "W621"
+    UNDECLARED_DELEGATE = "W622"
+    CONCURRENT_RUN_CONFLICT = "W623"
+    UNCHECKED_ROLLBACK = "W624"
+    DESTINATION_NOT_SHOWN = "W625"
+    UNKNOWN_MEMORY_SCOPE = "W626"
 
     @property
     def severity(self) -> Severity:
@@ -116,9 +131,15 @@ class ValidationError:
     message:
         Human-readable description of what went wrong.
     location:
-        Where the error occurred.  Typical keys are ``workflow`` (str),
-        ``step`` (int), and ``field`` (str), but any JSON-serialisable
-        dict is accepted.
+        Where the error occurred, with the keys STANDARD v1.2 §9.8 defines:
+        ``workflow`` (its key in the catalog), ``step`` (zero-based, in list
+        order), ``capability``, ``field`` (relative to the step, else the
+        workflow, else the document the finding is about), ``path`` (an RFC
+        6901 pointer from the catalog root, on every finding about the
+        catalog document), ``catalog`` (the id of another catalog of the
+        set the finding is in), ``profile`` or ``tool`` (a finding about
+        another document, with no ``path``), and the code-specific keys.
+        Any JSON-serialisable dict is accepted.
     suggestion:
         Optional hint on how to fix the problem.
     """
@@ -215,3 +236,11 @@ def format_errors_response(errors: list[ValidationError]) -> dict[str, Any]:
     (without the outer ``"error"`` wrapper).
     """
     return {"errors": [_error_to_dict(err) for err in errors]}
+
+
+def text_form(error: ValidationError) -> str:
+    """The diagnostic as text, for a channel that carries only text
+    (Section 9.8): the code, a space, the name, a colon, a space and the
+    message, e.g. ``F501 CHECKPOINT_REQUIRED: write requires a checkpoint``.
+    """
+    return f"{error.code_str} {error.name}: {error.message}"

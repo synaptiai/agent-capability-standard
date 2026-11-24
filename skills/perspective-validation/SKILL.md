@@ -89,7 +89,7 @@ actions:
     artifact: doc | workflow | policy | hook | test | benchmark | code
     owner: string
 confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -137,7 +137,7 @@ actions:
     owner: "maintainers"
 confidence: 0.7
 evidence_anchors:
-  - "file:schemas/workflow_catalog.yaml#L1"
+  - {ref: "file:schemas/workflow_catalog.yaml#L1", kind: file}
 assumptions:
   - "No runtime UI exists; report assumes log-based incident response."
 ```

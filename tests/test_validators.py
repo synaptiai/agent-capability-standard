@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -225,6 +226,22 @@ def test_example_catalog_matches_the_reference_catalog() -> None:
         assert workflow == reference[name], name
 
 
+def fixture_set(fixtures: Path, meta: dict[str, Any]) -> dict[str, Any]:
+    """An expectation's ``catalogs`` and ``agents`` (STANDARD v1.2 §10.3) as
+    validator arguments: further catalogs of the catalog set, and agent
+    manifests (a file, or a directory of ``*.agent.yaml`` files)."""
+    agents: list[str] = []
+    for a in meta.get("agents", []):
+        p = fixtures / a
+        agents += (
+            [str(m) for m in sorted(p.glob("*.agent.yaml"))] if p.is_dir() else [str(p)]
+        )
+    return {
+        "catalogs": [str(fixtures / c) for c in meta.get("catalogs", [])] or None,
+        "agents": agents or None,
+    }
+
+
 def test_w615_only_where_expected() -> None:
     """The fixtures bind every required input, so W615 appears only in those
     that expect it. The core's unit tests filter W615 out of their code
@@ -235,9 +252,11 @@ def test_w615_only_where_expected() -> None:
     expectations = json.loads(
         (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
     )
+    fixtures = ROOT / "tests" / "fixtures"
     for name, meta in expectations.items():
-        path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
-        emitted = {d["code"] for d in validator.validate_file(path)["diagnostics"]}
+        path = fixtures / f"{name}.workflow_catalog.yaml"
+        report = validator.validate_file(path, **fixture_set(fixtures, meta))
+        emitted = {d["code"] for d in report["diagnostics"]}
         expected = "W615" in meta.get("expected_warning_codes", [])
         assert ("W615" in emitted) == expected, name
 
@@ -255,33 +274,69 @@ class TestValidateProfiles:
         assert "Validating:" in result.stdout
 
     def test_boolean_weights_are_refused(self) -> None:
-        """YAML ``true`` is an int in Python, but not a weight."""
-        import importlib.util
+        """YAML ``true`` is an int in Python, but not a weight: the core
+        reports S303 at each (Standard v1.2 §5.21.2)."""
+        from grounded_agency import _core
 
-        sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
-        spec = importlib.util.spec_from_file_location(
-            "validate_profiles", ROOT / "tools" / "validate_profiles.py"
+        validator = _core.Validator(
+            str(ROOT / "schemas" / "capability_ontology.yaml"), str(ROOT)
         )
-        assert spec is not None and spec.loader is not None
-        vp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(vp)
+        report = validator.check_profiles(
+            [
+                {
+                    "domain": "p",
+                    "version": "1.0.0",
+                    "trust_weights": {"a": True, "b": 0.5},
+                    "evidence_policy": {"minimum_confidence": False},
+                    "domain_sources": [{"name": "s", "default_trust": True}],
+                }
+            ]
+        )
+        found = {(d["code"], d["location"]["field"]) for d in report["diagnostics"]}
+        assert found == {
+            ("S303", "trust_weights.a"),
+            ("S303", "evidence_policy.minimum_confidence"),
+            ("S303", "domain_sources[0].default_trust"),
+        }
+        # A NaN weight cannot reach the core as data.
+        with pytest.raises(ValueError, match="non-finite"):
+            validator.check_profiles(
+                [
+                    {
+                        "domain": "p",
+                        "version": "1.0.0",
+                        "trust_weights": {"a": float("nan")},
+                    }
+                ]
+            )
 
-        errors: list[str] = []
-        vp.validate_trust_weights({"trust_weights": {"a": True, "b": 0.5}}, errors, "p")
-        vp.validate_evidence_policy(
-            {"evidence_policy": {"minimum_confidence": False}}, errors, "p"
+    def test_a_misspelled_rule_fails(self, tmp_path: Path) -> None:
+        """A checkpoint_policy key that is no capability id is V101, an
+        error: no misspelled rule is ignored."""
+        profiles = tmp_path / "profiles"
+        shutil.copytree(ROOT / "schemas" / "profiles", profiles)
+        path = profiles / "vision.yaml"
+        text = path.read_text()
+        assert "  mutate: always\n" in text
+        path.write_text(text.replace("  mutate: always\n", "  mutat: always\n", 1))
+        result = run_validator(
+            "validate_profiles.py", ["--profiles-dir", str(profiles)]
         )
-        vp.validate_domain_sources(
-            {"domain_sources": [{"name": "s", "default_trust": True}]}, errors, "p"
-        )
-        assert any("trust_weights.a" in e for e in errors), errors
-        assert any("minimum_confidence" in e for e in errors), errors
-        assert any("default_trust" in e for e in errors), errors
-        assert not any("trust_weights.b" in e for e in errors), errors
+        assert result.returncode != 0
+        assert "V101" in result.stdout and "mutate" in result.stdout
 
-        nan: list[str] = []
-        vp.validate_trust_weights({"trust_weights": {"a": float("nan")}}, nan, "p")
-        assert any("trust_weights.a" in e for e in nan), nan
+    def test_a_shipped_profile_cites_the_current_versions(self, tmp_path: Path) -> None:
+        profiles = tmp_path / "profiles"
+        shutil.copytree(ROOT / "schemas" / "profiles", profiles)
+        path = profiles / "audio.yaml"
+        path.write_text(
+            path.read_text().replace('standard: "1.2.0"', 'standard: "1.1.0"')
+        )
+        result = run_validator(
+            "validate_profiles.py", ["--profiles-dir", str(profiles)]
+        )
+        assert result.returncode != 0
+        assert "'standard' must be '1.2.0'" in result.stdout
 
     def test_no_trust_calibration_warnings(self) -> None:
         """SEC-009: All profiles have trust_model_reviewed: true — no warnings."""
@@ -725,6 +780,86 @@ class TestValidateCanonicalSchemas:
             "    - unverified\n    - system_of_record",
         )
 
+    def test_catches_a_taxonomy_example_outside_the_pattern(
+        self, tmp_path: Path
+    ) -> None:
+        """Standard v1.2 §7.1: every example is an id of the grammar."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - svc:acme/payments/prod/api",
+            "  - svc:acme",
+        )
+
+    def test_catches_a_taxonomy_example_of_an_unknown_class(
+        self, tmp_path: Path
+    ) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - svc:acme/payments/prod/api",
+            "  - robot:acme/payments/prod/api",
+        )
+
+    def test_catches_a_missing_section_7_1_example(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - person:org.company/user/12345\n",
+            "",
+        )
+
+    def test_catches_an_unknown_tie_breaker(self, tmp_path: Path) -> None:
+        """Standard v1.2 §8.2 defines four tie-breakers."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "  - prefer_high_confidence\n  - escalate_to_human",
+            "  - prefer_loudest\n  - escalate_to_human",
+        )
+
+    def test_catches_missing_field_authority_fields(self, tmp_path: Path) -> None:
+        """§8.2 reads field_authority.fields; examples are illustrative."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "  fields:\n", "  feilds:\n"
+        )
+
+    def test_catches_phantom_source_in_the_examples(self, tmp_path: Path) -> None:
+        """`examples`, kept from 1.1, is checked as `fields` is."""
+        schemas = self._schemas_copy(tmp_path)
+        path = schemas / "authority_trust_model.yaml"
+        text = path.read_text()
+        examples = text.index("  examples:")
+        path.write_text(
+            text[:examples]
+            + text[examples:].replace("- hardware_sensor", "- unverified", 1)
+        )
+        result = run_validator(
+            "validate_canonical_schemas.py", ["--schemas-dir", str(schemas)]
+        )
+        assert result.returncode != 0
+        assert "field_authority.examples['serial_number']" in result.stdout
+
+    def test_catches_anchor_drift_between_event_and_world_state(
+        self, tmp_path: Path
+    ) -> None:
+        """The world state's Anchor is the event schema's (Standard v1.2 §6.5)."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "world_state_schema.yaml",
+            "|human_note|api|record|",
+            "|human_note|record|",
+        )
+
+    def test_catches_identity_model_id_drift(self, tmp_path: Path) -> None:
+        """The world state's AgentIdentity is agent_identity, model_id too."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "world_state_schema.yaml",
+            "      model_id:\n        type: string",
+            "      model_id:\n        type: integer",
+        )
+
     def test_catches_source_ranking_asymmetry(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
             tmp_path,
@@ -854,7 +989,7 @@ class TestValidateCanonicalSchemas:
 
     def test_catches_malformed_schema_version(self, tmp_path: Path) -> None:
         self._assert_drift_is_caught(
-            tmp_path, "entity_taxonomy.yaml", "  version: 1.0.0", "  version: v1"
+            tmp_path, "entity_taxonomy.yaml", "  version: 1.1.0", "  version: v1"
         )
 
     def test_catches_missing_canonical_schema_file(self, tmp_path: Path) -> None:
@@ -1075,9 +1210,9 @@ class TestSyncSkillSchemas:
         )
 
     def test_vendored_ontology_copies_are_maintained(self, tmp_path: Path) -> None:
-        """Every skills/*/reference/capability_ontology.yaml is a verbatim
-        copy of the ontology; a stale one fails --check and a sync repairs
-        it."""
+        """Every skills/*/reference/capability_ontology.yaml is the ontology
+        with its $refs pointed at the co-located copies; a stale one fails
+        --check and a sync repairs it."""
         root = self._tree(tmp_path)
         copies = sorted((root / "skills").glob("*/reference/capability_ontology.yaml"))
         assert copies, "expected skills that vendor the ontology"
@@ -1088,8 +1223,37 @@ class TestSyncSkillSchemas:
         assert check.returncode == 1
         assert str(stale.relative_to(root)) in check.stdout
         assert self._sync(root).returncode == 0
-        source = (root / "schemas" / "capability_ontology.yaml").read_bytes()
-        assert all(copy.read_bytes() == source for copy in copies)
+        source = (root / "schemas" / "capability_ontology.yaml").read_text()
+        rendered = self._module().render_vendored_ontology(source)
+        assert all(copy.read_text() == rendered for copy in copies)
+
+    def test_vendored_ontology_differs_only_in_its_refs(self) -> None:
+        """The rendering only points `schemas/event_schema.yaml` at the copy
+        beside it, which every vendoring skill has; undone, it is the source."""
+        module = self._module()
+        source = (ROOT / "schemas" / "capability_ontology.yaml").read_text()
+        rendered = module.render_vendored_ontology(source)
+        assert "schemas/event_schema.yaml" in source
+        assert "schemas/event_schema.yaml" not in rendered
+        # Every mention of the file in the source is the repository path, so
+        # putting the directory back undoes the rendering.
+        assert source.count("event_schema.yaml") == source.count(
+            "schemas/event_schema.yaml"
+        )
+        undone = rendered.replace("event_schema.yaml", "schemas/event_schema.yaml")
+        assert undone == source
+        for copy in sorted(
+            (ROOT / "skills").glob("*/reference/capability_ontology.yaml")
+        ):
+            assert (copy.parent / "event_schema.yaml").is_file(), copy
+
+    def test_skill_output_schemas_hold_no_ref(self) -> None:
+        """Skill-local output schemas are self-contained: the resolved
+        contract, with every $ref inlined."""
+        for path in sorted((ROOT / "skills").glob("*/schemas/output_schema.yaml")):
+            text = path.read_text()
+            assert "$ref" not in text, path.relative_to(ROOT)
+            assert "STANDARD v1.2 §4.1.2" in text, path.relative_to(ROOT)
 
     def test_crlf_checkout_is_not_drift(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)
@@ -1271,3 +1435,89 @@ class TestValidateRFCs:
         assert result.returncode != 0
         assert "Traceback" not in result.stderr, result.stderr
         assert "Could not read" in result.stdout
+
+
+def _resolved_depth(doc: Any, pointer: str) -> tuple[int, int]:
+    """How many tokens of an RFC 6901 pointer resolve in ``doc``, and how
+    many it has."""
+    if pointer == "":
+        return 0, 0
+    tokens = [t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")]
+    node = doc
+    for i, token in enumerate(tokens):
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return i, len(tokens)
+    return len(tokens), len(tokens)
+
+
+def test_every_fixture_diagnostic_has_an_exact_path() -> None:
+    """Every diagnostic about a catalog document carries ``location.path``
+    (STANDARD v1.2 §9.8), an RFC 6901 pointer that resolves in that
+    document (another catalog of the set when ``catalog`` names it), or,
+    for a finding about a member that is missing, whose workflow or step
+    does; and ``field`` ends with the pointer's last token, so the two name
+    the same member. A finding whose pointer is inside a step concerns that
+    step, so it carries ``step`` and the step's ``capability`` (§9.8), and
+    its ``field`` is relative to the step."""
+    import yaml
+
+    from grounded_agency import _core
+
+    fixtures = ROOT / "tests" / "fixtures"
+    validator = _core.Validator(ROOT / "schemas" / "capability_ontology.yaml", ROOT)
+    expectations = json.loads((fixtures / "EXPECTATIONS.json").read_text())
+    # Findings about a member the document lacks: a required field or input,
+    # the version, a flag the step does not declare, a plan it does not give.
+    missing_members = {"S304", "W605", "W615", "V103", "F501", "W606"}
+    for name, meta in expectations.items():
+        path = fixtures / f"{name}.workflow_catalog.yaml"
+        docs: dict[str | None, Any] = {None: yaml.safe_load(path.read_text())}
+        for c in meta.get("catalogs", []):
+            doc = yaml.safe_load((fixtures / c).read_text())
+            docs[doc["catalog"]["id"]] = doc
+        report = validator.validate_file(path, **fixture_set(fixtures, meta))
+        for d in report["diagnostics"]:
+            loc = d["location"]
+            # A finding about a workflow names it in its own catalog: the
+            # primary's, or the one `catalog` names (§9.8), header findings
+            # included.
+            if "workflow" in loc and "profile" not in loc and "tool" not in loc:
+                assert loc.get("catalog") in docs, (name, d)
+                assert loc["workflow"] in docs[loc.get("catalog")], (name, d)
+            if (
+                loc.get("field") == "# Standard version"
+                or "profile" in loc
+                or "tool" in loc
+            ):
+                assert "path" not in loc, (name, d)
+                continue
+            assert "path" in loc, (name, d)
+            tokens = loc["path"].split("/")
+            if "workflow" in loc and len(tokens) > 3 and tokens[2] == "steps":
+                assert loc.get("step") == int(tokens[3]), (name, d)
+                key = tokens[1].replace("~1", "/").replace("~0", "~")
+                wf = docs[loc.get("catalog")][key]
+                step = wf["steps"][int(tokens[3])]
+                capability = step.get("capability") if isinstance(step, dict) else None
+                if isinstance(capability, str):
+                    assert loc.get("capability") == capability, (name, d)
+                assert not loc.get("field", "").startswith("steps["), (name, d)
+            depth, length = _resolved_depth(docs[loc.get("catalog")], loc["path"])
+            anchor = (1 if "workflow" in loc else 0) + (2 if "step" in loc else 0)
+            assert depth == length or (
+                d["code"] in missing_members and depth >= anchor
+            ), (name, d)
+            if "field" in loc and loc["path"]:
+                last = (
+                    loc["path"].rsplit("/", 1)[1].replace("~1", "/").replace("~0", "~")
+                )
+                assert loc["field"].endswith(last) or loc["field"].endswith(
+                    f"[{last}]"
+                ), (
+                    name,
+                    d,
+                )

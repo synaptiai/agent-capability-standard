@@ -1,16 +1,19 @@
 # Grounded Agency Capability Ontology
-# Version: 2.1.0
+# Version: 2.2.0
 # 36 atomic capabilities derived from first principles
 # See: docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md
 ---
 meta:
   name: Grounded Agency Capability Ontology
-  version: 2.1.0
-  generated_at: '2026-10-28T00:00:00.000Z'
+  version: 2.2.0
+  generated_at: '2026-11-15T00:00:00.000Z'
   description: 36 atomic capabilities derived from first principles
   principles:
   - Capabilities are atomic and composable into workflows
-  - Every capability returns evidence anchors and confidence
+  - Every capability output carries evidence anchors, or is marked inferred with an
+    inference method and a confidence
+  - A capability whose output contract requires a confidence returns one in every
+    output
   - High-risk capabilities require checkpoint + verification
   - Capabilities are organized into 9 cognitive layers
   derivation:
@@ -132,11 +135,35 @@ nodes:
         description: Retrieved data
       evidence_anchors:
         type: array
-        description: Source references
+        description: Source references (Standard v1.2 §6.5).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: search
   layer: PERCEIVE
   description: Query for data matching criteria
@@ -170,10 +197,37 @@ nodes:
         type: integer
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: observe
   layer: PERCEIVE
   description: Watch and report current state
@@ -205,10 +259,37 @@ nodes:
         format: date-time
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: receive
   layer: PERCEIVE
   description: Accept pushed data or events
@@ -270,6 +351,26 @@ nodes:
               type: object
               description: The sender's identity as the host reported it
                 (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
+            inquiry_id:
+              type: string
+              description: For answers to an inquiry, the inquiry_id of the inquire
+                output they answer (STANDARD v1.2 §5.13.1)
+            answers:
+              type: array
+              items:
+                type: object
+                required:
+                - question_id
+                properties:
+                  question_id:
+                    type: string
+                    description: The id of the question answered, or its parameter
+                      when it has no id
+                  value:
+                    type: any
+                    description: The answer, of the question's answer_type
+              description: For answers to an inquiry, one entry per question answered
+                (STANDARD v1.2 §5.13.1)
         description: Received data/events
       source:
         type: string
@@ -279,6 +380,37 @@ nodes:
         format: date-time
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: detect
   layer: UNDERSTAND
   description: Find patterns or occurrences in data
@@ -316,10 +448,37 @@ nodes:
         description: Where patterns found
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: classify
   layer: UNDERSTAND
   description: Assign labels or categories to items
@@ -354,10 +513,37 @@ nodes:
         description: Label probabilities
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: measure
   layer: UNDERSTAND
   description: Quantify values with uncertainty
@@ -390,19 +576,67 @@ nodes:
         type: number
       uncertainty:
         type: object
+        description: The value's uncertainty. lower and upper bound the value; the
+          other members are those of an Uncertainty, whose interval.low and interval.high
+          then equal lower and upper (Standard v1.2 §4.1.1)
         properties:
           lower:
             type: number
           upper:
             type: number
+          type:
+            type: string
+            enum:
+            - epistemic
+            - aleatoric
+            - mixed
+          confidence:
+            type: number
+            minimum: 0
+            maximum: 1
+          interval:
+            type: object
+            properties:
+              low:
+                type: number
+              high:
+                type: number
+          distribution:
+            type: object
+            description: e.g. {name, mean, stdev}
+          notes:
+            type: string
       unit:
         type: string
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
 - id: predict
   layer: UNDERSTAND
   description: Forecast future states or outcomes
@@ -442,10 +676,37 @@ nodes:
         description: Alternative outcomes
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: compare
   layer: UNDERSTAND
   description: Evaluate alternatives against criteria
@@ -486,10 +747,37 @@ nodes:
         description: Key tradeoffs
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: discover
   layer: UNDERSTAND
   description: Find previously unknown patterns
@@ -527,10 +815,37 @@ nodes:
         description: Unusual findings
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: plan
   layer: REASON
   description: Create action sequence to achieve goal
@@ -572,10 +887,37 @@ nodes:
         description: Identified risks
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: decompose
   layer: REASON
   description: Break problem into subproblems
@@ -613,10 +955,37 @@ nodes:
         description: Subproblem dependencies
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: critique
   layer: REASON
   description: Identify weaknesses and issues
@@ -657,10 +1026,37 @@ nodes:
         description: Improvement suggestions
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: explain
   layer: REASON
   description: Justify conclusions with reasoning
@@ -704,10 +1100,37 @@ nodes:
         description: Reasoning chain
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: state
   layer: MODEL
   description: Create representation of current world state
@@ -748,10 +1171,37 @@ nodes:
         description: Entity relationships
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: transition
   layer: MODEL
   description: Define how state changes over time
@@ -789,10 +1239,37 @@ nodes:
         description: State changes
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: attribute
   layer: MODEL
   description: Establish cause-effect relationships
@@ -830,10 +1307,37 @@ nodes:
         description: Causal mechanism
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: ground
   layer: MODEL
   description: Anchor claims to evidence
@@ -874,10 +1378,37 @@ nodes:
         description: Evidence gaps
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: simulate
   layer: MODEL
   description: Run what-if scenarios
@@ -915,10 +1446,37 @@ nodes:
         description: End state
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: generate
   layer: SYNTHESIZE
   description: Produce new content
@@ -953,10 +1511,37 @@ nodes:
         description: Generation metadata
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: transform
   layer: SYNTHESIZE
   description: Convert between formats
@@ -995,10 +1580,37 @@ nodes:
         description: Applied transformations
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: integrate
   layer: SYNTHESIZE
   description: Merge data from multiple sources
@@ -1017,7 +1629,9 @@ nodes:
         description: Merge strategy
       conflict_resolution:
         type: string
-        description: How to handle conflicts
+        description: 'How conflicting values are resolved: a strategy of Standard
+          v1.2 §8.2 (highest_score, the default; prefer_authoritative_sources; prefer_recent;
+          prefer_high_confidence; merge_with_uncertainty; escalate_to_human)'
   output_schema:
     type: object
     required:
@@ -1046,10 +1660,37 @@ nodes:
         description: Source provenance
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: execute
   layer: EXECUTE
   description: Run code or script deterministically
@@ -1092,6 +1733,37 @@ nodes:
         type: integer
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: mutate
   layer: EXECUTE
   description: Change persistent state
@@ -1130,6 +1802,37 @@ nodes:
         description: State after mutation
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: send
   layer: EXECUTE
   description: Transmit data to external system
@@ -1145,7 +1848,9 @@ nodes:
     properties:
       destination:
         type: string
-        description: Target system/endpoint
+        description: Where the data goes, in the host's naming (a URL, an address,
+          a queue or a channel); checked against the destination policies in force
+          (Standard v1.2 §4.4.2)
       payload:
         type: any
         description: Data to send
@@ -1160,14 +1865,59 @@ nodes:
     properties:
       sent:
         type: boolean
+        description: Whether the destination accepted the data; a delivered transmission
+          cannot be recalled (Standard v1.2 §4.4.2)
       response:
         type: any
         description: Response if any
       timestamp:
         type: string
         format: date-time
+      compensation:
+        type: object
+        description: How the transmission's effect can be compensated, in the form
+          of world_state_schema.yaml TransitionRule.rollback; nothing performs it
+          automatically (Standard v1.2 §4.4.2)
+        properties:
+          strategy:
+            type: string
+          inverse_effects:
+            type: array
+            items:
+              type: string
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: verify
   layer: VERIFY
   description: Check that conditions are met
@@ -1204,10 +1954,37 @@ nodes:
         description: Failed conditions
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported unless the host documents a calibration (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: checkpoint
   layer: VERIFY
   description: Save state for potential recovery
@@ -1220,7 +1997,9 @@ nodes:
     properties:
       scope:
         type: string
-        description: What to checkpoint
+        description: What to capture, in the host's naming (paths or patterns, keys,
+          resource identifiers, e.g. separated by white space); '*' for everything
+          the host can restore (Standard v1.2 §4.4.1)
       label:
         type: string
         description: Checkpoint name
@@ -1242,8 +2021,66 @@ nodes:
       size:
         type: integer
         description: Checkpoint size
+      mechanism:
+        type: string
+        description: How the checkpoint was taken, e.g. vcs_snapshot, file_copy, store_snapshot,
+          savepoint, or an x- name (Standard v1.2 §4.4.1)
+      captured:
+        type: array
+        items:
+          type: string
+        description: What the checkpoint holds, in the host's naming
+      excluded:
+        type: array
+        items:
+          type: string
+        description: What the scope named that the checkpoint does not hold, such
+          as a secret the host will not copy or the host's own records, which no checkpoint
+          holds (Standard v1.2 §4.4.1)
+      digest:
+        type: string
+        description: Digest of the captured content as <algorithm>:<lowercase hex>,
+          e.g. sha256 followed by the hex digest, which a rollback's verification
+          compares
+      expires_at:
+        type: string
+        format: date-time
+        description: When the host may discard the content, after which a rollback
+          cannot restore it; not its validity for authorising a step (Standard v1.2
+          §5.2.2)
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: rollback
   layer: VERIFY
   description: Restore to previous checkpoint
@@ -1259,7 +2096,9 @@ nodes:
         description: Checkpoint to restore
       scope:
         type: string
-        description: What to rollback
+        description: Part of what the checkpoint captured to restore, in the host's
+          naming; all of it when absent. An item it names that the checkpoint did
+          not capture is unrestored (not_captured) (Standard v1.2 §4.4.1)
   output_schema:
     type: object
     required:
@@ -1268,14 +2107,113 @@ nodes:
     properties:
       restored:
         type: boolean
+        description: True only if everything the rollback concerns is back in its
+          checkpointed state, and then unrestored is empty; the step completes either
+          way (Standard v1.2 §4.4.1)
       previous_state:
         type: any
         description: State before rollback
       restored_state:
         type: any
         description: State after rollback
+      unrestored:
+        type: array
+        description: What the rollback concerns that is not back in its checkpointed
+          state, including an item its scope names that the checkpoint did not capture;
+          empty exactly when restored is true
+        items:
+          type: object
+          required:
+          - item
+          - reason
+          properties:
+            item:
+              type: string
+            reason:
+              type: string
+              description: failed, conflict, discarded, not_captured (the rollback's
+                scope names it and the checkpoint did not capture it), or an x- reason
+            detail:
+              type: string
+      not_covered:
+        type: array
+        description: Changes since the checkpoint that it never covered, which no
+          rollback to it restores; they do not make restored false
+        items:
+          type: object
+          required:
+          - item
+          - reason
+          properties:
+            item:
+              type: string
+            reason:
+              type: string
+              description: transmitted, delegated, outside_scope, or an x- reason
+            detail:
+              type: string
+      changes_reverted:
+        type: array
+        description: What the rollback undid
+        items:
+          type: object
+          required:
+          - item
+          - operation
+          properties:
+            item:
+              type: string
+            operation:
+              type: string
+              enum:
+              - create
+              - modify
+              - delete
+              - other
+            summary:
+              type: string
+      verification:
+        type: object
+        description: The digest of the restored content, computed as the checkpoint's
+          was, and whether it matches the checkpoint's digest
+        properties:
+          digest:
+            type: string
+          match:
+            type: boolean
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: constrain
   layer: VERIFY
   description: Enforce limits and policies
@@ -1333,6 +2271,37 @@ nodes:
               type: string
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: audit
   layer: VERIFY
   description: Record what happened and why
@@ -1350,13 +2319,23 @@ nodes:
     properties:
       event:
         type: object
-        description: Event to record
+        description: What happened, as the step reports it. The implementation records
+          it, whatever its shape, as details.event of an action record of its own
+          (capability audit), whose recorded_by and chain fields it sets itself; no
+          member of the event becomes a member of that record (Standard v1.2 §6.4).
       context:
         type: object
         description: Event context
       retention:
         type: string
-        description: How long to retain
+        description: How long the record is to be kept in the store it is written
+          to, a duration (Standard v1.2 §5.10.1, e.g. 2555d or P30D); absent, the
+          store's own policy applies (§6.3). A literal outside the grammar is W614.
+      require_record:
+        type: boolean
+        description: The record must be written. When true, the step fails (R402,
+          reason not_recorded) unless the output's recorded is true (Standard v1.2
+          §6.4). Default false.
   output_schema:
     type: object
     required:
@@ -1365,14 +2344,69 @@ nodes:
     properties:
       recorded:
         type: boolean
+        description: Whether the record was written.
       audit_id:
         type: string
         description: Audit record ID
+      record:
+        type: object
+        description: The action record written for the event (Standard v1.2 §6.4).
+      store:
+        type: object
+        description: Where the record was written, so a workflow can tell whether
+          it outlives the session (Standard v1.2 §6.3, §6.6)
+        properties:
+          name:
+            type: string
+            description: The store, as the host documents it
+          durability:
+            type: string
+            enum:
+            - memory
+            - session
+            - durable
+            description: memory - lost when its process ends; session - deleted with
+              the session or thread; durable - kept until its retention removes it
+          retention:
+            type: string
+            description: The retention the store applies to the record, a duration
+              (§5.10.1); absent when it keeps records until they are removed by hand
       timestamp:
         type: string
         format: date-time
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: persist
   layer: REMEMBER
   description: Store data durably
@@ -1385,13 +2419,21 @@ nodes:
     properties:
       data:
         type: any
-        description: Data to store
+        description: Data to store; it round-trips as I-JSON, and data holding a secret
+          the host recognises is refused (Standard v1.2 §4.5, §6.7)
       key:
         type: string
-        description: Storage key
+        description: Storage key; without one the host chooses it and returns it as
+          key
       ttl:
         type: string
-        description: Time to live
+        description: Time to live, a duration (Standard v1.2 §5.10.1) longer than
+          zero; the entry ends ttl after stored_at (§4.5)
+      scope:
+        type: string
+        description: Who can read the entry and how long it lasts, one of run (the
+          run the host started and every run nested in it), session, user, project,
+          global or an x- name; the host's default when absent (Standard v1.2 §4.5)
   output_schema:
     type: object
     required:
@@ -1400,14 +2442,59 @@ nodes:
     properties:
       stored:
         type: boolean
+        description: When true, a recall of the key in the scope returns the data
+          until the entry ends; when false, nothing was written (Standard v1.2 §4.5)
       key:
         type: string
         description: Storage key
+      scope:
+        type: string
+        description: The scope used
+      stored_at:
+        type: string
+        format: date-time
+        description: When the entry was stored
+      expires_at:
+        type: string
+        format: date-time
+        description: When the entry ends, for an entry with a ttl
       timestamp:
         type: string
         format: date-time
+        description: Deprecated, the same instant as stored_at (Standard v1.2 §4.5)
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: recall
   layer: REMEMBER
   description: Retrieve previously stored data
@@ -1420,10 +2507,13 @@ nodes:
     properties:
       key:
         type: string
-        description: Storage key
+        description: Storage key, compared by code point
       default:
         type: any
         description: Default if not found
+      scope:
+        type: string
+        description: The scope to read, as for persist (Standard v1.2 §4.5)
   output_schema:
     type: object
     required:
@@ -1432,14 +2522,55 @@ nodes:
     properties:
       data:
         type: any
-        description: Retrieved data
+        description: The entry's data, or default when no live entry has the key
       found:
         type: boolean
+        description: Whether a live entry has the key in the scope (Standard v1.2
+          §4.5)
+      scope:
+        type: string
+        description: The scope used
       stored_at:
         type: string
         format: date-time
+        description: When the entry was stored
+      expires_at:
+        type: string
+        format: date-time
+        description: When the entry ends, for an entry with a ttl
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: delegate
   layer: COORDINATE
   description: Assign task to another agent
@@ -1456,7 +2587,8 @@ nodes:
         description: Task to delegate
       agent:
         type: string
-        description: Target agent
+        description: Target agent, by the name its agent manifest and the workflow's
+          agents use; a target name, not a principal (STANDARD v1.2 §5.15, §5.15.2)
       constraints:
         type: object
         description: Delegation constraints
@@ -1466,15 +2598,25 @@ nodes:
           STANDARD v1.1 §5.15)
       model_family:
         type: string
-        description: Model family the delegate should run on (delegation@1)
+        description: Model family the delegate should run on, the lowercase name of
+          a provider's model line such as claude or gpt (as derived from a model identifier),
+          compared exactly (delegation@1, STANDARD v1.2 §5.15)
       role:
         type: string
         description: Role the delegate takes, e.g. reviewer (delegation@1)
       read_only:
         type: boolean
-        description: The delegate may read but must not change anything (files,
-          repositories, external state); the host attests it in effective (delegation@1,
-          STANDARD v1.1 §5.15)
+        description: The delegate may read but must not change anything (files, repositories,
+          external state); the host attests it in effective. A host that cannot enforce
+          it refuses the delegation; in a workflow that targets 1.2, an accepted delegation
+          the host does not attest as read_only fails (delegation@1, STANDARD v1.2
+          §5.15, §5.15.2)
+      continues:
+        type: string
+        description: The task_id of an earlier delegation whose delegate the host
+          continues instead of starting a new one; the call still returns a task_id
+          of its own, a continued delegation never has a fresh context, and null delegates
+          anew (STANDARD v1.2 §5.15.3)
       accept_from:
         type: array
         items:
@@ -1522,10 +2664,22 @@ nodes:
             type: boolean
           model_family:
             type: string
+            description: The family of the model the delegate ran on, as the host
+              attests it, derived from the model's identifier (STANDARD v1.2 §5.15)
+          model_id:
+            type: string
+            description: The provider's identifier of the model the delegate ran on,
+              such as acme-large-2, as the host attests it (STANDARD v1.2 §5.15,
+              §5.17)
           role:
             type: string
           read_only:
             type: boolean
+          checkpointed:
+            type: boolean
+            description: The host attests that, before each change it makes, the delegate
+              has a checkpoint valid in the scope where that change is checked (Standard
+              v1.2 §5.15.4)
           identity:
             type: object
             description: The agent_identity of the party that took the delegation
@@ -1536,6 +2690,37 @@ nodes:
           v1.1 §5.13), with its sender (and, with identity@1, its sender_identity)
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: synchronize
   layer: COORDINATE
   description: Achieve state agreement across agents
@@ -1606,6 +2791,37 @@ nodes:
           (agent_identity_schema.yaml; identity@1, STANDARD v1.1 §5.17)
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: invoke
   layer: COORDINATE
   description: Execute a composed workflow
@@ -1642,6 +2858,37 @@ nodes:
         description: Execution time
       evidence_anchors:
         type: array
+        description: What the output is based on, as evidence anchors (Standard v1.2
+          §6.5). An empty list grounds nothing, and the output is then marked inferred
+          (§3.1).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
+      confidence:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The producer's probability that the output's claim is correct,
+          self-reported; given when the output is inferred (Standard v1.2 §3.1, §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 - id: inquire
   layer: COORDINATE
   description: Request clarification when input is ambiguous
@@ -1670,19 +2917,38 @@ nodes:
     - evidence_anchors
     - confidence
     properties:
+      inquiry_id:
+        type: string
+        description: Names this inquiry; the items that answer it carry the same inquiry_id,
+          so a wait can correlate on it (STANDARD v1.2 §5.13.1)
       questions:
         type: array
         items:
           type: object
           properties:
+            id:
+              type: string
+              description: Unique within the inquiry; an answer names it as its question_id
+                (STANDARD v1.2 §5.13.1)
             question:
               type: string
             parameter:
               type: string
-              description: What parameter this resolves
+              description: What parameter this resolves; keys the answer when the
+                question has no id
+            answer_type:
+              type: string
+              enum:
+              - text
+              - choice
+              - boolean
+              - number
+              description: 'The type of the answer: text is a string, choice one of
+                options, boolean or number (STANDARD v1.2 §5.13.1)'
             options:
               type: array
-              description: Suggested answers if bounded
+              description: Suggested answers if bounded; for answer_type choice, the
+                answers allowed
         description: Clarifying questions to resolve ambiguity
       ambiguity_analysis:
         type: object
@@ -1695,12 +2961,34 @@ nodes:
             type: number
       evidence_anchors:
         type: array
-        description: Evidence supporting the ambiguity assessment
+        description: Evidence supporting the ambiguity assessment (Standard v1.2 §6.5).
+        items:
+          anyOf:
+          - $ref: schemas/event_schema.yaml#/types/Anchor
+          - type: string
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an anchor given
+              by its ref alone, with no kind; accepted, never counted toward grounding,
+              removed in 2.0
+          - type: object
+            description: Deprecated legacy form (Standard v1.2 §6.5) - an object that
+              is not an evidence anchor (no kind, or a kind outside the vocabulary);
+              accepted, never counted toward grounding, removed in 2.0
       confidence:
         type: number
         minimum: 0
         maximum: 1
-        description: Confidence that clarification is needed
+        description: Confidence that clarification is needed (Standard v1.2 §4.1.1)
+      inference_method:
+        type: string
+        description: How the output was reached when it is not grounded in evidence;
+          with confidence it marks the output inferred (Standard v1.2 §3.1, §4.1.1).
+          A producer should use model_knowledge, deduction, induction, abduction,
+          analogy, statistical, simulation, assumption or an x- vendor value; a grounding
+          policy (§5.20) requires one of them.
+      uncertainty:
+        $ref: schemas/event_schema.yaml#/types/Uncertainty
+        description: The uncertainty of the output's principal value; its confidence
+          equals the output's confidence (Standard v1.2 §4.1.1)
 edge_types:
   requires:
     description: 'Hard dependency: the ''from'' capability MUST be satisfied before ''to'' can execute'
@@ -1719,8 +3007,12 @@ edge_types:
     semantics: Orders capabilities without requiring either to be present (V102); a step in the same parallel_group does not run before another
     transitive: true
   conflicts_with:
-    description: 'No concurrency: ''from'' and ''to'' must not run in the same parallel_group'
-    semantics: Validator MUST reject the pair within one parallel_group (F504); in sequence they are allowed
+    description: 'No concurrency within a workflow: ''from'' and ''to'' must not run
+      in the same parallel_group; the rule does not reach across runs or agents (STANDARD
+      v1.2 §4.3)'
+    semantics: Validator MUST reject the pair within one parallel_group (F504); in
+      sequence they are allowed; a trigger with overlap allow_all on a workflow that
+      exercises both, itself or through the workflows it invokes, is W623
     transitive: false
     symmetric: true
   alternative_to:

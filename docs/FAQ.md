@@ -368,6 +368,17 @@ flowchart TB
   rb -.->|restores| cp
 ```
 
+### Does a rollback undo a message I sent?
+
+No. The checkpoint before a `send` restores the agent's own state, not the
+transmission: once delivered, data cannot be recalled, and a rollback lists
+the send as `not_covered`, `transmitted`
+([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)). A send
+is made safe before it happens: a `constrain` step, an approval that shows
+the destination and the payload, a destination policy, and at most one
+transmission per approval (every retry carries the same idempotency key).
+To correct a send, send again in a step of its own.
+
 ---
 
 ## Implementation
@@ -526,7 +537,7 @@ See the [Modality Handling Guide](guides/MODALITY_HANDLING.md) for full details.
 
 ### How do modality profiles differ from regular domain profiles?
 
-Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision profile requires spatial coordinates for all detections, while the audio profile requires temporal anchors. These are declarations: a profile is informative data, and no shipped component checks an output against one (see [Status of Domain Profiles](domains/README.md#status-of-domain-profiles)).
+Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision and audio profiles require grounding for `detect`, `classify`, `predict`, `generate` and `transform`, with `file` among the anchor kinds: an image region or a time range is a `file` anchor whose `ref` holds the coordinates or the times (see the [Modality Handling Guide](guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality)). A profile takes effect where a host or safety layer applies it (Standard 1.2.0 §5.21): there, an output of a listed capability that is not grounded with an anchor of a listed kind, or marked inferred, fails (F505; see [Status of Domain Profiles](domains/README.md#status-of-domain-profiles)).
 
 ---
 
@@ -536,7 +547,7 @@ Modality profiles add source-type-specific trust weights and grounding requireme
 
 1. Follow the [Quickstart Guide](QUICKSTART.md) (10 min)
 2. Complete the [Tutorial](TUTORIAL.md) (30 min)
-3. Read the [Specification](../spec/STANDARD-v1.1.0.md)
+3. Read the [Specification](../spec/STANDARD-v1.2.0.md)
 
 ### Can I use this commercially?
 

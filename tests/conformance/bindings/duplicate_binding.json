@@ -1,0 +1,30 @@
+{
+  "description": "Two records for one tool are V110, and neither is loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "x",
+      "ontology": "2.2.0",
+      "capability": "observe"
+    },
+    {
+      "tool": "x",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V110",
+        "tool": "x"
+      },
+      {
+        "code": "V110",
+        "tool": "x"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

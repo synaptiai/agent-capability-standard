@@ -6,9 +6,11 @@ use super::canonical;
 use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
-    Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
-    Purpose, Replacement, Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
+    Action, Attendance, Body, CancelError, Checkpoint, Deferral, End, Frame, MAX_FRAMES, MAX_TIME,
+    Outcome, Pending, Purpose, Queued, RecordMode, Replacement, Response, ResumeOptions, Stage,
+    State, StepError, StepState, SubmitError, Terminal, check_inputs,
 };
+use crate::catalogs::Resolved;
 use crate::duration;
 use crate::expr::ast::RefAt;
 use crate::expr::eval::{self, Bindings};
@@ -122,11 +124,106 @@ fn later(now: u64, d: std::time::Duration) -> u64 {
         .min(MAX_TIME)
 }
 
+/// The reasons §5.19.7 defines. A host may also send a vendor reason
+/// (`x-…`, [`is_reason`]).
+pub(crate) const REASONS: &[&str] = &[
+    "unsupported_capability",
+    "unsupported_domain",
+    "not_recorded",
+    "outcome_unknown",
+    "key_conflict",
+    "destination_not_allowed",
+    "unsupported_scope",
+    "unsupported_ttl",
+    "over_capacity",
+    "secret_in_data",
+    "below_minimum_confidence",
+    "invalid_confidence",
+];
+
+/// Whether `t` is a reason (§5.19.7): one of [`REASONS`], or `x-`, then a
+/// lowercase letter or a digit, then at most 61 lowercase letters, digits,
+/// `_`, `.` or `-`.
+pub(crate) fn is_reason(t: &str) -> bool {
+    REASONS.contains(&t) || (crate::grounding::vendor(t) && t.len() <= 2 + 1 + 61)
+}
+
+/// The reason a failure came with (§5.19.7): a token, or a value a host gave
+/// that is not one, which is ignored and only traced.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Reason {
+    pub token: Option<String>,
+    pub ignored: Option<Value>,
+}
+
+impl Reason {
+    /// A reason the executor raises itself.
+    pub(crate) fn of(token: &str) -> Reason {
+        debug_assert!(is_reason(token), "{token} is not a reason");
+        Reason {
+            token: Some(token.to_string()),
+            ignored: None,
+        }
+    }
+
+    /// The `reason` member of a host's `Error` response.
+    fn from_response(v: Option<Value>) -> Reason {
+        match v {
+            None => Reason::default(),
+            Some(Value::String(t)) if is_reason(&t) => Reason {
+                token: Some(t),
+                ignored: None,
+            },
+            Some(other) => Reason {
+                token: None,
+                ignored: Some(other),
+            },
+        }
+    }
+
+    /// Add the reason to a trace event's detail: `reason`, or
+    /// `reason_ignored` for a value outside the grammar. Nothing without one.
+    fn annotate(&self, detail: &mut Value) {
+        if let Some(t) = &self.token {
+            detail["reason"] = json!(t);
+        }
+        if let Some(v) = &self.ignored {
+            detail["reason_ignored"] = v.clone();
+        }
+    }
+}
+
+/// How a run, or a nested run, failed.
+pub(crate) struct Fail {
+    pub code: String,
+    pub message: String,
+    /// The reason the failure came with (§5.19.7).
+    pub reason: Option<String>,
+}
+
+impl Fail {
+    /// A failure the executor makes, with no reason.
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Fail {
+        Fail {
+            code: code.into(),
+            message: message.into(),
+            reason: None,
+        }
+    }
+}
+
 /// What an approval request asked for.
 struct Asked<'s> {
     digest: &'s str,
     expires_at: Option<u64>,
     min: u64,
+    /// The approver as the request named it (§5.14): a person asked in
+    /// place of a mandate has no `mandate_ref`.
+    approver: &'s Value,
+    /// `identity@1`: the identities the decision attested (§5.17), checked
+    /// by `submit`; `None` when it carried none or the workflow does not
+    /// declare the extension.
+    identities: Option<Vec<Value>>,
 }
 
 pub(crate) struct Machine<'a> {
@@ -166,7 +263,8 @@ impl<'a> Machine<'a> {
 
     pub(crate) fn trace(&mut self, kind: &str, step: Option<usize>, detail: Value) {
         let event = json!({
-            "seq": self.st.trace.len(),
+            // Taken events count (§5.19.4): `seq` goes on where it left off.
+            "seq": self.st.trace_base + self.st.trace.len() as u64,
             "at": self.st.now,
             "kind": kind,
             "frame": self.names(),
@@ -182,17 +280,77 @@ impl<'a> Machine<'a> {
     }
 
     fn record(&mut self, status: &str, approval: Option<Value>) -> usize {
-        let step = self.frame_ref().step;
-        let purpose = self
-            .step_ref()
+        // A queued step a resumption re-entered continues its queued
+        // action: the record its deferral left is updated in place, with
+        // every decision and refusal of the step until it goes on or
+        // carries the action out (`carry_out_queued`), a re-ask and a
+        // recovery loop before then included (§5.14.1).
+        if let Some(r) = self.queued_record() {
+            let always_ask = self.always_ask();
+            self.stamp(r);
+            // check_state keeps every record an object.
+            let Some(record) = self.st.rec_mut(r).as_object_mut() else {
+                return r;
+            };
+            record.insert("status".into(), json!(status));
+            if always_ask {
+                record.insert("always_ask".into(), json!(true));
+            } else {
+                record.remove("always_ask");
+            }
+            match approval {
+                Some(a) => record.insert("approval".into(), a),
+                None => record.remove("approval"),
+            };
+            record.remove("reason");
+            record.remove("reason_code");
+            record.remove("code");
+            // The checkpoint of this pass, not of an earlier one (§6.4).
+            match self.frame_ref().cur.checkpoint_id.clone() {
+                Some(c) => self.st.rec_mut(r)["checkpoint_id"] = json!(c),
+                None => {
+                    if let Some(record) = self.st.rec_mut(r).as_object_mut() {
+                        record.remove("checkpoint_id");
+                    }
+                }
+            }
+            // Likewise the pass's idempotency key (§4.4.2).
+            match self.frame_ref().cur.idempotency_key.clone() {
+                Some(k) => self.st.rec_mut(r)["idempotency_key"] = json!(k),
+                None => {
+                    if let Some(record) = self.st.rec_mut(r).as_object_mut() {
+                        record.remove("idempotency_key");
+                    }
+                }
+            }
+            return r;
+        }
+        let top = self.st.frames.len() - 1;
+        self.push_record(top, status, approval)
+    }
+
+    /// Write a new action record for the current step of frame `i` (§6.4):
+    /// its correlation members, the run's actor, the step's `purpose` as
+    /// its intent and the checkpoint the step used. Returns its index.
+    fn push_record(&mut self, i: usize, status: &str, approval: Option<Value>) -> usize {
+        let f = &self.st.frames[i];
+        let step = &self.program.workflows[&f.workflow].steps[f.step];
+        let purpose = step
             .raw
             .get("purpose")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let n = self.st.records.len();
+            .unwrap_or_default();
+        let frame: Vec<String> = self.st.frames[..=i]
+            .iter()
+            .map(|f| f.workflow.clone())
+            .collect();
+        let n = self.st.records_written();
         let mut record = json!({
-            "action_id": format!("{}/{}/{step}/{n}", self.st.run_id, self.names().join("/")),
+            "action_id": format!("{}/{}/{}/{n}", self.st.run_id, frame.join("/"), f.step),
+            "run_id": self.st.run_id,
+            "frame": frame,
+            "step": f.step,
+            "capability": step.capability,
             "timestamp": iso(self.st.now),
             "actor": "agent",
             "intent": purpose,
@@ -202,8 +360,19 @@ impl<'a> Machine<'a> {
             record["actor"] = identity["kind"].clone();
             record["actor_identity"] = identity.clone();
         }
-        if self.always_ask() {
+        if self.always_ask_at(i) {
             record["always_ask"] = json!(true);
+        }
+        // An applied profile required a person for the step (§5.21.3).
+        if step.person {
+            record["person_required"] = json!(true);
+        }
+        if let Some(c) = &f.cur.checkpoint_id {
+            record["checkpoint_id"] = json!(c);
+        }
+        // Once the step has called its capability, its pass's key (§6.4).
+        if let Some(k) = &f.cur.idempotency_key {
+            record["idempotency_key"] = json!(k);
         }
         if let Some(a) = approval {
             record["approval"] = a;
@@ -212,33 +381,114 @@ impl<'a> Machine<'a> {
         n
     }
 
-    /// A record for an action that did not go ahead, with the reason.
-    fn record_refused(&mut self, status: &str, approval: Option<Value>, reason: &str) {
+    /// In record mode `actions` (§6.4): a record of its own for a
+    /// failure-mode checkpoint or a rollback of the current step, with the
+    /// step's correlation members and `purpose`; it is not the step's record.
+    fn side_record(
+        &mut self,
+        capability: &str,
+        status: &str,
+        checkpoint_id: Option<String>,
+        code: Option<&str>,
+    ) {
+        if self.st.records_mode != RecordMode::Actions {
+            return;
+        }
+        let top = self.st.frames.len() - 1;
+        let r = self.push_record(top, status, None);
+        let record = self.st.rec_mut(r);
+        record["capability"] = json!(capability);
+        // The step's pass key is not this action's (§4.4.2).
+        if let Some(m) = record.as_object_mut() {
+            m.remove("idempotency_key");
+        }
+        match checkpoint_id {
+            Some(c) => record["checkpoint_id"] = json!(c),
+            None => {
+                if let Some(m) = record.as_object_mut() {
+                    m.remove("checkpoint_id");
+                }
+            }
+        }
+        if let Some(code) = code {
+            record["code"] = json!(code);
+        }
+    }
+
+    /// Record `r` is written again now: it takes the time and the actor of
+    /// then (§5.14.1, §5.17).
+    fn stamp(&mut self, r: usize) {
+        let now = iso(self.st.now);
+        let actor = self.st.actor_identity.clone();
+        let Some(record) = self.st.rec_mut(r).as_object_mut() else {
+            return;
+        };
+        record.insert("timestamp".into(), json!(now));
+        record.insert("actor".into(), json!("agent"));
+        record.remove("actor_identity");
+        if let Some(identity) = actor {
+            record.insert("actor".into(), identity["kind"].clone());
+            record.insert("actor_identity".into(), identity);
+        }
+    }
+
+    /// A record for an action that did not go ahead, with the reason and,
+    /// when the step fails for it, the code (§6.4).
+    fn record_refused(
+        &mut self,
+        status: &str,
+        approval: Option<Value>,
+        reason: &str,
+        code: Option<&str>,
+    ) {
         let r = self.record(status, approval);
-        self.st.records[r]["reason"] = json!(reason);
+        self.st.rec_mut(r)["reason"] = json!(reason);
+        if let Some(code) = code {
+            self.st.rec_mut(r)["code"] = json!(code);
+        }
         self.frame().cur.record = Some(r);
     }
 
     fn set_record_status(&mut self, status: &str) {
         if let Some(r) = self.frame_ref().cur.record {
-            self.st.records[r]["status"] = json!(status);
+            self.st.rec_mut(r)["status"] = json!(status);
         }
     }
 
     /// An approved action that then failed. A record that is already
     /// rejected, expired or executed keeps its status.
     fn record_failed(&mut self) {
+        let error = self.frame_ref().cur.error.clone();
         if let Some(r) = self.frame_ref().cur.record
-            && self.st.records[r]["status"] == "approved"
+            && self.st.rec(r)["status"] == "approved"
         {
-            self.st.records[r]["status"] = json!("failed");
+            let record = self.st.rec_mut(r);
+            record["status"] = json!("failed");
+            // The code and the reason the step failed with (§5.19.7, §6.4).
+            if let Some(e) = error {
+                record["code"] = json!(e.code);
+                if let Some(reason) = e.reason {
+                    record["reason_code"] = json!(reason);
+                }
+            }
         }
     }
 
     // ---- actions ----
 
     fn emit(&mut self, body: Body, purpose: Purpose, deadline: Option<u64>) -> Flow {
+        // The step starts its pass with its first checkpoint, call or wait
+        // (§5.19.5).
+        if matches!(
+            (&body, &purpose),
+            (Body::CreateCheckpoint { .. }, Purpose::Checkpoint)
+                | (Body::InvokeCapability { .. }, _)
+                | (Body::AwaitEvent { .. }, _)
+        ) {
+            self.frame().cur.started = true;
+        }
         let action = Action {
+            run_id: self.st.run_id.clone(),
             id: self.st.next_id,
             frame: self.names(),
             body,
@@ -252,31 +502,27 @@ impl<'a> Machine<'a> {
         Flow::Wait
     }
 
-    fn finish(&mut self, body: Body) -> Flow {
-        let action = Action {
+    /// The run ends: its terminal action's head is stored, and `next()`
+    /// derives the records, outputs and deferrals from the state.
+    fn finish(&mut self, end: End) -> Flow {
+        let terminal = Terminal {
             id: self.st.next_id,
             frame: self.names(),
-            body,
+            end,
         };
         self.st.next_id += 1;
         self.st.pending = None;
-        self.st.finished = Some(action);
+        self.st.finished = Some(terminal);
         Flow::Wait
     }
 
     /// End the whole run from any frame (replanning ends every frame).
     fn finish_run(&mut self, outcome: Outcome) -> Flow {
         self.trace("run_finished", None, json!({"outcome": outcome}));
-        let outputs = Value::Object(self.st.frames[0].stores.clone());
-        let records = self.st.records.clone();
-        let deferred = self.deferred_report();
-        self.finish(Body::Completed {
+        self.finish(End::Completed {
             outcome,
             cause: None,
             ended: None,
-            outputs,
-            action_records: records,
-            deferred,
         })
     }
 
@@ -320,12 +566,40 @@ impl<'a> Machine<'a> {
 
     /// The step failed before or while executing: on to its failure modes.
     fn step_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        self.step_error_with(code, message, Reason::default())
+    }
+
+    /// [`Machine::step_error`] with the reason the failure came with
+    /// (§5.19.7): the step keeps it, and the trace shows it.
+    fn step_error_with(&mut self, code: &str, message: impl Into<String>, reason: Reason) -> Flow {
         let message = message.into();
-        self.trace_step("step_failed", json!({"code": code, "message": message}));
+        let mut detail = json!({"code": code, "message": message});
+        reason.annotate(&mut detail);
+        self.trace_step("step_failed", detail);
+        // Record mode `actions` (§6.4): a step that fails after it started
+        // has a `failed` record of the pass.
+        if self.st.records_mode == RecordMode::Actions {
+            let cur = &self.frame_ref().cur;
+            if cur.record.is_none() && cur.started {
+                let r = self.record("failed", None);
+                self.frame().cur.record = Some(r);
+                let record = self.st.rec_mut(r);
+                record["code"] = json!(code);
+                if let Some(t) = &reason.token {
+                    record["reason_code"] = json!(t);
+                }
+            }
+        }
         self.frame().cur.error = Some(StepError {
             code: code.to_string(),
             message,
+            reason: reason.token,
         });
+        // In either mode, an approved record of the step is `failed`, with
+        // the code and the reason, from the moment the step fails: its
+        // failure modes' checkpoint or rollback, or a cancel before they
+        // finish, does not change what happened to the action (§5.19.5).
+        self.record_failed();
         self.set_stage(Stage::Failure)
     }
 
@@ -339,8 +613,32 @@ impl<'a> Machine<'a> {
         self.next_step()
     }
 
-    /// After a step: the next one, or the end of an escalation.
+    /// After a step: the next one, or the end of an escalation. During a
+    /// resumption, the next step of its list (§5.14.1).
     fn next_step(&mut self) -> Flow {
+        // The step goes on: the queued action it continued closes. A loop
+        // that runs a later step again keeps that step's.
+        if self.queued_record().is_some() {
+            self.settle_queued();
+        }
+        if let Some(list) = self.frame_ref().resume.clone() {
+            if let Some(&next) = list.first() {
+                let f = self.frame();
+                f.step = next;
+                f.stage = Stage::Begin;
+                return Flow::Continue;
+            }
+            self.frame().resume = None;
+            if self.frame_ref().escalation.is_none() {
+                // The list is done: every later step ran before the deferral
+                // (or a gate ended the run), and its output stands.
+                let len = self.workflow().steps.len();
+                let f = self.frame();
+                f.step = len;
+                f.stage = Stage::Begin;
+                return Flow::Continue;
+            }
+        }
         if let Some(cause) = self.frame_ref().escalation.clone() {
             // A handler that was deferred (or whose nested run deferred
             // steps) did not finish handling: the run is deferred, not
@@ -366,6 +664,15 @@ impl<'a> Machine<'a> {
         let step = self.frame_ref().step;
         self.trace_step("run_ended", json!({"message": message}));
         self.frame().ended = Some(json!({"step": step, "message": message}));
+        // During a resumption, the queued steps after it, and a deferred
+        // handler, will not run: their queued actions are superseded.
+        if let Some(left) = self.frame().resume.take() {
+            self.supersede_queued(
+                &left,
+                "superseded: a gate ended the resumed run before the step",
+            );
+        }
+        self.frame().pending_escalation = None;
         if self.frame_ref().escalation.is_some() {
             return self.next_step();
         }
@@ -373,26 +680,37 @@ impl<'a> Machine<'a> {
     }
 
     fn fail_run(&mut self, code: &str, message: &str) -> Flow {
+        self.fail_run_with(Fail::new(code, message))
+    }
+
+    /// End the run with `fail`; the `Failed` action carries its reason.
+    fn fail_run_with(&mut self, fail: Fail) -> Flow {
         let step = self.st.frames.last().map(|f| f.step);
-        self.trace(
-            "run_failed",
+        let mut detail = json!({"code": fail.code, "message": fail.message});
+        if let Some(r) = &fail.reason {
+            detail["reason"] = json!(r);
+        }
+        self.trace("run_failed", step, detail);
+        self.finish(End::Failed {
+            code: fail.code,
             step,
-            json!({"code": code, "message": message}),
-        );
-        let records = self.st.records.clone();
-        let deferred = self.deferred_report();
-        self.finish(Body::Failed {
-            code: code.to_string(),
-            step,
-            message: message.to_string(),
-            action_records: records,
-            deferred,
+            message: fail.message,
+            reason: fail.reason,
+            checkpoint_id: None,
         })
     }
 
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
-    fn end_frame(&mut self, end: Result<(Outcome, Option<String>), (String, String)>) -> Flow {
+    fn end_frame(&mut self, end: Result<(Outcome, Option<String>), Fail>) -> Flow {
+        // The frame fails while its step has failed: an approved record of
+        // the step is failed (§6.4). `step_error_with` failed it already; a
+        // state an earlier executor saved while the step's failure mode ran
+        // may still hold it `approved`.
+        if end.is_err() && self.frame_ref().cur.error.is_some() {
+            self.record_failed();
+        }
+        self.settle_queued();
         // A run that completed with deferred steps ends deferred.
         let end = match end {
             Ok((Outcome::Completed, cause)) if !self.frame_ref().deferred.is_empty() => {
@@ -408,20 +726,14 @@ impl<'a> Machine<'a> {
                         None,
                         json!({"outcome": outcome, "cause": cause}),
                     );
-                    let outputs = Value::Object(self.st.frames[0].stores.clone());
-                    let records = self.st.records.clone();
-                    let deferred = self.deferred_report();
                     let ended = self.st.frames[0].ended.clone();
-                    self.finish(Body::Completed {
+                    self.finish(End::Completed {
                         outcome,
                         cause,
                         ended,
-                        outputs,
-                        action_records: records,
-                        deferred,
                     })
                 }
-                Err((code, message)) => self.fail_run(&code, &message),
+                Err(fail) => self.fail_run_with(fail),
             };
         }
         let child = self.st.frames.pop().expect("checked above");
@@ -430,7 +742,7 @@ impl<'a> Machine<'a> {
         }
         let result = match &end {
             Ok((o, _)) => json!(o),
-            Err((c, _)) => json!(c),
+            Err(f) => json!(f.code),
         };
         self.trace_step(
             "invoke_returned",
@@ -447,10 +759,20 @@ impl<'a> Machine<'a> {
                     .filter(|s| child.stores.contains_key(*s))
                     .map(|s| json!(s))
                     .collect();
+                // With grounding@1, the invoking workflow's step carries the
+                // anchors of its nested run's stored outputs (§5.20); else
+                // none, as in 1.1.
+                let anchors = if self.program.workflows[&self.frame_ref().workflow]
+                    .extension("grounding@1")
+                {
+                    nested_anchors(&self.program.workflows[&child.workflow], &child.stores)
+                } else {
+                    Vec::new()
+                };
                 self.frame().cur.output = Some(json!({
                     "result": Value::Object(child.stores),
                     "steps_executed": steps,
-                    "evidence_anchors": [],
+                    "evidence_anchors": anchors,
                 }));
                 self.set_stage(Stage::After)
             }
@@ -477,10 +799,10 @@ impl<'a> Machine<'a> {
             // records are the queued actions.
             Ok((Outcome::Deferred, None)) => {
                 if let Some(r) = self.frame_ref().cur.record
-                    && self.st.records[r]["status"] == "approved"
+                    && self.st.rec(r)["status"] == "approved"
                 {
-                    self.st.records[r]["status"] = json!("executed");
-                    self.st.records[r]["reason"] =
+                    self.st.rec_mut(r)["status"] = json!("executed");
+                    self.st.rec_mut(r)["reason"] =
                         json!("its nested run deferred steps, which are queued separately");
                 }
                 let wf = &self.program.workflows[&child.workflow];
@@ -488,19 +810,31 @@ impl<'a> Machine<'a> {
                     .deferred
                     .iter()
                     .map(|&d| wf.steps[d].capability.clone())
-                    .chain(child.nested_caps.into_values().flatten())
+                    .chain(
+                        child
+                            .deferred
+                            .iter()
+                            .filter_map(|d| child.nested_caps.get(d))
+                            .flatten()
+                            .cloned(),
+                    )
                     .collect();
                 caps.sort_unstable();
                 caps.dedup();
                 let step = self.frame_ref().step;
-                self.frame().nested_caps.insert(step, caps);
-                self.defer_step(&format!(
-                    "invoked workflow '{}' deferred steps",
-                    child.workflow
-                ))
+                let why = format!("invoked workflow '{}' deferred steps", child.workflow);
+                // Kept, at rest, so that a resumption continues it (§5.14.1).
+                let mut child = child;
+                child.stage = Stage::Begin;
+                child.step = wf.steps.len();
+                child.cur = StepState::default();
+                let f = self.frame();
+                f.nested_caps.insert(step, caps);
+                f.parked.insert(step, child);
+                self.defer_step(&why)
             }
             Ok((outcome, _)) => self.finish_run(outcome),
-            Err((code, message)) => self.exec_error(
+            Err(Fail { code, message, .. }) => self.exec_error(
                 "R402",
                 format!(
                     "invoked workflow '{}' failed with {code}: {message}",
@@ -513,8 +847,22 @@ impl<'a> Machine<'a> {
     // ---- stages ----
 
     fn begin(&mut self) -> Flow {
+        let index = self.frame_ref().step;
+        // A resumption runs its list in order (§5.14.1): this step leaves
+        // it. A deferred handler reached so takes up the escalation it was
+        // deferred under, before the handler check below reads it.
+        if self.frame_ref().resume.as_ref().and_then(|l| l.first()) == Some(&index) {
+            let handler = self.step_ref().handler;
+            let f = self.frame();
+            if let Some(list) = f.resume.as_mut() {
+                list.remove(0);
+            }
+            if handler && let Some(cause) = f.pending_escalation.take() {
+                f.escalation = Some(cause);
+            }
+        }
         let escalating = self.frame_ref().escalation.is_some();
-        let (index, count) = (self.frame_ref().step, self.workflow().steps.len());
+        let count = self.workflow().steps.len();
         if !escalating {
             if index >= count {
                 return self.end_frame(Ok((Outcome::Completed, None)));
@@ -539,6 +887,19 @@ impl<'a> Machine<'a> {
             replaces,
             ..StepState::default()
         };
+        // A step that begins while a deferral of its own is listed is one a
+        // resumption re-enters: it continues that queued action (§5.14.1).
+        // A recovery loop that runs it again keeps the action (`queued`).
+        let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
+        if let Some(pos) = self.st.deferrals.iter().position(|d| d.path == path) {
+            let d = self.st.deferrals.remove(pos);
+            if let Some(record) = d.record {
+                self.frame().queued = Some(Queued {
+                    step: index,
+                    record,
+                });
+            }
+        }
         let capability = self.step_ref().capability.clone();
         self.trace_step("step_started", json!({"capability": capability}));
         let program = self.program;
@@ -549,6 +910,26 @@ impl<'a> Machine<'a> {
         // world.
         if let Some(why) = self.deferred_cause(step) {
             return self.defer_step(&why);
+        }
+        // Not deferred: while a step of its frame is, it runs ahead (§5.14).
+        let f = self.frame();
+        if !f.deferred.is_empty()
+            && let Some(ahead) = &mut f.ahead
+        {
+            ahead.insert(index);
+        }
+        // A deferred invoke step whose nested run ended deferred continues
+        // it (the resumption reopened it); its condition, gates and inputs
+        // were settled when the invocation started.
+        if let Some(child) = self.frame().parked.remove(&index) {
+            let f = self.frame();
+            f.nested_caps.remove(&index);
+            f.stage = Stage::Execute;
+            // Its nested run goes on: the step has started (§5.19.5).
+            f.cur.started = true;
+            self.trace_step("invoke_resumed", json!({"workflow": child.workflow}));
+            self.st.frames.push(child);
+            return Flow::Continue;
         }
         if let Some(c) = &step.condition {
             let ok = match eval::eval_condition(c, &FrameBindings(self.frame_ref())) {
@@ -608,7 +989,108 @@ impl<'a> Machine<'a> {
             return self.step_error("R402", format!("the step's resolved inputs: {e}"));
         }
         self.frame().cur.inputs = inputs;
+        if step.capability == "send"
+            && let Some(message) = self.destination_refusal()
+        {
+            // Before approval and the checkpoint: no one is asked and no
+            // checkpoint is used for a send that may not go (§4.4.2). An
+            // executor refusal, not retried.
+            return self.step_error_with("F504", message, Reason::of("destination_not_allowed"));
+        }
+        // A delegation the executor refuses is refused here, once its inputs
+        // are resolved and before it is put to an approver or uses a
+        // checkpoint (§5.15.2).
+        if step.capability == "delegate"
+            && let Err(e) = self.delegate_target_error(step)
+        {
+            return self.step_error("R402", e);
+        }
         self.set_stage(Stage::Approval)
+    }
+
+    /// Why the current `send` step's destination may not go, if a
+    /// destination policy is in force and does not allow it (§4.4.2). The
+    /// policies in force are the host's, then each applied profile's
+    /// (§5.21.3). The message does not repeat the destination, which can
+    /// hold a credential (§6.7); the step's inputs hold it.
+    fn destination_refusal(&self) -> Option<String> {
+        let mut policies = self.st.destinations.clone();
+        policies.extend(self.program.policy.destinations());
+        if policies.is_empty() {
+            return None;
+        }
+        match self
+            .frame_ref()
+            .cur
+            .inputs
+            .get("destination")
+            .and_then(Value::as_str)
+        {
+            Some(d) if crate::destination::allowed(&policies, d) => None,
+            Some(_) => Some(format!(
+                "the step's destination is not one the {} destination {} in force {} (§4.4.2)",
+                policies.len(),
+                if policies.len() == 1 { "policy" } else { "policies" },
+                if policies.len() == 1 { "allows" } else { "all allow" },
+            )),
+            None => Some(
+                "the step's destination is not a string, so no destination policy in force can allow it (§4.4.2)"
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// Why the executor refuses a delegation in a workflow that declares
+    /// `agents` (§5.15.2): its resolved agent is not listed, its target
+    /// maxima are unknown, or its task does not fit the agent's manifest.
+    fn delegate_target_error(&self, step: &Step) -> Result<(), String> {
+        let wf = &self.program.workflows[&self.frame_ref().workflow];
+        let Some(listed) = &wf.agents else {
+            return Ok(());
+        };
+        let inputs = &self.frame_ref().cur.inputs;
+        let agent = match inputs.get("agent") {
+            Some(Value::String(a)) if listed.iter().any(|l| l == a) => a,
+            Some(Value::String(a)) => {
+                return Err(format!("agent '{a}' is not one of the workflow's agents"));
+            }
+            other => {
+                return Err(format!(
+                    "the delegation names no agent of the workflow's agents (agent is {})",
+                    other.map_or_else(|| "missing".to_string(), Value::to_string)
+                ));
+            }
+        };
+        if let Some(why) = &step.unbounded {
+            return Err(format!(
+                "the target maxima of this delegation are unknown: {why}; a workflow that declares agents delegates only to agents whose manifests the host gives"
+            ));
+        }
+        let Some(decl) = self.program.agents.get(agent).and_then(|m| m.task.as_ref()) else {
+            return Ok(());
+        };
+        let given: Vec<String> = match inputs.get("task") {
+            Some(Value::Object(t)) => t.keys().cloned().collect(),
+            None | Some(Value::Null) => Vec::new(),
+            Some(other) => {
+                return Err(format!(
+                    "the task for '{agent}' must be a mapping of its task inputs, found {}",
+                    crate::yaml::kind_of(other)
+                ));
+            }
+        };
+        let (undeclared, missing) = crate::agents::check_task(decl, &given);
+        if let Some(name) = undeclared.first() {
+            return Err(format!(
+                "'{agent}' has no task input '{name}'; the executor refuses undeclared inputs"
+            ));
+        }
+        if let Some(name) = missing.first() {
+            return Err(format!(
+                "'{agent}' needs task input '{name}', which the task does not give"
+            ));
+        }
+        Ok(())
     }
 
     /// Evaluate a gate; an evaluation error fires it (fail-safe).
@@ -644,9 +1126,9 @@ impl<'a> Machine<'a> {
     /// Roll back to the latest checkpoint; with none, the run fails (F503).
     fn rollback(&mut self, purpose: Purpose) -> Flow {
         let Some(cp) = self.st.checkpoints.last().map(|c| c.id.clone()) else {
-            return self.end_frame(Err((
-                "F503".to_string(),
-                "there is no checkpoint to roll back to".to_string(),
+            return self.end_frame(Err(Fail::new(
+                "F503",
+                "there is no checkpoint to roll back to",
             )));
         };
         let step = self.frame_ref().step;
@@ -670,6 +1152,11 @@ impl<'a> Machine<'a> {
             cp.valid = false;
             let id = cp.id.clone();
             self.trace_step("checkpoint_consumed", json!({"checkpoint_id": id}));
+            // The step's records name the checkpoint it uses (§6.4).
+            if let Some(r) = self.frame_ref().cur.record {
+                self.st.rec_mut(r)["checkpoint_id"] = json!(id);
+            }
+            self.frame().cur.checkpoint_id = Some(id);
             return self.set_stage(Stage::Execute);
         }
         let step = self.frame_ref().step;
@@ -697,9 +1184,25 @@ impl<'a> Machine<'a> {
             self.frame().cur.always_ask = true;
             self.trace_step("always_ask", json!({}));
         }
+        // A step an applied profile requires a person for (§5.21.3) is
+        // asked as an always-ask step is, but marks nothing: only the
+        // request and the decision change.
+        if self.step_ref().person && !self.frame_ref().cur.person {
+            self.frame().cur.person = true;
+            let profiles = self.step_ref().raised_by.clone();
+            self.trace_step("person_required", json!({"profiles": profiles}));
+        }
+        let required = marked || self.step_ref().person;
+        // So is a queued step that an attended resumption re-enters
+        // (§5.14.1); every request for a re-entered queued step names it
+        // while the step continues it (a re-ask and a retry included).
+        let queued = self.queued_record();
+        let person = required || (queued.is_some() && self.st.attendance == Attendance::Attended);
+        let queued_action_id =
+            queued.and_then(|r| self.st.rec(r)["action_id"].as_str().map(str::to_string));
         // A standing mandate needs no one present: it is asked even in an
         // unattended run, and the plan applies only if none covers the step.
-        let mandate = !marked
+        let mandate = !person
             && spec
                 .get("approver")
                 .and_then(|a| a.get("kind"))
@@ -708,6 +1211,8 @@ impl<'a> Machine<'a> {
         if self.st.attendance == Attendance::Unattended && !mandate {
             let why = if marked {
                 "the run is unattended and the step uses an item from an always-ask trust class"
+            } else if required {
+                "the run is unattended and an applied profile requires a person for this step"
             } else {
                 "the run is unattended"
             };
@@ -743,10 +1248,12 @@ impl<'a> Machine<'a> {
             .get("approver")
             .cloned()
             .unwrap_or_else(|| json!({"kind": "human"}));
-        if marked && let Value::Object(a) = &mut approver {
+        if person && let Value::Object(a) = &mut approver {
             a.insert("kind".into(), json!("human"));
             a.remove("mandate_ref");
-            a.insert("always_ask".into(), json!(true));
+            if required {
+                a.insert("always_ask".into(), json!(true));
+            }
         }
         // More approvers than any count can reach: the cap keeps the state
         // exactly representable (I-JSON) without changing the outcome.
@@ -772,6 +1279,7 @@ impl<'a> Machine<'a> {
                 shown,
                 digest: digest.clone(),
                 expires_at,
+                queued_action_id,
             },
             Purpose::Approval {
                 digest,
@@ -803,19 +1311,20 @@ impl<'a> Machine<'a> {
                     "rejected",
                     approval,
                     &format!("{why} (when_unattended: skip); the step was skipped"),
+                    None,
                 );
                 self.skip_step(&format!("approval needed, but {why}"))
             }
             "defer_to_queue" => {
                 let r = self.record("planned", approval);
-                self.st.records[r]["reason"] =
+                self.st.rec_mut(r)["reason"] =
                     json!(format!("{why} (when_unattended: defer_to_queue)"));
                 self.frame().cur.record = Some(r);
                 self.defer_step(why)
             }
             _ => {
                 let why = format!("approval is needed, but {why}");
-                self.record_refused("rejected", approval, &why);
+                self.record_refused("rejected", approval, &why, Some("F502"));
                 self.step_error("F502", why)
             }
         }
@@ -828,18 +1337,32 @@ impl<'a> Machine<'a> {
     fn defer_step(&mut self, why: &str) -> Flow {
         self.trace_step("step_deferred", json!({"reason": why}));
         let step = self.frame_ref().step;
+        // From a frame's first deferral on, the steps that run ahead of it
+        // are tracked, so that a resumption knows them (§5.14.1).
+        let f = self.frame();
+        if f.deferred.is_empty() {
+            f.ahead = Some(Default::default());
+        }
+        if let Some(ahead) = &mut f.ahead {
+            ahead.remove(&step);
+        }
         let record = match self.frame_ref().cur.record {
             // The queued action (when_unattended: defer_to_queue).
-            Some(r) if self.st.records[r]["status"] == "planned" => Some(r),
+            Some(r) if self.st.rec(r)["status"] == "planned" => Some(r),
             // An invoke that ran: its nested run's records are the queue.
             Some(_) => None,
             None if self.step_ref().requires_approval => {
                 let r = self.record("planned", None);
-                self.st.records[r]["reason"] = json!(why);
+                self.st.rec_mut(r)["reason"] = json!(why);
                 Some(r)
             }
             None => None,
         };
+        // A queued step deferred again keeps its record `planned`, under
+        // its deferral; it no longer continues it now.
+        if self.queued_record().is_some() {
+            self.frame().queued = None;
+        }
         let store_as = self.step_ref().store_as.clone();
         if let Some(store) = &store_as {
             let f = self.frame();
@@ -862,9 +1385,10 @@ impl<'a> Machine<'a> {
         self.next_step()
     }
 
-    /// A wait or delay ended: checkpoints taken before it describe a world
-    /// that may have changed, so they authorise nothing after it (W608).
-    fn invalidate_checkpoints(&mut self) {
+    /// A wait or delay ended, or the run resumed: checkpoints taken before
+    /// it describe a world that may have changed, so they authorise nothing
+    /// after it (W608, §5.14.1). Traced at `step`; returns the ids.
+    fn invalidate_checkpoints(&mut self, step: Option<usize>) -> Vec<String> {
         let invalidated: Vec<String> = self
             .st
             .checkpoints
@@ -876,11 +1400,13 @@ impl<'a> Machine<'a> {
             })
             .collect();
         if !invalidated.is_empty() {
-            self.trace_step(
+            self.trace(
                 "checkpoints_invalidated",
+                step,
                 json!({"checkpoint_ids": invalidated}),
             );
         }
+        invalidated
     }
 
     /// Why `step` must wait for a deferred step of this frame, if it must:
@@ -909,9 +1435,17 @@ impl<'a> Machine<'a> {
         if step.acts {
             return Some("it may act on the world, after a deferred step".to_string());
         }
+        // The capabilities nested runs deferred count for the deferred
+        // invoke steps only: during a resumption, an entry of a queued
+        // invoke step stays until its nested run continues.
         deferred()
             .map(|d| &d.capability)
-            .chain(f.nested_caps.values().flatten())
+            .chain(
+                f.deferred
+                    .iter()
+                    .filter_map(|d| f.nested_caps.get(d))
+                    .flatten(),
+            )
             .find(|c| step.after.contains(c))
             .map(|c| {
                 format!(
@@ -921,17 +1455,52 @@ impl<'a> Machine<'a> {
             })
     }
 
-    /// A recovery loop to `target` runs its steps again: they are no longer
-    /// deferred, here or in the nested runs under them, and the actions
-    /// they queued are superseded.
+    /// The steps a recovery loop to `target` runs again, in step order.
+    /// During a resumption, those from `target` to the step that loops,
+    /// after which the resumption goes on with its list; a handler among
+    /// them does not run, so a deferred one keeps its place last in the
+    /// list, its kept nested run and its queued actions (§5.14.1). Else
+    /// every step from `target` on.
+    fn rerun(&self, target: usize) -> Vec<usize> {
+        let f = self.frame_ref();
+        let steps = &self.workflow().steps;
+        if f.resume.is_some() && f.escalation.is_none() {
+            (target..=f.step).filter(|&k| !steps[k].handler).collect()
+        } else {
+            (target..steps.len()).collect()
+        }
+    }
+
+    /// A recovery loop to `target` runs its steps again (`rerun`): they are
+    /// no longer deferred, here or in the nested runs under them, and the
+    /// actions they queued are superseded. During a resumption they run
+    /// first, and then the steps left in its list, a deferred handler
+    /// last: the queued steps after the loop keep their queued actions, and
+    /// a step after it that ran ahead keeps its output.
     fn undefer_from(&mut self, target: usize) {
+        let rerun = self.rerun(target);
         let f = self.frame();
-        f.deferred.retain(|&d| d < target);
-        f.nested_caps.retain(|&k, _| k < target);
+        if let Some(list) = f.resume.as_mut()
+            && f.escalation.is_none()
+        {
+            list.splice(0..0, rerun.iter().copied());
+        }
+        f.deferred.retain(|d| !rerun.contains(d));
+        f.nested_caps.retain(|k, _| !rerun.contains(k));
+        f.parked.retain(|k, _| !rerun.contains(k));
+        if f.deferred.is_empty() {
+            f.ahead = None;
+        } else if let Some(ahead) = &mut f.ahead {
+            ahead.retain(|k| !rerun.contains(k));
+        }
         let depth = self.st.frames.len() - 1;
         let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
         self.supersede(
-            |d| d.path.len() > depth && d.path[..depth] == prefix[..] && d.path[depth] >= target,
+            |d| {
+                d.path.len() > depth
+                    && d.path[..depth] == prefix[..]
+                    && rerun.contains(&d.path[depth])
+            },
             "superseded: a recovery loop ran the step again",
         );
     }
@@ -942,6 +1511,7 @@ impl<'a> Machine<'a> {
         let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
         let step = self.frame_ref().step;
         self.frame().nested_caps.remove(&step);
+        self.frame().parked.remove(&step);
         self.supersede(
             |d| d.path.len() > path.len() && d.path[..path.len()] == path[..],
             "superseded: the invoke step ran its workflow again",
@@ -957,27 +1527,76 @@ impl<'a> Machine<'a> {
                 .partition(|d| gone(d));
         self.st.deferrals = kept;
         for r in dropped.iter().filter_map(|d| d.record) {
-            if self.st.records[r]["status"] == "planned" {
-                self.st.records[r]["status"] = json!("rejected");
-                self.st.records[r]["reason"] = json!(reason);
+            if self.st.rec(r)["status"] == "planned" {
+                self.reject_queued(r, reason);
             }
         }
     }
-    /// The run's deferrals, as the terminal action reports them.
-    fn deferred_report(&self) -> Vec<Value> {
-        self.st
-            .deferrals
-            .iter()
-            .map(|d| {
-                json!({
-                    "frame": d.frame,
-                    "step": d.path.last(),
-                    "store_as": d.store_as,
-                    "reason": d.reason,
-                    "action_id": d.record.map(|r| self.st.records[r]["action_id"].clone()),
-                })
-            })
-            .collect()
+
+    /// Queued action `r` is superseded. A resumed run writes the record
+    /// again, with the time and the actor of then (§5.14.1, §5.17); a run
+    /// that was not resumed leaves them, as 1.1 does.
+    fn reject_queued(&mut self, r: usize, reason: &str) {
+        if self.st.resumed {
+            self.stamp(r);
+        }
+        self.st.rec_mut(r)["status"] = json!("rejected");
+        self.st.rec_mut(r)["reason"] = json!(reason);
+    }
+
+    /// Supersede the deferrals of `steps` of the current frame, nested ones
+    /// included, and drop their kept nested runs: a resumption will not
+    /// re-enter them (§5.14.1). Steps of the list that only run again have
+    /// no deferral and are unaffected.
+    fn supersede_queued(&mut self, steps: &[usize], reason: &str) {
+        let depth = self.st.frames.len() - 1;
+        let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
+        self.supersede(
+            |d| {
+                d.path.len() > depth
+                    && d.path[..depth] == prefix[..]
+                    && steps.contains(&d.path[depth])
+            },
+            reason,
+        );
+        let f = self.frame();
+        f.parked.retain(|k, _| !steps.contains(k));
+        f.nested_caps.retain(|k, _| !steps.contains(k));
+    }
+
+    /// The record of the queued action the current step continues, if it
+    /// continues one (§5.14.1).
+    fn queued_record(&self) -> Option<usize> {
+        let f = self.frame_ref();
+        f.queued.filter(|q| q.step == f.step).map(|q| q.record)
+    }
+
+    /// The re-entered queued step went on, or the run left it: its queued
+    /// action closes. One whose step never reached its approval (skipped,
+    /// failed or ended first) is superseded.
+    fn settle_queued(&mut self) {
+        if let Some(q) = self.frame().queued.take()
+            && self.st.rec(q.record)["status"] == "planned"
+        {
+            self.reject_queued(
+                q.record,
+                "superseded: the step did not reach its approval when its run resumed",
+            );
+        }
+    }
+
+    /// The re-entered queued step performs its capability (calls it,
+    /// starts its nested run, waits for its event or evaluates its
+    /// quorum): it carries its queued action out, whatever the result, and
+    /// the action closes. Its record is that pass's (§6.4): a failure marks
+    /// it `failed`, and a recovery loop that runs the step again asks for a
+    /// new action, with a record of its own (§5.14.1 items 6, 7).
+    fn carry_out_queued(&mut self) {
+        if self.frame_ref().cur.record.is_some()
+            && self.frame_ref().cur.record == self.queued_record()
+        {
+            self.frame().queued = None;
+        }
     }
 
     fn decide(
@@ -992,29 +1611,82 @@ impl<'a> Machine<'a> {
             digest: expected,
             expires_at,
             min,
+            approver,
+            identities,
         } = asked;
         let spec = self.approval_spec();
         let now = self.st.now;
-        let distinct: std::collections::BTreeSet<&String> = approvers.iter().collect();
-        // A person was asked instead of the mandate (§5.17).
-        let mandate_ref = if self.always_ask() {
-            Value::Null
-        } else {
-            spec.get("approver")
-                .and_then(|a| a.get("mandate_ref"))
-                .cloned()
-                .unwrap_or(Value::Null)
+        // Who counts toward min_approvers (§5.14, §5.17): with attested
+        // identities, the principals whose identities meet the request;
+        // else the distinct strings of `approvers`, as the host vouches.
+        let wf = self.workflow();
+        let v12 = wf.targets_1_2;
+        let requires = v12
+            && (approver.get("sender_check").is_some()
+                || approver.get("accept_trust_classes").is_some());
+        let counting = match identities {
+            Some(list) => {
+                let mut by_principal: std::collections::BTreeMap<String, Value> =
+                    std::collections::BTreeMap::new();
+                for id in list {
+                    let p = id["principal"].as_str().unwrap_or_default().to_string();
+                    by_principal.entry(p).or_insert(id);
+                }
+                let mut counted = Vec::new();
+                let mut refused = Vec::new();
+                for (p, id) in by_principal {
+                    match meets(approver, &id, v12) {
+                        Ok(()) => counted.push((p, id)),
+                        Err(why) => refused.push(format!("{p} ({why})")),
+                    }
+                }
+                Counting {
+                    approvers: counted.iter().map(|(p, _)| p.clone()).collect(),
+                    identities: Some(counted.into_iter().map(|(_, id)| id).collect()),
+                    note: (!refused.is_empty())
+                        .then(|| format!("not counted: {}", refused.join(", "))),
+                    attested: true,
+                }
+            }
+            None if requires => Counting {
+                approvers: Vec::new(),
+                identities: None,
+                note: Some(
+                    "the approver requires attested identities (sender_check, accept_trust_classes), and the decision carries none"
+                        .into(),
+                ),
+                attested: true,
+            },
+            None => Counting {
+                approvers: approvers
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .cloned()
+                    .collect(),
+                identities: None,
+                note: None,
+                attested: false,
+            },
         };
+        // A person asked in place of a mandate (§5.17, §5.14.1) names none.
+        let mandate_ref = approver.get("mandate_ref").cloned().unwrap_or(Value::Null);
         let sub = |decision: &str| {
-            json!({
+            let mut sub = json!({
                 "digest": expected,
                 "decision": decision,
-                "approvers": distinct.iter().collect::<Vec<_>>(),
+                "approvers": counting.approvers,
                 "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
                 "mandate_ref": mandate_ref,
                 "decided_at": iso(now),
                 "expires_at": expires_at.map(iso),
-            })
+                // The host's identifier of the decision (§5.19.1, §6.4).
+                "decision_id": decision_id,
+            });
+            if let Some(ids) = &counting.identities {
+                sub["approver_identities"] = json!(ids);
+            }
+            sub
         };
         if decision == "unavailable" {
             // No one could decide: in an unattended run, the plan applies;
@@ -1028,24 +1700,31 @@ impl<'a> Machine<'a> {
             self.st.used_decisions.insert(decision_id.clone());
             let mut record = sub("unavailable");
             record["approvers"] = json!([]);
+            if let Value::Object(m) = &mut record {
+                m.remove("approver_identities");
+            }
             if self.st.attendance == Attendance::Unattended {
                 return self.unattended(Some(record), "no standing mandate covers the action");
             }
             let why = "the approver was unavailable";
-            self.record_refused("rejected", Some(record), why);
+            self.record_refused("rejected", Some(record), why, Some("F502"));
             return self.step_error("F502", why);
         }
         let reused = !self.st.used_decisions.insert(decision_id.clone());
+        let counted = counting.approvers.len() as u64;
         // (status, reason) for a decision that does not let the step run.
+        // A reason repeats neither the decision's id nor its value: both
+        // are the host's text, and a reason is a diagnostic, which holds no
+        // secret (§6.7); the trace's `approval_decided` names them.
         let problem: Option<(&str, String)> = if reused {
-            Some((
-                "rejected",
-                format!("decision '{decision_id}' was already used"),
-            ))
+            Some(("rejected", "the decision was already used".to_string()))
         } else if decision == "rejected" {
             Some(("rejected", "approval was rejected".to_string()))
         } else if decision != "approved" {
-            Some(("rejected", format!("'{decision}' is not a decision")))
+            Some((
+                "rejected",
+                "the decision is none of approved, rejected or unavailable".to_string(),
+            ))
         } else if expires_at.is_some_and(|e| now > e) {
             Some(("expired", "the approval expired".to_string()))
         } else if !canonical::same_digest(given, expected) {
@@ -1053,11 +1732,17 @@ impl<'a> Machine<'a> {
                 "rejected",
                 "the decision approves different values than were shown".to_string(),
             ))
-        } else if (distinct.len() as u64) < min {
-            Some((
-                "rejected",
-                format!("{} distinct approver(s), {min} needed", distinct.len()),
-            ))
+        } else if counted < min {
+            let mut why = if counting.attested {
+                format!("{counted} counted approver(s), {min} needed")
+            } else {
+                format!("{counted} distinct approver(s), {min} needed")
+            };
+            if let Some(note) = &counting.note {
+                why.push_str("; ");
+                why.push_str(note);
+            }
+            Some(("rejected", why))
         } else {
             None
         };
@@ -1067,7 +1752,7 @@ impl<'a> Machine<'a> {
         );
         if let Some((status, reason)) = problem {
             let sub = sub(status);
-            self.record_refused(status, Some(sub), &reason);
+            self.record_refused(status, Some(sub), &reason, Some("F502"));
             return self.step_error("F502", reason);
         }
         let r = self.record("approved", Some(sub("approved")));
@@ -1133,12 +1818,15 @@ impl<'a> Machine<'a> {
             }
             "stop" => {
                 self.set_record_status("expired");
+                if let Some(r) = self.frame_ref().cur.record {
+                    self.st.rec_mut(r)["code"] = json!("F502");
+                }
                 self.step_error("F502", "the approved source changed before acting")
             }
             _ => {
                 self.set_record_status("expired");
                 if let Some(r) = self.frame_ref().cur.record {
-                    self.st.records[r]["reason"] =
+                    self.st.rec_mut(r)["reason"] =
                         json!("the approved source changed; asked again");
                 }
                 let f = self.frame();
@@ -1246,6 +1934,7 @@ impl<'a> Machine<'a> {
             } else {
                 None
             };
+            self.carry_out_queued();
             return self.emit(
                 Body::AwaitEvent {
                     step: index,
@@ -1279,6 +1968,9 @@ impl<'a> Machine<'a> {
         {
             let identities =
                 self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+            // The executor runs the quorum itself: the step starts here.
+            self.frame().cur.started = true;
+            self.carry_out_queued();
             let result = quorum::evaluate(q, self.frame_ref(), identities);
             self.trace_step("quorum", json!({"tally": result.output["tally"]}));
             self.frame().cur.output = Some(result.output);
@@ -1294,6 +1986,23 @@ impl<'a> Machine<'a> {
         }
         let inputs = self.frame_ref().cur.inputs.clone();
         let attempt = self.frame_ref().cur.attempt;
+        // The pass's idempotency key (§4.4.2): the id of its first
+        // InvokeCapability, kept by every later attempt of the pass (a
+        // retry keeps `cur`; `begin` starts a new pass with a new one). A
+        // delegation that replaces another is a new one, with its own key.
+        let next = self.st.next_id;
+        let run_id = self.st.run_id.clone();
+        let cur = &mut self.frame().cur;
+        if cur.idempotency_key.is_none() || cur.replaces.is_some() {
+            cur.idempotency_key = Some(format!("{run_id}:{next}"));
+        }
+        let key = cur.idempotency_key.clone();
+        // The record of the pass carries the key once the step calls its
+        // capability (§6.4).
+        if let Some(r) = cur.record {
+            self.st.rec_mut(r)["idempotency_key"] = json!(key);
+        }
+        self.carry_out_queued();
         self.emit(
             Body::InvokeCapability {
                 step: index,
@@ -1307,6 +2016,7 @@ impl<'a> Machine<'a> {
                 inputs,
                 deadline,
                 attempt,
+                idempotency_key: key,
                 replaces: self.frame_ref().cur.replaces.clone(),
             },
             Purpose::Capability,
@@ -1327,7 +2037,32 @@ impl<'a> Machine<'a> {
             // meet the same refusal without the host ever being asked.
             return self.step_error("R402", "the invoke step names no workflow");
         };
-        let Some(child) = self.program.workflows.get(&target) else {
+        // The target resolves over the catalog set as the validator
+        // resolves it (§5.1.1); a computed one is checked here.
+        let key = match self
+            .program
+            .resolver
+            .resolve(&self.frame_ref().workflow, &target)
+        {
+            Resolved::Key(k) => k,
+            Resolved::Unresolved => {
+                return self
+                    .step_error("R402", format!("workflow '{target}' is not in the catalog"));
+            }
+            Resolved::NotExported { catalog, name } => {
+                return self.step_error(
+                    "R402",
+                    format!("catalog '{catalog}' does not export workflow '{name}'"),
+                );
+            }
+            Resolved::Missing { catalog, name } => {
+                return self.step_error(
+                    "R402",
+                    format!("catalog '{catalog}' has no workflow '{name}'"),
+                );
+            }
+        };
+        let Some(child) = self.program.workflows.get(&key) else {
             return self.step_error("R402", format!("workflow '{target}' is not in the catalog"));
         };
         if self.st.frames.len() >= MAX_FRAMES {
@@ -1344,9 +2079,12 @@ impl<'a> Machine<'a> {
         if let Err(e) = check_inputs(child, &child_inputs) {
             return self.step_error("R402", e);
         }
-        self.trace_step("invoke_started", json!({"workflow": target}));
+        self.trace_step("invoke_started", json!({"workflow": key}));
+        // Its nested run starts: so has the step (§5.19.5).
+        self.frame().cur.started = true;
+        self.carry_out_queued();
         self.undefer_nested();
-        let mut frame = Frame::new(&target, child_inputs);
+        let mut frame = Frame::new(&key, child_inputs);
         frame.marked = self.always_ask();
         self.st.frames.push(frame);
         Flow::Continue
@@ -1355,6 +2093,13 @@ impl<'a> Machine<'a> {
     /// An execution error: retried while attempts remain (R401, R402,
     /// R406), then on to the failure modes.
     fn exec_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        self.exec_error_with(code, message, Reason::default())
+    }
+
+    /// [`Machine::exec_error`] with the reason the error came with
+    /// (§5.19.7): the retry trace shows it, and the step keeps it when it
+    /// fails.
+    fn exec_error_with(&mut self, code: &str, message: impl Into<String>, reason: Reason) -> Flow {
         let message = message.into();
         let (attempt, retry) = {
             let s = self.step_ref();
@@ -1372,12 +2117,13 @@ impl<'a> Machine<'a> {
                 "exponential" => 1000u64.saturating_mul(1u64 << attempt.saturating_sub(1).min(32)),
                 _ => 0,
             };
-            let detail = json!({
+            let mut detail = json!({
                 "code": code,
                 "message": message,
                 "attempt": attempt,
                 "backoff_ms": wait_ms,
             });
+            reason.annotate(&mut detail);
             self.trace_step("retry", detail);
             // A delegate that waits is delegated again: a delegate
             // that went silent is replaced, not waited on again.
@@ -1393,10 +2139,10 @@ impl<'a> Machine<'a> {
             let until = self.st.now.saturating_add(wait_ms).min(MAX_TIME);
             return self.set_stage(Stage::Backoff { until });
         }
-        self.step_error(code, message)
+        self.step_error_with(code, message, reason)
     }
 
-    fn output(&mut self, value: Value) -> Flow {
+    fn output(&mut self, value: Value, seen: Option<&[String]>) -> Flow {
         let step = self.step_ref();
         let missing: Vec<&String> = match &value {
             Value::Object(m) => step
@@ -1425,14 +2171,88 @@ impl<'a> Machine<'a> {
                 format!("{detail}, which the '{capability}' contract requires"),
             );
         }
+        // In a workflow that targets 1.2 or later, the output is checked as
+        // §5.18.9's consumer checks one (§5.19.1), as a safety layer checks
+        // a call's (§5.18.10): before grounding (F505) and a minimum
+        // confidence (F504). Retried as any R402. Below 1.2, only the
+        // required fields, as 1.1 did.
+        if self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && let Some(detail) = contract_value_problem(&value, &step.required_outputs)
+        {
+            let capability = step.capability.clone();
+            return self.exec_error(
+                "R402",
+                format!("the output's {detail}, which the '{capability}' contract does not allow"),
+            );
+        }
+        // A memory step that bound a scope gets that scope or fails (§4.5):
+        // a host that does not know the input would store or look up
+        // elsewhere without saying so. Retried as any R402. Below 1.2,
+        // `scope` is an input the executor passes on and does not read, as
+        // 1.1 did (W616).
+        if matches!(step.capability.as_str(), "persist" | "recall")
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && let Some(bound) = self
+                .frame_ref()
+                .cur
+                .inputs
+                .get("scope")
+                .filter(|v| !v.is_null())
+            && value.get("scope") != Some(bound)
+        {
+            let message = format!(
+                "the step asked for memory scope {bound} and the output's scope is {}",
+                value
+                    .get("scope")
+                    .map_or_else(|| "absent".to_string(), Value::to_string)
+            );
+            return self.exec_error_with("R402", message, Reason::of("unsupported_scope"));
+        }
         let wf = &self.program.workflows[&self.frame_ref().workflow];
         // A delegation's attested identity is read under identity@1 only.
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
             && wf.extension("identity@1")
-            && let Some(e) = super::delegate_identity_error(&value)
+            && let Some(e) = super::delegate_identity_error(&value, wf.targets_1_2)
         {
             return self.exec_error("R402", e);
+        }
+        if step.capability == "delegate" && self.frame_ref().cur.delegated.is_none() {
+            let inputs = &self.frame_ref().cur.inputs;
+            let effective = value.get("effective");
+            let attests = |k: &str| effective.and_then(|e| e.get(k)) == Some(&Value::Bool(true));
+            // A continued delegation (§5.15.3) never has a fresh context,
+            // and returns a task_id of its own. Below 1.2, `continues` is an
+            // input the executor passes on and does not read, as 1.1 did.
+            if wf.targets_1_2
+                && let Some(Value::String(continues)) = inputs.get("continues")
+            {
+                if attests("fresh_context") {
+                    return self.exec_error(
+                        "R402",
+                        "a continued delegation cannot have a fresh context, but the host attests fresh_context: true",
+                    );
+                }
+                if value.get("task_id").and_then(Value::as_str) == Some(continues.as_str()) {
+                    return self.exec_error(
+                        "R402",
+                        "a continued delegation returned the task_id it continues; every delegation call returns its own (§5.15.3)",
+                    );
+                }
+            }
+            // A 1.2 delegation that relied on read_only (§5.15.2) fails when
+            // its host does not attest it; not retried: the delegate has
+            // already run.
+            if wf.targets_1_2
+                && value.get("accepted") == Some(&Value::Bool(true))
+                && inputs.get("read_only") == Some(&Value::Bool(true))
+                && !attests("read_only")
+            {
+                return self.step_error(
+                    "R402",
+                    "the host did not attest read_only, which this step's flags rely on; not retried: the delegate has already run",
+                );
+            }
         }
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
@@ -1449,6 +2269,12 @@ impl<'a> Machine<'a> {
                     "a delegation the step waits on needs a task_id to match its result",
                 );
             }
+            // The accepted delegation's output becomes the step's output
+            // once the result arrives (with `result` added): its
+            // confidence is checked now (§5.21.3).
+            if let Some(flow) = self.confidence_failure(&value) {
+                return flow;
+            }
             let mut traced = json!({"task_id": value.get("task_id")});
             if wf.extension("identity@1")
                 && let Some(p) = super::delegate_principal(&value)
@@ -1461,16 +2287,88 @@ impl<'a> Machine<'a> {
             f.cur.delegated = Some(value);
             return self.set_stage(Stage::Execute);
         }
+        // `require_record` (§6.4): an audit step that did not write its
+        // record fails, retried as any R402. Below 1.2, `require_record` is
+        // an input the executor passes on and does not read, as 1.1 did
+        // (W616).
+        if step.capability == "audit"
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && self.frame_ref().cur.inputs.get("require_record") == Some(&Value::Bool(true))
+            && value.get("recorded") != Some(&Value::Bool(true))
+        {
+            return self.exec_error_with(
+                "R402",
+                "the audit step did not write its record (recorded is not true)",
+                Reason::of("not_recorded"),
+            );
+        }
+        // Grounding (§5.20), after the checks of required fields (R402) and
+        // before the after-gates. A delegate that waits returned above: its
+        // acceptance is not its claim.
+        if let Err(message) = self.grounding_check(&value, seen) {
+            return self.step_error("F505", message);
+        }
+        // An applied profile's minimum confidence (§5.21.3), after the
+        // required fields and the grounding check, before the after-gates.
+        if let Some(flow) = self.confidence_failure(&value) {
+            return flow;
+        }
         if step.capability == "checkpoint" {
             let id = value
                 .get("checkpoint_id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| self.derived_checkpoint_id());
+            self.frame().cur.checkpoint_id = Some(id.clone());
             self.add_checkpoint(id);
         }
         self.frame().cur.output = Some(value);
         self.set_stage(Stage::After)
+    }
+
+    /// The step's failure when `value`, an output the host returned for
+    /// it, fails the applied profiles' minimum confidence (§5.21.3): F504
+    /// with `below_minimum_confidence` or `invalid_confidence`.
+    fn confidence_failure(&mut self, value: &Value) -> Option<Flow> {
+        let min = self.program.policy.minimum_confidence()?;
+        let fault = crate::profile::check_confidence(value, min)?;
+        Some(self.step_error_with("F504", fault.message(min), Reason::of(fault.reason())))
+    }
+
+    /// §5.20's check of a host's output for the current step: under every
+    /// policy that requires its capability (the frame workflow's own, then
+    /// the host's, then the applied profiles' (§5.21.3); the last two apply
+    /// in every frame), each on its own. With none, nothing is checked or
+    /// traced, as in 1.1. On success the trace gets one `grounding` event,
+    /// from the last policy checked.
+    fn grounding_check(&mut self, output: &Value, seen: Option<&[String]>) -> Result<(), String> {
+        let step = self.step_ref();
+        let wf = &self.program.workflows[&self.frame_ref().workflow];
+        let policies: Vec<&crate::grounding::Policy> = wf
+            .grounding
+            .iter()
+            .chain(&self.st.grounding)
+            .chain(&self.program.grounding)
+            .filter(|p| p.requires(&step.capability))
+            .collect();
+        let Some(last) = policies.len().checked_sub(1) else {
+            return Ok(());
+        };
+        let mut detail = Value::Null;
+        for (i, policy) in policies.iter().enumerate() {
+            let checked = crate::grounding::check(output, policy, &step.bound, seen)?;
+            if i == last {
+                detail = json!({
+                    "status": checked.status,
+                    "counted": checked.counted,
+                    "legacy": checked.legacy,
+                    "unattested": checked.unattested,
+                    "policies": policies.len(),
+                });
+            }
+        }
+        self.trace_step("grounding", detail);
+        Ok(())
     }
 
     fn derived_checkpoint_id(&self) -> String {
@@ -1486,11 +2384,15 @@ impl<'a> Machine<'a> {
     /// Whether the current step reads (in its bindings, condition or gates)
     /// a store or input marked always-ask (§5.17).
     fn always_ask(&self) -> bool {
-        let f = self.frame_ref();
+        self.always_ask_at(self.st.frames.len() - 1)
+    }
+
+    /// [`Machine::always_ask`] for the current step of frame `i`.
+    fn always_ask_at(&self, i: usize) -> bool {
+        let f = &self.st.frames[i];
         f.marked
             || !f.always_ask.is_empty()
-                && self
-                    .step_ref()
+                && self.program.workflows[&f.workflow].steps[f.step]
                     .reads
                     .iter()
                     .any(|r| f.always_ask.contains(r))
@@ -1627,7 +2529,8 @@ impl<'a> Machine<'a> {
             self.st.pending = Some(pending);
             return Flow::Wait;
         }
-        self.invalidate_checkpoints();
+        let at = self.frame_ref().step;
+        self.invalidate_checkpoints(Some(at));
         let mut item = event.clone();
         if let Value::Object(m) = &mut item {
             if let Some(p) = &principal {
@@ -1688,6 +2591,12 @@ impl<'a> Machine<'a> {
             let f = self.frame();
             f.stores.insert(store.clone(), out);
             f.ran_inputs.insert(store.clone(), inputs);
+        }
+        // Record mode `actions` (§6.4): one record for each pass of each
+        // step that runs; an approved step's record is that record.
+        if self.st.records_mode == RecordMode::Actions && self.frame_ref().cur.record.is_none() {
+            let r = self.record("executed", None);
+            self.frame().cur.record = Some(r);
         }
         self.set_record_status("executed");
         self.trace_step("step_completed", json!({}));
@@ -1755,10 +2664,12 @@ impl<'a> Machine<'a> {
             }
         }
         match error {
-            Some(e) => {
-                self.record_failed();
-                self.end_frame(Err((e.code, e.message)))
-            }
+            // end_frame fails the step's approved record.
+            Some(e) => self.end_frame(Err(Fail {
+                code: e.code,
+                message: e.message,
+                reason: e.reason,
+            })),
             None => match self.frame().cur.ending.take() {
                 Some(message) => self.end_run(message),
                 None => self.next_step(),
@@ -1772,27 +2683,38 @@ impl<'a> Machine<'a> {
         let wf = &program.workflows[&self.frame_ref().workflow];
         let step = &wf.steps[self.frame_ref().step];
         let fm = &step.failure_modes[f];
-        let (code, message) = match &self.frame_ref().cur.error {
-            Some(e) => (e.code.clone(), e.message.clone()),
+        let (code, message, reason) = match &self.frame_ref().cur.error {
+            Some(e) => (e.code.clone(), e.message.clone(), e.reason.clone()),
             None => (
                 "R402".to_string(),
                 format!(
                     "failure mode {f} fired: {}",
                     step.raw["failure_modes"][f]["condition"]
                 ),
+                None,
             ),
         };
+        let failed = |code: String, message: String| Fail {
+            code,
+            message,
+            reason: reason.clone(),
+        };
+        // As in `end_frame`: for a state an earlier executor saved while the
+        // failure mode's checkpoint or rollback was pending.
         if self.frame_ref().cur.error.is_some() {
             self.record_failed();
         }
+        // An escalation or the end of the run closes the step's queued
+        // action (`escalate`, `end_frame`); a loop runs the step again, which
+        // keeps it unless the step carried it out (`carry_out_queued`).
         if fm.action == "escalate" {
             return match fm.goto {
                 Some(h) => self.escalate(h, &code),
-                None => self.end_frame(Err((code, message))),
+                None => self.end_frame(Err(failed(code, message))),
             };
         }
         let Some(target) = fm.goto else {
-            return self.end_frame(Err((code, message)));
+            return self.end_frame(Err(failed(code, message)));
         };
         let key = format!("{}:{f}", step.index);
         let taken = self
@@ -1808,8 +2730,8 @@ impl<'a> Machine<'a> {
             );
             return match fm.on_exhausted {
                 Some(h) => self.escalate(h, "R404"),
-                None => self.end_frame(Err((
-                    "R404".to_string(),
+                None => self.end_frame(Err(Fail::new(
+                    "R404",
                     format!("recovery loop exhausted after {taken} loop(s): {message}"),
                 ))),
             };
@@ -1841,8 +2763,8 @@ impl<'a> Machine<'a> {
             self.frame().always_ask.insert("_recovery".to_string());
         }
         if let Err(e) = super::ijson(&Value::Object(injected.clone())) {
-            return self.end_frame(Err((
-                "R402".to_string(),
+            return self.end_frame(Err(Fail::new(
+                "R402",
                 format!("the context a recovery loop injects: {e}"),
             )));
         }
@@ -1882,9 +2804,10 @@ impl<'a> Machine<'a> {
                 }
             }
         }
-        let cleared: Vec<String> = wf.steps[target..]
-            .iter()
-            .filter_map(|s| s.store_as.clone())
+        let cleared: Vec<String> = self
+            .rerun(target)
+            .into_iter()
+            .filter_map(|k| wf.steps[k].store_as.clone())
             .collect();
         self.undefer_from(target);
         let frame = self.frame();
@@ -1911,6 +2834,46 @@ impl<'a> Machine<'a> {
 
     fn escalate(&mut self, handler: usize, cause: &str) -> Flow {
         self.trace_step("escalated", json!({"handler": handler, "cause": cause}));
+        self.settle_queued();
+        // During a resumption (§5.14.1): this escalation takes precedence
+        // over a deferred handler's, whose queued actions are superseded;
+        // the queued steps not yet re-entered stay deferred, and the steps
+        // listed only to run again keep their outputs from before.
+        if let Some(left) = self.frame().resume.take() {
+            let mut left = left;
+            if self.frame().pending_escalation.take().is_some()
+                && let Some(h) = left.pop()
+            {
+                self.supersede_queued(&[h], "superseded: another escalation took precedence");
+            }
+            let depth = self.st.frames.len() - 1;
+            let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
+            let queued: Vec<bool> = left
+                .iter()
+                .map(|&k| {
+                    self.st.deferrals.iter().any(|d| {
+                        d.path.len() == depth + 1
+                            && d.path[..depth] == prefix[..]
+                            && d.path[depth] == k
+                    })
+                })
+                .collect();
+            let f = self.frame();
+            for (k, q) in left.into_iter().zip(queued) {
+                if q {
+                    if let Err(at) = f.deferred.binary_search(&k) {
+                        f.deferred.insert(at, k);
+                    }
+                } else {
+                    f.ahead.get_or_insert_with(Default::default).insert(k);
+                }
+            }
+            if f.deferred.is_empty() {
+                f.ahead = None;
+            } else if f.ahead.is_none() {
+                f.ahead = Some(Default::default());
+            }
+        }
         let f = self.frame();
         f.escalation = Some(cause.to_string());
         f.step = handler;
@@ -1923,7 +2886,7 @@ impl<'a> Machine<'a> {
     pub(crate) fn submit(
         &mut self,
         id: u64,
-        response: Response,
+        mut response: Response,
         now: u64,
     ) -> Result<(), SubmitError> {
         if self.st.finished.is_some() {
@@ -1950,7 +2913,7 @@ impl<'a> Machine<'a> {
                 Response::Checkpoint { .. } | Response::Error { .. }
             ) | (
                 Body::Rollback { .. },
-                Response::RolledBack | Response::Error { .. }
+                Response::RolledBack { .. } | Response::Error { .. }
             ) | (Body::RequestApproval { .. }, Response::Decision { .. })
                 | (
                     Body::RecheckSource { .. },
@@ -1968,15 +2931,23 @@ impl<'a> Machine<'a> {
             });
         }
         let values: Vec<&Value> = match &response {
-            Response::Output { value } | Response::Current { value } => vec![value],
+            Response::Output { value, .. } | Response::Current { value } => vec![value],
             Response::Event { event, .. } => vec![event],
             _ => Vec::new(),
         };
         for v in values {
             super::ijson(v).map_err(SubmitError::Malformed)?;
         }
-        let identity_declared =
-            self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+        if let Response::RolledBack {
+            not_covered: Some(items),
+        } = &mut response
+        {
+            super::ijson(&Value::Array(items.clone())).map_err(SubmitError::Malformed)?;
+            *items = super::not_covered_kept(items).map_err(SubmitError::Malformed)?;
+        }
+        let frame_wf = &self.program.workflows[&self.frame_ref().workflow];
+        let identity_declared = frame_wf.extension("identity@1");
+        let v12 = frame_wf.targets_1_2;
         if let (
             true,
             Response::Event {
@@ -1987,7 +2958,7 @@ impl<'a> Machine<'a> {
         ) = (identity_declared, &response)
         {
             super::ijson(identity).map_err(SubmitError::Malformed)?;
-            if let Some(e) = super::identity_error(identity) {
+            if let Some(e) = super::identity_error(identity, v12) {
                 return Err(SubmitError::Malformed(e));
             }
             if principal
@@ -1998,6 +2969,20 @@ impl<'a> Machine<'a> {
                     "the event's principal is not its identity's principal".into(),
                 ));
             }
+        }
+        if let (
+            true,
+            Response::Decision {
+                approvers,
+                approver_identities: Some(list),
+                ..
+            },
+        ) = (identity_declared, &response)
+            && !list.is_null()
+        {
+            approver_identities_error(approvers, list, v12).map_or(Ok(()), |e| {
+                Err(SubmitError::Malformed(format!("approver_identities: {e}")))
+            })?;
         }
         self.st.now = self.st.now.max(now.min(MAX_TIME));
         self.st.pending = None;
@@ -2012,18 +2997,28 @@ impl<'a> Machine<'a> {
             (Purpose::Capability | Purpose::Event, _) if late => {
                 self.exec_error("R401", "the result arrived after the step's timeout");
             }
-            (Purpose::Capability, Response::Output { value }) => {
-                self.output(value);
+            (
+                Purpose::Capability,
+                Response::Output {
+                    value,
+                    evidence_seen,
+                },
+            ) => {
+                self.output(value, evidence_seen.as_deref());
             }
             (
                 purpose @ (Purpose::Capability | Purpose::Event),
-                Response::Error { code, message },
+                Response::Error {
+                    code,
+                    message,
+                    reason,
+                },
             ) => {
                 // A timeout keeps its code; so does lost liveness on a wait.
                 // Anything else a host reports is a failed step.
                 let keep = code == "R401" || (code == "R406" && matches!(purpose, Purpose::Event));
                 let code = if keep { code } else { "R402".to_string() };
-                self.exec_error(&code, message);
+                self.exec_error_with(&code, message, Reason::from_response(reason));
             }
             (
                 Purpose::Event,
@@ -2041,35 +3036,60 @@ impl<'a> Machine<'a> {
             (Purpose::Checkpoint, Response::Checkpoint { checkpoint_id }) => {
                 self.add_checkpoint(checkpoint_id);
             }
-            (Purpose::Checkpoint, Response::Error { message, .. }) => {
-                self.step_error("F501", format!("could not take a checkpoint: {message}"));
+            (
+                Purpose::Checkpoint,
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                self.step_error_with(
+                    "F501",
+                    format!("could not take a checkpoint: {message}"),
+                    Reason::from_response(reason),
+                );
             }
             (Purpose::FailureCheckpoint { mode }, Response::Checkpoint { checkpoint_id }) => {
+                self.side_record("checkpoint", "executed", Some(checkpoint_id.clone()), None);
                 self.add_checkpoint(checkpoint_id);
                 self.recover(mode);
             }
-            (Purpose::FailureCheckpoint { .. }, Response::Error { message, .. }) => {
-                self.end_frame(Err((
-                    "F501".to_string(),
-                    format!("could not take a checkpoint: {message}"),
-                )));
+            (
+                Purpose::FailureCheckpoint { .. },
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                let reason = Reason::from_response(reason).token;
+                self.side_record("checkpoint", "failed", None, Some("F501"));
+                self.side_reason(reason.as_deref());
+                self.end_frame(Err(Fail {
+                    code: "F501".to_string(),
+                    message: format!("could not take a checkpoint: {message}"),
+                    reason,
+                }));
             }
-            (Purpose::GateRollback { message }, Response::RolledBack) => {
-                self.trace_step("rolled_back", json!({}));
+            (Purpose::GateRollback { message }, Response::RolledBack { not_covered }) => {
+                self.rolled_back_ok(&pending, not_covered);
                 self.step_error("R403", message);
             }
-            (Purpose::FailureRollback { mode }, Response::RolledBack) => {
-                self.trace_step("rolled_back", json!({}));
+            (Purpose::FailureRollback { mode }, Response::RolledBack { not_covered }) => {
+                self.rolled_back_ok(&pending, not_covered);
                 self.recover(mode);
             }
             (
                 Purpose::GateRollback { .. } | Purpose::FailureRollback { .. },
-                Response::Error { message, .. },
+                Response::Error {
+                    message, reason, ..
+                },
             ) => {
-                self.end_frame(Err((
-                    "F503".to_string(),
-                    format!("rollback failed: {message}"),
-                )));
+                let reason = Reason::from_response(reason).token;
+                self.side_record("rollback", "failed", rolled_back(&pending), Some("F503"));
+                self.side_reason(reason.as_deref());
+                self.end_frame(Err(Fail {
+                    code: "F503".to_string(),
+                    message: format!("rollback failed: {message}"),
+                    reason,
+                }));
             }
             (
                 Purpose::Approval {
@@ -2082,22 +3102,39 @@ impl<'a> Machine<'a> {
                     decision,
                     approvers,
                     digest: given,
+                    approver_identities,
                 },
             ) => {
+                let approver = match &pending.action.body {
+                    Body::RequestApproval { approver, .. } => approver.clone(),
+                    _ => json!({"kind": "human"}),
+                };
+                // Read under identity@1 only; `submit` checked them.
+                let identities = approver_identities
+                    .filter(|_| self.workflow().extension("identity@1"))
+                    .and_then(|v| v.as_array().cloned());
                 let asked = Asked {
                     digest: &digest,
                     expires_at,
                     min,
+                    approver: &approver,
+                    identities,
                 };
                 self.decide(decision_id, &decision, &approvers, &given, asked);
             }
             (Purpose::Recheck, Response::Current { value }) => {
                 self.rechecked(value);
             }
-            (Purpose::Recheck, Response::Error { message, .. }) => {
-                self.step_error(
+            (
+                Purpose::Recheck,
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                self.step_error_with(
                     "F502",
                     format!("could not recheck the approved source: {message}"),
+                    Reason::from_response(reason),
                 );
             }
             // check_state and submit rule this out; a run never panics.
@@ -2110,20 +3147,65 @@ impl<'a> Machine<'a> {
         }
     }
 
-    pub(crate) fn tick(&mut self, now: u64) {
+    /// Resume a run that ended `deferred` (§5.14.1); `Run::resume` checked
+    /// that it did, and that its state keeps what this needs.
+    pub(crate) fn resume(&mut self, o: ResumeOptions) {
+        let principal = |v: &Option<Value>| {
+            v.as_ref()
+                .and_then(|i| i.get("principal"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
+        let previous = principal(&self.st.actor_identity);
+        if o.actor_identity.is_some() {
+            self.st.actor_identity = o.actor_identity;
+        }
+        self.st.attendance = o.attendance;
+        self.st.now = self.st.now.max(o.now_ms.min(MAX_TIME));
+        self.st.finished = None;
+        self.st.resumed = true;
+        // The queued actions of a nested run that failed under a step that
+        // was not deferred are never carried out.
+        let orphans: Vec<Vec<usize>> = self
+            .st
+            .deferrals
+            .iter()
+            .filter(|d| orphaned(&self.st.frames[0], &d.path))
+            .map(|d| d.path.clone())
+            .collect();
+        self.supersede(
+            |d| orphans.contains(&d.path),
+            "superseded: the nested run it was queued in failed",
+        );
+        let actor = principal(&self.st.actor_identity);
+        let attendance = self.st.attendance;
+        self.trace(
+            "run_resumed",
+            None,
+            json!({"attendance": attendance, "actor": actor, "previous_actor": previous}),
+        );
+        let invalidated = self.invalidate_checkpoints(None);
+        reopen(self.program, &mut self.st.frames[0], &invalidated);
+        self.drive();
+    }
+
+    /// True when the tick changed the run: a new action is pending, or the
+    /// run ended (§5.19.2 **tick**).
+    pub(crate) fn tick(&mut self, now: u64) -> bool {
         if self.st.finished.is_some() {
-            return;
+            return false;
         }
         self.st.now = self.st.now.max(now.min(MAX_TIME));
         let Some(pending) = self.st.pending.clone() else {
-            return;
+            return false;
         };
         match (&pending.action.body, &pending.purpose) {
             (Body::Sleep { until }, _) if self.st.now >= *until => {
                 self.st.pending = None;
                 if matches!(self.frame_ref().stage, Stage::Delay { .. }) {
                     // The world may have changed while the step waited.
-                    self.invalidate_checkpoints();
+                    let step = self.frame_ref().step;
+                    self.invalidate_checkpoints(Some(step));
                     self.trace_step("delay_finished", json!({}));
                     self.set_stage(Stage::Ready);
                 } else {
@@ -2138,10 +3220,11 @@ impl<'a> Machine<'a> {
                     _ => String::new(),
                 };
                 let spec = self.approval_spec();
-                let mandate_ref = if self.always_ask() {
-                    None
-                } else {
-                    spec.get("approver").and_then(|a| a.get("mandate_ref"))
+                // As the request named it: a person asked in place of a
+                // mandate names none (§5.17, §5.14.1).
+                let mandate_ref = match &pending.action.body {
+                    Body::RequestApproval { approver, .. } => approver.get("mandate_ref").cloned(),
+                    _ => None,
                 };
                 let sub = json!({
                     "digest": digest,
@@ -2156,6 +3239,7 @@ impl<'a> Machine<'a> {
                     "expired",
                     Some(sub),
                     "no decision before the approval expired",
+                    Some("F502"),
                 );
                 self.trace_step("approval_expired", json!({}));
                 self.step_error("F502", "no decision before the approval expired");
@@ -2166,10 +3250,376 @@ impl<'a> Machine<'a> {
                 self.st.pending = None;
                 self.exec_error("R401", "the step timed out");
             }
-            _ => return,
+            _ => return false,
         }
         self.drive();
+        true
     }
+
+    /// Cancel the run (§5.19.5): it ends with `Failed` R408 and no retry,
+    /// failure mode, recovery loop, handler or rollback. Approved and queued
+    /// records become `cancelled`; in record mode `actions`, so does a new
+    /// record of every step, in every frame, that started its pass and has
+    /// no record of it, and of a pending failure-mode checkpoint or rollback.
+    pub(crate) fn cancel(&mut self, reason: &str, now: u64) -> Result<(), CancelError> {
+        if let Some(t) = &self.st.finished
+            && !matches!(
+                t.end,
+                End::Completed {
+                    outcome: Outcome::Deferred,
+                    ..
+                }
+            )
+        {
+            return Err(CancelError::Ended(t.end.describe()));
+        }
+        self.st.now = self.st.now.max(now.min(MAX_TIME));
+        let pending = self.st.pending.take();
+        let was_finished = self.st.finished.take().is_some();
+        let cancel = |record: &mut Value| {
+            record["status"] = json!("cancelled");
+            record["code"] = json!("R408");
+            record["reason"] = json!(reason);
+            // The cancel is the record's code now: a reason the action had
+            // before it no longer goes with it (§5.19.7).
+            if let Some(m) = record.as_object_mut() {
+                m.remove("reason_code");
+            }
+        };
+        // Approved actions may or may not have been carried out; queued ones
+        // will not be. A resumed run writes a queued record again with the
+        // time and actor of now, as when it supersedes one (§5.14.1).
+        let base = self.st.records_base;
+        let open: Vec<(usize, bool)> = self
+            .st
+            .records
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| match r["status"].as_str() {
+                Some("approved") => Some((base + i, false)),
+                Some("planned") => Some((base + i, true)),
+                _ => None,
+            })
+            .collect();
+        for (r, queued) in open {
+            if queued && self.st.resumed {
+                self.stamp(r);
+            }
+            cancel(self.st.rec_mut(r));
+        }
+        if !was_finished && self.st.records_mode == RecordMode::Actions {
+            // By the step's state, root first: a step that started its pass
+            // and has no record of it may have taken effect.
+            for i in 0..self.st.frames.len() {
+                let cur = &self.st.frames[i].cur;
+                if cur.started && cur.record.is_none() {
+                    let r = self.push_record(i, "cancelled", None);
+                    cancel(self.st.rec_mut(r));
+                    self.st.frames[i].cur.record = Some(r);
+                }
+            }
+            // A pending failure-mode checkpoint or rollback has its own.
+            let side = match pending.as_ref().map(|p| (&p.action.body, &p.purpose)) {
+                Some((Body::CreateCheckpoint { .. }, Purpose::FailureCheckpoint { .. })) => {
+                    Some(("checkpoint", None))
+                }
+                Some((Body::Rollback { checkpoint_id, .. }, _)) => {
+                    Some(("rollback", Some(checkpoint_id.clone())))
+                }
+                _ => None,
+            };
+            if let Some((capability, checkpoint_id)) = side {
+                self.side_record(capability, "cancelled", checkpoint_id, Some("R408"));
+                if let Some(last) = self.st.records.last_mut() {
+                    last["reason"] = json!(reason);
+                }
+            }
+        }
+        let checkpoint_id = self.st.checkpoints.last().map(|c| c.id.clone());
+        let step = (!was_finished).then(|| self.frame_ref().step);
+        self.trace("run_cancelled", step, json!({"reason": reason}));
+        // A cancelled run cannot be resumed: nothing is kept for it.
+        for f in &mut self.st.frames {
+            f.parked.clear();
+            f.resume = None;
+            f.pending_escalation = None;
+            f.queued = None;
+            let deferred = f.deferred.clone();
+            f.nested_caps.retain(|k, _| deferred.contains(k));
+        }
+        self.finish(End::Failed {
+            code: "R408".into(),
+            step,
+            message: reason.into(),
+            reason: None,
+            checkpoint_id,
+        });
+        Ok(())
+    }
+
+    /// The host restored the checkpoint of the executor's own rollback
+    /// (§4.4.1): its record (record mode `actions`) and the `rolled_back`
+    /// trace event carry what the checkpoint never covered, when the host
+    /// listed any.
+    fn rolled_back_ok(&mut self, pending: &Pending, not_covered: Option<Vec<Value>>) {
+        let written = self.st.records_written();
+        self.side_record("rollback", "executed", rolled_back(pending), None);
+        let detail = match not_covered {
+            Some(nc) => {
+                if self.st.records_written() > written {
+                    let r = written;
+                    self.st.rec_mut(r)["details"] = json!({"not_covered": nc});
+                }
+                json!({"not_covered": nc})
+            }
+            None => json!({}),
+        };
+        self.trace_step("rolled_back", detail);
+    }
+
+    /// The reason a failure-mode checkpoint or rollback failed with, on the
+    /// record `side_record` just wrote (§6.4).
+    fn side_reason(&mut self, reason: Option<&str>) {
+        if let (RecordMode::Actions, Some(t)) = (self.st.records_mode, reason)
+            && let Some(last) = self.st.records.last_mut()
+        {
+            last["reason_code"] = json!(t);
+        }
+    }
+}
+
+/// What §5.18.9's consumer checks refuse in an output object that has every
+/// field its contract requires (`required`): an `evidence_anchors` that is
+/// present and not an array, or a `confidence` the contract requires that
+/// is not a number from 0 to 1 (a boolean is not a number). `None` when
+/// the output passes.
+fn contract_value_problem(output: &Value, required: &[String]) -> Option<String> {
+    let anchors = output.get("evidence_anchors");
+    if anchors.is_some_and(|a| !a.is_array()) {
+        return Some("'evidence_anchors' is not an array".to_string());
+    }
+    if required.iter().any(|r| r == "confidence") {
+        let c = output.get("confidence");
+        if !c
+            .and_then(Value::as_f64)
+            .is_some_and(|x| (0.0..=1.0).contains(&x))
+        {
+            // The host's text is not repeated (§6.7).
+            let shown = c.map_or_else(|| "absent".to_string(), crate::grounding::shown_value);
+            return Some(format!(
+                "'confidence' ({shown}) is not a number from 0 to 1"
+            ));
+        }
+    }
+    None
+}
+
+/// The evidence anchors of the outputs a nested run stored, in the order of
+/// its workflow's steps: each `ref` once, and no `acs:` anchor, which names
+/// a value of the nested run (§5.20).
+fn nested_anchors(wf: &Workflow, stores: &Map<String, Value>) -> Vec<Value> {
+    let mut refs: Vec<&str> = Vec::new();
+    let mut out = Vec::new();
+    let outputs = wf
+        .steps
+        .iter()
+        .filter_map(|s| s.store_as.as_deref())
+        .filter_map(|s| stores.get(s));
+    for output in outputs {
+        let items = output
+            .get("evidence_anchors")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for item in items {
+            let Some(r) = item.get("ref").and_then(Value::as_str) else {
+                continue;
+            };
+            if crate::grounding::is_anchor(item) && !r.starts_with("acs:") && !refs.contains(&r) {
+                refs.push(r);
+                out.push(item.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The checkpoint a pending `Rollback` restores.
+fn rolled_back(pending: &Pending) -> Option<String> {
+    match &pending.action.body {
+        Body::Rollback { checkpoint_id, .. } => Some(checkpoint_id.clone()),
+        _ => None,
+    }
+}
+
+/// Whether a deferral's queued action can no longer be carried out: its
+/// path runs through a step that is not deferred in its frame (the nested
+/// run it was queued in failed), or a nested run that was not kept. A step
+/// still listed by an earlier resumption of a nested run that was never
+/// continued counts as deferred.
+fn orphaned(top: &Frame, path: &[usize]) -> bool {
+    let mut f = top;
+    for (j, k) in path.iter().enumerate() {
+        if !f.deferred.contains(k) && !f.resume.iter().flatten().any(|r| r == k) {
+            return true;
+        }
+        if j + 1 < path.len() {
+            match f.parked.get(k) {
+                Some(child) => f = child,
+                None => return true,
+            }
+        }
+    }
+    false
+}
+
+/// Reopen a frame that ended deferred (§5.14.1 item 2): its resumption list
+/// is, in step order, the deferred steps; the steps that ran ahead of them
+/// and that a later listed step reads; and the checkpoint steps whose
+/// checkpoint the resumption invalidated and that a later listed step that
+/// requires a checkpoint reads. A deferred handler goes last. Its kept
+/// nested runs are reopened too. A frame reopened before whose nested run
+/// was not continued (its invoke step was deferred again) keeps its list:
+/// nothing it reads has changed since.
+fn reopen(program: &Program, f: &mut Frame, invalidated: &[String]) {
+    if f.resume.is_some() {
+        return;
+    }
+    let wf = &program.workflows[&f.workflow];
+    let deferred = std::mem::take(&mut f.deferred);
+    let ahead = f.ahead.take().unwrap_or_default();
+    let handler = f.escalation.take().map(|cause| {
+        f.pending_escalation = Some(cause);
+        f.step
+    });
+    let mut list: std::collections::BTreeSet<usize> = deferred
+        .iter()
+        .copied()
+        .filter(|&s| Some(s) != handler)
+        .collect();
+    let reads = |s: usize, store: &str| wf.steps[s].reads.iter().any(|r| r == store);
+    // Descending, so that every later reader is settled first.
+    for c in (0..wf.steps.len()).rev() {
+        let step = &wf.steps[c];
+        if list.contains(&c) || step.handler {
+            continue;
+        }
+        let Some(store) = step.store_as.as_deref() else {
+            continue;
+        };
+        let later: Vec<usize> = list.range(c + 1..).copied().chain(handler).collect();
+        let ran_ahead = ahead.contains(&c)
+            && !step.after_deferral_runs
+            && later.iter().any(|&s| reads(s, store));
+        let stale_checkpoint = step.capability == "checkpoint"
+            && f.stores
+                .get(store)
+                .and_then(|o| o.get("checkpoint_id"))
+                .and_then(Value::as_str)
+                .is_some_and(|id| invalidated.iter().any(|i| i == id))
+            && later
+                .iter()
+                .any(|&s| wf.steps[s].requires_checkpoint && reads(s, store));
+        if ran_ahead || stale_checkpoint {
+            list.insert(c);
+        }
+    }
+    let mut queue: Vec<usize> = list.into_iter().collect();
+    queue.extend(handler);
+    for child in f.parked.values_mut() {
+        reopen(program, child, invalidated);
+    }
+    f.step = queue.first().copied().unwrap_or(wf.steps.len());
+    f.stage = Stage::Begin;
+    f.cur = StepState::default();
+    f.resume = Some(queue);
+}
+
+/// What is wrong with a decision's `approver_identities` (§5.17), if
+/// anything: a list of `agent_identity`, one per principal (an identical
+/// repeat is one), whose principals are exactly `approvers` when that is
+/// not empty. `v12`: the workflow targets 1.2 or later ([`super::identity_error`]).
+fn approver_identities_error(approvers: &[String], list: &Value, v12: bool) -> Option<String> {
+    let Some(items) = list.as_array() else {
+        return Some("must be a list".into());
+    };
+    let mut seen: std::collections::BTreeMap<&str, &Value> = std::collections::BTreeMap::new();
+    for (i, id) in items.iter().enumerate() {
+        if let Err(e) = super::ijson(id) {
+            return Some(format!("[{i}]: {e}"));
+        }
+        if let Some(e) = super::identity_error(id, v12) {
+            return Some(format!("[{i}]: {e}"));
+        }
+        let p = id["principal"].as_str().unwrap_or_default();
+        match seen.get(p) {
+            Some(other) if *other != id => {
+                return Some(format!("two different identities for '{p}'"));
+            }
+            _ => {
+                seen.insert(p, id);
+            }
+        }
+    }
+    let principals: std::collections::BTreeSet<&str> = seen.keys().copied().collect();
+    let named: std::collections::BTreeSet<&str> = approvers.iter().map(String::as_str).collect();
+    if !approvers.is_empty() && principals != named {
+        return Some("the decision's approvers are not its identities' principals".into());
+    }
+    None
+}
+
+/// Who an approval decision counts (§5.14, §5.17).
+struct Counting {
+    /// The approvers that count: principals with identities, else the
+    /// distinct strings of `approvers`, in order.
+    approvers: Vec<String>,
+    /// With identities: those of the approvers that count.
+    identities: Option<Vec<Value>>,
+    /// Who did not count, and why.
+    note: Option<String>,
+    /// Counted by attested identity (or required to be, and none came).
+    attested: bool,
+}
+
+/// Whether an attested approver identity meets the request (§5.17): a
+/// `human` approver's identity has kind `human`; a requested `role` is its
+/// role; and, in a workflow that targets 1.2, its `authenticated_by` and
+/// `trust_class` are among the approver's `sender_check` and
+/// `accept_trust_classes`. In an earlier target those two are not read.
+fn meets(approver: &Value, id: &Value, v12: bool) -> Result<(), String> {
+    if approver["kind"] == "human" && id["kind"] != "human" {
+        return Err(format!(
+            "kind {} is not 'human'",
+            id.get("kind").unwrap_or(&Value::Null)
+        ));
+    }
+    if let Some(role) = approver.get("role").and_then(Value::as_str)
+        && id["role"].as_str() != Some(role)
+    {
+        return Err(match id["role"].as_str() {
+            Some(r) => format!("role '{r}' is not '{role}'"),
+            None => format!("no role, '{role}' requested"),
+        });
+    }
+    if v12 {
+        for (key, field) in [
+            ("sender_check", "authenticated_by"),
+            ("accept_trust_classes", "trust_class"),
+        ] {
+            let Some(allowed) = approver.get(key).and_then(Value::as_array) else {
+                continue;
+            };
+            let v = id[field].as_str();
+            if !v.is_some_and(|v| allowed.iter().any(|a| a == v)) {
+                return Err(match v {
+                    Some(v) => format!("{field} '{v}' is not in {key}"),
+                    None => format!("no {field}, which {key} requires"),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether `identity`'s `field` is one of `allowed` (`sender_check`,

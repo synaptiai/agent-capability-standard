@@ -13,30 +13,78 @@ use serde_json::Value;
 use crate::refs::Seg;
 use crate::yaml;
 
-/// Maximum `$ref` hops followed while resolving one node.
-const MAX_REF_DEPTH: usize = 12;
+/// Maximum `$ref` hops followed while resolving one node (the
+/// implementation's limit of STANDARD v1.2 §4.1.2).
+pub const MAX_REF_DEPTH: usize = 12;
 
 /// Most schema nodes one validation may produce by resolving refs (a
 /// catalog's inputs, or the ontology's contracts). The repository's largest
 /// schema expands to a few thousand; this bounds memory however refs fan out.
 pub const MAX_EXPANDED_NODES: usize = 200_000;
 
-/// Loads schema files under one root, caching each file.
+/// Where a store's documents come from.
+enum Source {
+    /// Files under a root directory.
+    Disk(PathBuf),
+    /// Documents given in memory, keyed by their normalised relative path
+    /// (`schemas/event_schema.yaml`): a host without a file system (the
+    /// WebAssembly interface) passes them.
+    Memory(HashMap<String, Arc<Value>>),
+}
+
+/// Loads schema documents under one root, caching each file.
 pub struct SchemaStore {
-    root: PathBuf,
+    source: Source,
     cache: Mutex<HashMap<PathBuf, Option<Arc<Value>>>>,
+}
+
+/// A relative reference as a memory key: `CurDir` components dropped, the
+/// rest joined by `/`. `None` when it is empty or would leave the root.
+fn normalised(rel: &str) -> Option<String> {
+    let p = Path::new(rel);
+    if rel.is_empty()
+        || p.components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+    {
+        return None;
+    }
+    let parts: Vec<&str> = p
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(n) => n.to_str(),
+            _ => None,
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 impl SchemaStore {
     pub fn new(root: impl Into<PathBuf>) -> SchemaStore {
         SchemaStore {
-            root: root.into(),
+            source: Source::Disk(root.into()),
             cache: Mutex::new(HashMap::new()),
         }
     }
 
+    /// A store of documents given in memory, each under its path relative
+    /// to the schema root. References resolve exactly as on disk.
+    pub fn in_memory(docs: impl IntoIterator<Item = (String, Value)>) -> SchemaStore {
+        let docs = docs
+            .into_iter()
+            .filter_map(|(k, v)| normalised(&k).map(|k| (k, Arc::new(v))))
+            .collect();
+        SchemaStore {
+            source: Source::Memory(docs),
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The root directory; empty for a store in memory.
     pub fn root(&self) -> &Path {
-        &self.root
+        match &self.source {
+            Source::Disk(root) => root,
+            Source::Memory(_) => Path::new(""),
+        }
     }
 
     /// Forget every cached file, so the next lookup reads the disk again.
@@ -49,23 +97,26 @@ impl SchemaStore {
 
     /// The path a repository-relative reference names, if it stays under the root.
     pub fn locate(&self, rel: &str) -> Option<PathBuf> {
-        let p = Path::new(rel);
-        if rel.is_empty()
-            || p.components()
-                .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
-        {
-            return None;
-        }
-        Some(self.root.join(p))
+        let key = normalised(rel)?;
+        Some(match &self.source {
+            Source::Disk(root) => root.join(rel),
+            Source::Memory(_) => PathBuf::from(key),
+        })
     }
 
     /// Whether a repository-relative file exists (and is under the root).
     pub fn file_exists(&self, rel: &str) -> bool {
-        self.locate(rel).is_some_and(|p| p.is_file())
+        match &self.source {
+            Source::Disk(_) => self.locate(rel).is_some_and(|p| p.is_file()),
+            Source::Memory(docs) => normalised(rel).is_some_and(|k| docs.contains_key(&k)),
+        }
     }
 
     /// Load a schema file (`.yaml`, `.yml` or `.json`); `None` if absent or unreadable.
     pub fn document(&self, rel: &str) -> Option<Arc<Value>> {
+        if let Source::Memory(docs) = &self.source {
+            return docs.get(&normalised(rel)?).cloned();
+        }
         let path = self.locate(rel)?;
         let cached = self
             .cache
@@ -110,7 +161,20 @@ impl SchemaStore {
     /// produced is charged to `budget`, which the caller shares across all
     /// the resolutions one validation keeps in memory.
     pub fn resolve_node(&self, node: &Value, budget: &mut usize) -> Result<Value, TooLarge> {
-        self.expand(node, None, &mut Vec::new(), budget)
+        self.expand(node, None, None, &mut Vec::new(), budget)
+    }
+
+    /// [`Self::resolve_node`] for a node of `doc`, a document that need not
+    /// be in the store (the ontology, which may lie outside the schema
+    /// root): a same-file `$ref`, `#<pointer>`, names a node of `doc`
+    /// (STANDARD v1.2 §4.1.2).
+    pub fn resolve_node_in(
+        &self,
+        node: &Value,
+        doc: &Value,
+        budget: &mut usize,
+    ) -> Result<Value, TooLarge> {
+        self.expand(node, None, Some(doc), &mut Vec::new(), budget)
     }
 
     /// Resolve `r` and every `$ref` inside what it names; a `#/...` ref
@@ -122,7 +186,7 @@ impl SchemaStore {
         };
         let file = r.split_once('#').map_or(r, |(f, _)| f).to_string();
         let mut chain = vec![absolute(r, None)];
-        self.expand(&target, Some(&file), &mut chain, budget)
+        self.expand(&target, Some(&file), None, &mut chain, budget)
             .map(Some)
     }
 
@@ -130,11 +194,15 @@ impl SchemaStore {
     /// and a ref already on it (a cycle), or one that names nothing usable,
     /// is kept as it is. Every node produced spends one unit of `budget`,
     /// kept refs included: refs that fan out can multiply a small file into
-    /// an exponentially large tree, so expansion stops there.
+    /// an exponentially large tree, so expansion stops there. `local` is
+    /// the document a ref with no file part (`#<pointer>`, made absolute
+    /// against no base) names a node of; without it such a ref names
+    /// nothing.
     fn expand(
         &self,
         node: &Value,
         base: Option<&str>,
+        local: Option<&Value>,
         chain: &mut Vec<String>,
         budget: &mut usize,
     ) -> Result<Value, TooLarge> {
@@ -144,6 +212,8 @@ impl SchemaStore {
             let abs = absolute(r, base);
             let target = if chain.len() >= MAX_REF_DEPTH || chain.contains(&abs) {
                 None
+            } else if let (Some(doc), Some(pointer)) = (local, abs.strip_prefix('#')) {
+                json_pointer(doc, pointer).cloned()
             } else {
                 self.resolve_ref(&abs)
             };
@@ -161,7 +231,7 @@ impl SchemaStore {
                 .map_or(abs.as_str(), |(f, _)| f)
                 .to_string();
             chain.push(abs);
-            let out = self.expand(&Value::Object(merged), Some(&file), chain, budget);
+            let out = self.expand(&Value::Object(merged), Some(&file), local, chain, budget);
             chain.pop();
             return out;
         }
@@ -169,12 +239,12 @@ impl SchemaStore {
         Ok(match node {
             Value::Object(m) => Value::Object(
                 m.iter()
-                    .map(|(k, v)| Ok((k.clone(), self.expand(v, base, chain, budget)?)))
+                    .map(|(k, v)| Ok((k.clone(), self.expand(v, base, local, chain, budget)?)))
                     .collect::<Result<_, TooLarge>>()?,
             ),
             Value::Array(a) => Value::Array(
                 a.iter()
-                    .map(|v| self.expand(v, base, chain, budget))
+                    .map(|v| self.expand(v, base, local, chain, budget))
                     .collect::<Result<_, TooLarge>>()?,
             ),
             other => other.clone(),
@@ -522,6 +592,7 @@ mod tests {
                 .expand(
                     &node,
                     Some(r.split('#').next().unwrap()),
+                    None,
                     &mut vec![r.into()],
                     &mut budget,
                 )

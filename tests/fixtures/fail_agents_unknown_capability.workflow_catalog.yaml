@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# A manifest that lists a capability the ontology does not define (STANDARD
+# v1.2 §5.15.1, §11.6): V101 where it is used, and unknown maxima (W621).
+ask:
+  goal: Ask the oracle.
+  risk: low
+  agents: [oracle]
+  steps:
+  - capability: delegate
+    purpose: Ask the oracle.
+    store_as: answer
+    input_bindings:
+      agent: oracle
+      task: {question: q}

@@ -1,0 +1,58 @@
+{
+  "description": "Under a profile's minimum confidence in a 1.2 workflow, a required confidence that is not a number from 0 to 1 fails the contract check first: R402, not F504 invalid_confidence (\u00a75.19.1, \u00a75.21.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "q"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "confidence": "0.95",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "profiles": [
+    {
+      "domain": "confident",
+      "version": "1.0.0",
+      "evidence_policy": {
+        "minimum_confidence": 0.9
+      }
+    }
+  ]
+}
