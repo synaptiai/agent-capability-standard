@@ -1,0 +1,713 @@
+target: "PR #132: Agent Capability Standard 1.2.0 (Candidate) and ontology 2.2.0, with the reference implementation and the safety-layer hardening"
+context:
+  domain: general
+  deployment: customer-facing  # a public standard and a plugin others install
+  risk_tier: high  # the change alters the layers that gate tool calls
+stakeholders:
+  - operator/on-call
+  - end user
+  - security
+  - compliance/legal
+  - product/engineering owners
+assumptions:
+  - "The report scores the artifacts at 5c28dcd (branch claude/gallant-hypatia-wbucn3, against origin/main 6b3e40b) in the areas the change touches, not the project's earlier history."
+  - "Standard 1.2.0 is a Candidate Standard; these findings are inputs to its review, not defects in a final standard."
+  - "The adversarial security review stopped at its five-round cap with medium-severity findings still appearing (tasks/todo.md); the hooks' and the Bash classifier's reading of shell text are treated as carrying residual risk."
+  - "Each check was scored, then verified independently against the cited lines. All 15 checks were verified; verification lowered one score (CTRL-501, PASS to PARTIAL)."
+  - "The review ran no full Python suite of its own (its environment's built extension was older than core/ at 5c28dcd); it cites single tests it ran, the Rust runtime fixtures replayed with cargo, and CI, which runs the whole suite on the pull request."
+  - "Templates under docs/compliance/ are adopter templates: they count as guidance, not as an operational process for this project's own artifacts."
+evidence:
+  # HF-101
+  - "file:spec/SECURITY.md#L665 (HF-101: section 6, unchanged since January, lists the detection signal 'Audit entries without corresponding checkpoints', which the plugin log cannot compute)"
+  - "file:hooks/pretooluse_require_checkpoint.sh#L1939 (HF-101: the used marker's name <checkpoint_id>.<call_id> is the only link from a call to its restore point; hooks/README.md does not document it)"
+  - "file:docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md#L420 (HF-101: a tabletop exercise template is planned gap G-09; the file it names does not exist)"
+  # HF-102
+  - "file:spec/STANDARD-v1.2.0.md#L3957 (HF-102, ETH-801: section 8.4, a manual override by a person's or an agent's decision, governed by the trust model's overrides block)"
+  - "test:tests/test_audit_records.py::test_manual_override_refusals (.venv/bin/python -m pytest -q <node id>; passed; with audit_required false an override takes effect with no record, L317)"
+  - "file:hooks/pretooluse_require_checkpoint.sh#L1095 (HF-102: the F502 refusal in a mode that asks no one points the operator to ACS_HOOK_APPROVAL=off)"
+  - "test:manual probe, not committed (timeout 120 .venv/bin/python): GroundedAgentConfig(strict_mode=False, approval='off'), one Write sent through the adapter's PreToolUse hook and can_use_tool; the call ran, and call_records held 4 'refused' F501 and 2 'allowed' entries for it (HF-101, HF-102)"
+  # HF-103
+  - "file:spec/STANDARD-v1.2.0.md#L3168 (HF-103: under attested, an anchor counts only when its availability is established; checking is opt-in, L153)"
+  - "test:cd core && CARGO_TARGET_DIR=<scratch> timeout 120 cargo test --offline --test runtime (HF-103, SEC-402, CTRL-501: 35 passed at 5c28dcd; runtime_fixtures replays every tests/conformance/runtime fixture, grounding_*, always_ask_*, destination_*, retry_* and recovery_loop_exhausted included)"
+  - "file:benchmarks/scenarios/decision_audit.py#L204 (HF-103: faithfulness is scored from a 'confabulated' flag the scenario sets itself, not by comparing the explanation with the reasoning)"
+  # ORG-201
+  - "file:spec/STANDARD-v1.2.0.md#L4571 (ORG-201: a change to an ontology safety flag is a MAJOR version; no CI check enforces it)"
+  - "file:spec/GOVERNANCE.md#L27 (ORG-201: decision-making names only 'a small core team'; the repository has no CODEOWNERS file)"
+  - "file:schemas/profiles/healthcare.yaml#L50 (ORG-201: trust_model_reviewed_at 2026-02-03 with no reviewer named, though the weights now take effect)"
+  # GOV-202
+  - "test:tests/test_audit_records.py::test_the_hook_line and tests/test_audit_records.py::test_the_adapters_call_records_export (.venv/bin/python -m pytest -q <node ids>; both passed: the plugin's line and the adapter's exported records validate against the section 6.4 ActionRecord schema)"
+  - "file:hooks/posttooluse_log_tool.sh#L16 (GOV-202, ASSUR-601, ASSUR-602: a call the PreToolUse hook refused did not run and is not logged)"
+  - "file:spec/SECURITY.md#L524 (GOV-202: the review process is 'Monitor audit logs for anomalies', with no owner, cadence or rule)"
+  # ECON-301
+  - "file:hooks/hooks.json#L10 (ECON-301, ASSUR-602: 30 s timeout with onFailure block at L11, a fail-closed ceiling, not a latency target; the log, take and boundary hooks set no timeout)"
+  - "test:tests/test_hook_git_bound.py::test_a_stalled_git_blocks_the_call_in_time (.venv/bin/python -m pytest -q <node id>; 4 passed, each under 20 s)"
+  - "file:hooks/README.md#L553 (ECON-301, GOV-202, DG-701: the plugin's audit log has no retention of its own)"
+  # ECON-302
+  - "file:benchmarks/README.md#L60 (ECON-302: failure classes mapped to capabilities with a baseline and a layer metric; benchmarks/tests/test_scenarios.py asserts them and CI runs the suite)"
+  - "file:benchmarks/scenarios/mutation_recovery.py#L135 (ECON-302: the layer's recovery writes back content held in memory and never calls CheckpointTracker.restore_checkpoint)"
+  - "file:tasks/todo.md#L225 (ECON-302: the 130 confirmed security defects by round and severity; no count per failure class or link to the control that mitigates it)"
+  # SEC-401
+  - "file:spec/STANDARD-v1.2.0.md#L2435 (SEC-401: a tool with no loaded binding is treated as a high-risk mutation)"
+  - "test:tests/test_pretooluse_hooks.py -k unbound_tool_needs_a_checkpoint (.venv/bin/python -m pytest tests/test_pretooluse_hooks.py -k <expr>; 6 passed: Monitor, PowerShell, an MCP tool, the worktree tools and an unknown tool are refused F501 without a marker and F502 where no person can be asked)"
+  - "file:spec/STANDARD-v1.2.0.md#L2758 (SEC-401, ASSUR-601: mutate and send need a checkpoint for this call alone and a decision, F501/F502; there is no path rule)"
+  - "test:manual probe of hooks/pretooluse_require_checkpoint.sh in a scratch git project with a valid marker (SEC-401): a Write to $HOME/.ssh/authorized_keys gives 'ask' with F502 in permission mode default and exit 2 with F502 in bypassPermissions, never F504"
+  # SEC-402
+  - "file:spec/SECURITY.md#L333 (SEC-402: prompt injection is left to the runtime as residual risk)"
+  - "file:spec/STANDARD-v1.2.0.md#L2660 (SEC-402: a prompt answered by the host, an automatic mode or a classifier decides nothing, F502)"
+  - "file:spec/STANDARD-v1.2.0.md#L3193 (SEC-402: the grounding check runs on an output after the host has run the step, so it cannot stop an injected send)"
+  # CTRL-501
+  - "file:spec/STANDARD-v1.2.0.md#L798 (CTRL-501: retry {max, backoff}; backoff is opt-in and defaults to none)"
+  - "file:core/src/exec/machine.rs#L2726 (CTRL-501: the executor ends a recovery loop at max_loops; loops are never reset, Standard L1410)"
+  - "file:core/src/exec/machine.rs#L21 (CTRL-501: MAX_TRANSITIONS guards against executor bugs and resets on every drive(); it is not a run budget)"
+  # ASSUR-601
+  - "file:spec/STANDARD-v1.2.0.md#L4300 (ASSUR-601: conformance class SL for a safety layer)"
+  - "file:spec/SECURITY.md#L626 (ASSUR-601: the plugin's checkpoint row maps the check to 'Code: blocks the call' and links no test or audit field)"
+  - "test:tests/test_call_fixtures.py (.venv/bin/python -m pytest -q tests/test_call_fixtures.py; 51 passed, 18 skipped for host features the adapter's statement lacks; SEC-401, ASSUR-601)"
+  - "file:tasks/todo.md#L230 (SEC-401, ASSUR-601: the security loop did not converge; neither SECURITY.md nor the CHANGELOG says so)"
+  # ASSUR-602
+  - "file:hooks/pretooluse_require_checkpoint.sh#L188 (ASSUR-602: an ERR trap blocks the call with R407 when the check itself fails)"
+  - "test:tests/test_verify_audit_log.py (.venv/bin/python -m pytest -q tests/test_verify_audit_log.py; 73 passed, including the log hook keeping the head of a cut log as evidence, hooks/posttooluse_log_tool.sh L647)"
+  - "file:spec/SECURITY.md#L759 (GOV-202, ASSUR-602: automated anomaly detection is a planned enhancement, not shipped)"
+  # DG-701
+  - "file:spec/STANDARD-v1.2.0.md#L3765 (DG-701: the records a secret never enters, with redaction to [REDACTED])"
+  - "test:tests/test_redaction.py -k vector (.venv/bin/python -m pytest -q tests/test_redaction.py -k vector; 202 passed; vectors shared with the TypeScript redactor)"
+  - "file:hooks/posttooluse_log_tool.sh#L459 (DG-701: .claude and audit.log are created with the default umask; observed .claude 755, audit.log and audit.head 644 under umask 022)"
+  # ETH-801
+  - "file:schemas/authority_trust_model.yaml#L27 (ETH-801: human_note 0.55 ranks below derived_inference 0.65, with no stated rationale)"
+  - "file:spec/STANDARD-v1.2.0.md#L3305 (ETH-801: a profile's trust_weights replace weights, higher or lower, and with several profiles the lowest applies)"
+  - "file:spec/SECURITY.md#L345 (ETH-801: the only trust harm scenario is manipulation by an attacker, not systematic deprioritization)"
+  # ECO-901
+  - "file:docs/integrations/standard_agents.md#L13 (ECO-901: the binding pins SA 0.2.0 at commit faccc8b and the types version)"
+  - "file:docs/FAQ.md#L36 (ECO-901: 'Quarter 1: Achieve L2 conformance, full type safety'; docs/GROUNDED_AGENCY.md L1127 puts it at L3)"
+  - "file:spec/STANDARD-v1.2.0.md#L4176 (ECO-901: levels L1-L4 rank validators, so they are no longer adopter milestones)"
+scorecard:
+  HF-101: PARTIAL  # Recovery texts and restorable checkpoints are tested, but no joined incident view, no tabletop recipe, a generic section 6, and the plugin log has no checkpoint link.
+  HF-102: PARTIAL  # Section 8.4 overrides are policy-bound and tested and a repo cannot loosen the layer (R407), but overrides need no permission and strict_mode=False is ungated.
+  HF-103: PARTIAL  # explain must carry anchors and F505 checks citations (fixtures pass), but grounding is opt-in, unused for explain, per output only; the faithfulness benchmark is self-labelled.
+  ORG-201: PARTIAL  # Versioning is met (section 11.6 MAJOR rule, profile version, recorded_by), but no owner, reviewer or rollback procedure is named for profiles, weights or hook defaults.
+  GOV-202: PARTIAL  # The section 6.4 schema is validated for every writer, but the plugin log is thin (no capability, no refusals) and review is 'monitor for anomalies' with no owner or rule.
+  ECON-301: PARTIAL  # Fail-closed time ceilings are set and tested (30 s hook, 5 s git), but no p50/p95 budget for the normal path and no retention or capture policy by risk level.
+  ECON-302: PARTIAL  # Benchmarks map five failure classes with before/after metrics in CI, but classes are assumed, recovery is simulated, and no scenario covers the 1.2 safety-layer controls.
+  SEC-401: PARTIAL  # Deny-by-default holds (unbound tools are the worst case, F502 when no one can be asked), but no allowed-capability set or path policy, and the Bash classifier did not converge.
+  SEC-402: PARTIAL  # Person-only approval, destination policies and the always-ask mark are enforced and tested, but nothing separates data from instructions and grounding runs after the act.
+  CTRL-501: PARTIAL  # Verification lowered the scorer's PASS: retries and loops are capped and tested, but goto_step loops have no cooldown, backoff is opt-in, and there is no run budget.
+  ASSUR-601: PARTIAL  # Core claims have enforcement points, SL fixtures and audit fields, but nothing links claim to argument to evidence; plugin refusals leave no record; section 1.4 is unenforced.
+  ASSUR-602: PARTIAL  # Call-time monitors fail closed and the log hook detects a cut log (tested), but nothing consumes refusal or record signals; anomaly detection is planned, not shipped.
+  DG-701: PARTIAL  # Redaction is normative and tested on shared vectors and SDK stores are owner-only, but no retention by risk or sensitivity, and the plugin's audit log is created 0644.
+  ETH-801: PARTIAL  # The override path is defined and tested, but no rationale or stakeholder review covers the default weights, profiles can lower a source, and there is no appeal path.
+  ECO-901: PARTIAL  # Compatibility notes and version pins are met and CI replays the 1.1 fixtures, but the four staged adoption plans disagree and use validator levels as milestones.
+actions:
+  # P1. Where an action absorbs a duplicate from another check, its text names the merged id.
+  - id: "HF-101-A"
+    priority: P1
+    fix: >-
+      Define one canonical incident view: a documented schema plus a tool that emits it, for example a summary
+      mode of tools/verify_audit_log.py or a new tools/incident_view.py (it can share its reader with
+      ASSUR-602-A). For each gated plugin or SDK call it shows tool, call id, status, the checkpoint id and
+      restore commit the call used, the exact restore command and any refusal code. For each executor run it is
+      built from the action records, run record and trace, and shows the failing step, code and reason_code, the
+      last checkpoint_id and its scope, the targets changed, the evidence anchors, the not_covered items and the
+      next action (retry, rollback or escalate). Add a test that runs the tool on a fixture log and run.
+    artifact: doc
+    owner: "maintainers"
+  - id: "HF-101-B"
+    priority: P1
+    fix: >-
+      Make the plugin's audit line carry what the PreToolUse hook already knows. posttooluse_log_tool.sh adds
+      details.checkpoint_id and details.commit from the marker filed under .claude/checkpoints/used/ for this
+      call id, and the capability the hook classified the call as, so the log alone answers what changed, under
+      which capability, and how to undo it. Document the used/<checkpoint_id>.<call_id> file name in
+      hooks/README.md and add a test that pins the fields. (Merges the record part of ASSUR-602-A and of
+      GOV-202-A.)
+    artifact: hook
+    owner: "maintainers"
+  - id: "HF-101-C"
+    priority: P1
+    fix: >-
+      Add a tabletop exercise recipe for at least one high-risk flow, for example an approved Write through the
+      plugin that must be undone, or a send refused under a destination policy through the SDK adapter. Give the
+      expected codes, what the operator looks at first and the recovery commands. Put it at
+      docs/compliance/nist-ai-rmf/tabletop_exercise_template.md, the path the NIST profile already names for gap
+      G-09, and script its steps as a test so it stays true.
+    artifact: test
+    owner: "maintainers"
+  - id: "HF-101-D"
+    priority: P1
+    fix: >-
+      Rewrite SECURITY.md section 6 for Standard 1.2 as a runbook keyed to concrete alerts: R407 lockout from
+      project-settings env, F501 loops, F502 in bypassPermissions, dontAsk or auto modes, F504 records-guard
+      refusals and bursts of F501/F502/F504, the log hook's 'no longer holds the entry its head records'
+      message, a verify_audit_log chain, head or witness failure, a run that ends 'escalated' with a safety code,
+      and an invariant-monitor violation (ASSUR-602-A). For each, give the symptom, the first place to look, the
+      default response (halt the session, roll back to a recorded commit, rotate AUDIT_HMAC_KEY), the escalation
+      role and the time limit. Replace the detection signal 'audit entries without corresponding checkpoints'
+      with one the plugin and SDK records can compute, and link section 8.3's 'Audit logs are monitored' and
+      'Incident response plan exists' items to the runbook. (Merges ASSUR-602-C.)
+    artifact: doc
+    owner: "maintainers and security reviewers"
+  - id: "HF-102-A"
+    priority: P1
+    fix: >-
+      Add permissions and attribution to section 8.4 overrides. In authority_trust_model.yaml overrides, add
+      requires_actor_identity (default true) and an allowed-actor rule (allowed_actors or requires_person), with
+      person-only as the default for high-risk domains. manual_override then refuses an override with
+      actor_identity=None (today accepted and recorded as actor 'agent') and, where a person is required, one
+      whose actor_identity.kind is not human. Update section 8.4, implement it in grounded_agency/trust.py and
+      packages/acs-core (only the Python SDK implements section 8.4 today), and add pytest cases for each refusal
+      and section 8.4 vectors in tests/conformance/trust/, which cover no override today. (Merges ETH-801-C.)
+    artifact: policy
+    owner: "maintainers and security reviewers"
+  - id: "HF-102-B"
+    priority: P1
+    fix: >-
+      Reword the F502 refusal for permission modes that ask no one (hooks/pretooluse_require_checkpoint.sh
+      L1095). First direct the operator to a mode that asks (default, acceptEdits, plan). Then say that
+      ACS_HOOK_APPROVAL=off hands every approval to Claude Code's rules, so in bypassPermissions nothing is
+      asked. Emit an operator-visible notice (for example a SessionStart message) whenever approval is off.
+    artifact: hook
+    owner: "maintainers"
+  - id: "HF-102-C"
+    priority: P1
+    fix: >-
+      Treat strict_mode=False as an audited override and make its records truthful. Require an explicit
+      acknowledgement flag, and write one dedicated audit record when an adapter starts with checkpoints
+      unenforced. Write one record per call that goes ahead despite F501 or F503, as executed with the skipped
+      diagnostic under details, instead of 'refused' entries followed by 'allowed' ones (today the PreToolUse
+      hook and the permission callback write 4 refused and 2 allowed records for one call that ran). Remove
+      'Solution 2' from the F501 troubleshooting in docs/integrations/claude_agent_sdk.md. Add a test.
+      (Merges HF-101-E.)
+    artifact: policy
+    owner: "maintainers"
+  - id: "HF-103-A"
+    priority: P1
+    fix: >-
+      Measure explanation faithfulness. In benchmarks/scenarios/decision_audit.py, replace the self-labelled
+      confabulated check in _evaluate_faithfulness with a comparison of the explanation's cited_criterion and
+      detailed_reasons against actual_reasoning (criteria_values, scores). Add a scenario that takes real explain
+      outputs (recorded or model-generated) and checks each premise and chain claim against a cited anchor's
+      content and the run's action records and trace. Report the unsupported-claim and contradicted-claim rates,
+      with a threshold that fails CI.
+    artifact: benchmark
+    owner: "maintainers"
+  - id: "HF-103-B"
+    priority: P1
+    fix: >-
+      Apply the existing grounding check to explain in shipped policy. Add explain to require_grounding in the
+      high-risk profiles (healthcare, manufacturing, data_analysis). Declare grounding@1 with attested: true and
+      require explain in the domain catalogs whose explain step binds grounded or audit outputs (for example
+      healthcare_workflows.yaml L496, manufacturing_workflows.yaml L217). Update the explain skill's procedure so
+      it cites those inputs as acs: record anchors (or the action or audit record ids) rather than free-text
+      evidence strings.
+    artifact: policy
+    owner: "maintainers"
+  - id: "ORG-201-A"
+    priority: P1
+    fix: >-
+      Add a 'Policy ownership' section to spec/GOVERNANCE.md. For each policy surface, name the role that owns it
+      and the reviewer it requires: the ontology safety flags and requires/precedes/conflicts_with edges;
+      schemas/profiles/* (trust_weights, risk_thresholds, checkpoint_policy, evidence_policy); the defaults of
+      the hooks and the adapter (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE, RateLimitConfig); and the Bash
+      classifier lists (grounded_agency/capabilities/mapper.py and hooks/pretooluse_require_checkpoint.sh). Point
+      deployers to the RACI in docs/compliance/iso42001/ai_policy_template.md section 5. Add a
+      .github/CODEOWNERS that requires those reviewers for schemas/capability_ontology.yaml, schemas/profiles/,
+      hooks/, grounded_agency/capabilities/mapper.py and spec/.
+    artifact: policy
+    owner: "maintainers"
+  - id: "ORG-201-B"
+    priority: P1
+    fix: >-
+      Write a rollback procedure for a bad policy update and link it from spec/SECURITY.md section 6.2 and
+      docs/compliance/iso42001/nonconformity_procedure.md. It covers reverting a profile, an ontology change or a
+      hook or adapter default to the previous released version; finding the affected calls and steps by
+      recorded_by.version, config_sha256 and settings in the audit records; handling runs that keep the profiles
+      they started with (sections 5.21.1, 5.19.4); and who declares the incident.
+    artifact: doc
+    owner: "maintainers and security reviewers"
+  - id: "GOV-202-A"
+    priority: P1
+    fix: >-
+      Make refusals observable in every layer. Have hooks/pretooluse_require_checkpoint.sh append each refusal it
+      can (F501, F502, F504, R407) to the HMAC chain of .claude/audit.log under the log hook's lock and head, or
+      to a chained sibling log, as an ActionRecord with status 'rejected', the code, the tool, call_id and
+      recorded_by, as section 5.18.8 asks of a layer; add a test that an F501 refusal appears there and passes
+      tools/verify_audit_log.py. Give the Standard Agents binding an onRefusal callback, and document the
+      adapter's 'Refused:' WARNING on the grounded_agency.adapter logger and its 'rejected' records as its alert
+      interface. If the plugin change is not wanted, correct SECURITY.md section 1.1 (L19) and section 6.1 (L663)
+      to say the plugin's refusals reach only the model's stderr, and list it as a host gap in section 5.5.
+      (Merges ASSUR-601-B and ASSUR-602-D.)
+    artifact: hook
+    owner: "maintainers and security reviewers"
+  - id: "GOV-202-B"
+    priority: P1
+    fix: >-
+      Add an audit review procedure to SECURITY.md sections 6 and 8.3. Name the owner and the cadence (for
+      example verify_audit_log.py --witness at each session end and a weekly review). Define anomaly rules with
+      thresholds over fields the records actually hold: refusal rate, gated calls with no used/ checkpoint
+      marker, chain or head mismatch, recorded_by.settings.approval == 'off', a change of config_sha256, and gaps
+      in action_id or seq. Give an escalation path that links the EU AI Act L1-L4 model. In the same change,
+      correct the measurement sources in post_market_monitoring.md sections 3.1 and 5, including the
+      checkpoint-enforcement and audit-completeness KPIs that cite a nonexistent 'CheckpointTracker validation
+      log', to what the plugin log and the adapter's exported records contain.
+    artifact: doc
+    owner: "security reviewers"
+  - id: "ECON-301-A"
+    priority: P1
+    fix: >-
+      Add a hook latency benchmark (for example benchmarks/hooks_latency.py, run in a scratch git repo). Cover
+      the pre hook by tool class (read-only tool, read-only Bash, git read, gated Write with and without a
+      marker), the log hook, the take hook and the adapter's PreToolUse callback. Publish the p50/p95 results as
+      a budget table in hooks/README.md and docs/integrations/claude_agent_sdk.md; a reference run gave about
+      17/37/89/51 ms for the pre hook and about 190 ms for the log hook. Add a CI check against a generous
+      ceiling so regressions are caught.
+    artifact: benchmark
+    owner: "maintainers"
+  - id: "ECON-302-A"
+    priority: P1
+    fix: >-
+      Extend the round-by-severity table in tasks/todo.md (L218-238) into a failure-class table in a public
+      document (spec/SECURITY.md or a docs page). Sort the 130 confirmed defects into classes (shell-text reading
+      and classification, trust in layer records, redaction coverage, composite and nesting checks, time bounds).
+      For each class give counts per round and severity, and the capability or Standard section and the test
+      suite that mitigates it. Rank the classes by residual trend, so that the open 'classify fewer forms' design
+      task for shell reading, which still yields about 20 medium defects per round, comes first.
+    artifact: doc
+    owner: "security reviewers"
+  - id: "ECON-302-B"
+    priority: P1
+    fix: >-
+      Add benchmark scenarios for the 1.2.0 safety-layer mechanisms, each with a baseline metric and a layer
+      metric in benchmarks/runner.py and the CI artifact: a send to a destination the policy does not allow
+      (F504 destination policy), a secret reaching evidence or records (redaction), a gated tool call without a
+      checkpoint (F501), and an ungrounded output (F505). Add test assertions for each like those at
+      benchmarks/tests/test_scenarios.py L129 and L138.
+    artifact: benchmark
+    owner: "maintainers"
+  - id: "ECON-302-C"
+    priority: P1
+    fix: >-
+      Make the mutation_recovery scenario's layer path capture the file with the checkpoint and restore it with
+      CheckpointTracker.restore_checkpoint (the snapshot store this change adds), not by writing
+      self.original_content (mutation_recovery.py L135, L209), so the recovery and integrity metrics measure the
+      shipped restore path. Assert on the returned Restore result.
+    artifact: benchmark
+    owner: "maintainers"
+  - id: "SEC-401-A"
+    priority: P1
+    fix: >-
+      Add a deployment-level resource policy for mutate, analogous to allowed_destinations for send: a profile
+      and adapter member protected_paths, with a shipped default taken from the persist skill's list (~/.ssh,
+      ~/.aws, ~/.config, ~/.claude, /etc, *.pem, *.key, .env), plus an optional allowed_paths. Apply it in
+      hooks/pretooluse_require_checkpoint.sh, the SDK adapter and the Standard Agents binding: to
+      Write/Edit/MultiEdit/NotebookEdit paths, links followed, and the paths the existing path reader resolves in
+      Bash and MCP arguments. Refuse with F504 before approval and the checkpoint, in every permission mode. Add
+      the rule to the Standard's section 5.18.10 mutate row and section 5.21, replace the SECURITY section 5.3
+      example with the shipped policy, and add call fixtures under tests/conformance/calls plus a hook test (a
+      Write to ~/.ssh/authorized_keys gives F504 in default and bypassPermissions modes).
+    artifact: policy
+    owner: "maintainers"
+  - id: "SEC-401-B"
+    priority: P1
+    fix: >-
+      Do the design task the security loop left open (tasks/todo.md, 'Not converged'). Shrink the read-only Bash
+      classification in grounded_agency/capabilities/mapper.py and the plugin hook to a small, fully specified
+      grammar: one simple command, literal ASCII words, listed programs with listed options, and no expansions,
+      redirections or PATH-relative programs. Give everything else the worst case. Add a differential test
+      against the current classifier, then run further adversarial rounds until two in a row confirm no medium
+      defect.
+    artifact: hook
+    owner: "security reviewers"
+  - id: "SEC-402-A"
+    priority: P1
+    fix: >-
+      Add a normative rule to the Standard (section 3 or 5.18) and to SECURITY.md that data is never
+      instructions: tool results, retrieved, received or recalled content, capability outputs and repository
+      content never change a layer's configuration, bindings, policies or approvals, and never count as a
+      person's decision. Rewrite SECURITY section 2.2.1's mitigations to name the 1.2 mechanisms (person-only
+      approval 5.18.7, destination policies 4.4.2, the always-ask mark 5.17) in place of 'Gates can block
+      suspicious patterns'. Add a 'tainted input gate' pattern (retrieve, then verify or constrain, then act) to
+      docs/WORKFLOW_PATTERNS.md, with a catalog example that validates in strict mode.
+    artifact: doc
+    owner: "spec editors"
+  - id: "SEC-402-B"
+    priority: P1
+    fix: >-
+      Extend the section 5.17 always-ask mark to PERCEIVE and REMEMBER outputs. Give retrieve, search, observe and
+      recall an always_ask_trust_classes (or always_ask_source_types) input, applied to items whose host-reported
+      source type or trust class is listed or missing, so that a mutate, send or execute step that reads such a
+      value is asked of a person. Add runtime fixtures for propagation from a retrieve output, for the unattended
+      case, and for the fail-closed case where the source is missing.
+    artifact: workflow
+    owner: "spec editors"
+  - id: "SEC-402-C"
+    priority: P1
+    fix: >-
+      Add a provenance gate that runs before the action. The section 5.20 grounding check runs on the output
+      after the host has acted (Standard L3193), so require_grounding on mutate, send or execute cannot stop an
+      injected effect. Define a check that runs before approval and the checkpoint: every reference a mutate,
+      send or execute step reads must come from a step whose output passed a grounding policy with attested
+      anchors, not one only marked inferred, and whose evidence has a section 8.3 static weight at or above a
+      floor the profile sets; refuse with F505 or F504 otherwise. Turn the check on, and set
+      allowed_destinations, in the reference profiles that send (at least personal_assistant). Add runtime and
+      call fixtures.
+    artifact: policy
+    owner: "maintainers"
+  - id: "CTRL-501-A"
+    priority: P1
+    fix: >-
+      Add a cooldown to goto_step recovery loops (recovery.backoff with the same none, linear and exponential
+      semantics as retry, applied through Sleep before the loop re-enters its target), and document it in
+      Standard section 5.12. Add a validator warning when retry.max or max_loops is above a stated threshold while
+      backoff is none. Add runtime fixtures for a loop that waits out its backoff and for cancelling during that
+      wait.
+    artifact: workflow
+    owner: "spec editors"
+  - id: "ASSUR-601-A"
+    priority: P1
+    fix: >-
+      Add a safety case: spec/SAFETY_CASE.md, or a table in SECURITY.md section 1, with one row per core claim:
+      checkpoint before mutate/send/rollback (F501/F503, V102), approval (F502), destination policy, secrets out
+      of records and memory (F504, section 6.7), fail closed (R407), grounding (F505), ordering (V102) and
+      identity merges. Each row names the enforcement points of each implementation (validator/executor,
+      adapter, binding, plugin hook, with file links), the normative fixtures and pytest/vitest node ids, the
+      run-time audit field that proves it (status/code, checkpoint_id, approval.digest, recorded_by, the plugin's
+      used-marker name), the assumptions (the host gaps in tests/conformance/calls/statements/*.json) and the
+      residual risk. Add a test that every linked file and test id exists, so the table cannot rot.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ASSUR-601-C"
+    priority: P1
+    fix: >-
+      Carry the security loop's non-convergence finding (tasks/todo.md L230) into SECURITY.md section 5.5 and the
+      CHANGELOG 'Upgrading from v2.0.0' notes as a stated residual risk of the hooks and the Bash classifier.
+      Name the open structural mitigation (SEC-401-B): refuse, or take the worst case for, anything outside a
+      small accepted grammar.
+    artifact: doc
+    owner: "security reviewers"
+  - id: "ASSUR-602-A"
+    priority: P1
+    fix: >-
+      Add a log-based invariant monitor and report: tools/check_audit_invariants.py, or a report mode of
+      tools/verify_audit_log.py, with tests on fixture logs. It counts lines by tool, status and settings, lists
+      config_sha256 transitions and gaps in action_id or seq, and cross-references gated calls' call_id with the
+      .claude/checkpoints/used/<checkpoint>.<call_id>.* markers (or the checkpoint_id HF-101-B adds). It flags
+      each executed Write, Edit, MCP or unbound call in .claude/audit.log with no checkpoint, each executed
+      mutate or send in the adapter's export_action_records without checkpoint_id and approval, and the anomaly
+      rules of GOV-202-B; it prints each violation's call_id and exits non-zero. (Merges GOV-202-C.)
+    artifact: code
+    owner: "maintainers"
+  - id: "ASSUR-602-B"
+    priority: P1
+    fix: >-
+      Run verify_audit_log.py and the invariant monitor automatically at an execution boundary: a
+      SessionEnd/Stop hook in the plugin and the adapter's Stop handler. Copy the head as a witness to a location
+      the agent cannot write, and surface a failure as an operator-visible error, not only as stderr of a
+      PostToolUse exit 1 or an on-demand run.
+    artifact: hook
+    owner: "maintainers"
+  - id: "DG-701-A"
+    priority: P1
+    fix: >-
+      Define a retention and capture policy by risk tier and data sensitivity. Add a 'retention' member to
+      schemas/profiles/profile_schema.yaml that states, per record kind (audit, evidence, checkpoint content and
+      archive, memory), per capability risk level and per sensitivity class: which records are required and
+      which best-effort (section 6.4), how much evidence detail is kept (digest only or full anchors) and any
+      sampling, the default retention per store (memory, JSONL, plugin audit log), and when to export to a
+      durable store. Add Standard text (sections 6.3, 6.6) on how a host applies it and reports it in 'store'.
+      Replace the informative compliance.audit_retention_days with this member, or give that member an effect.
+      (Merges ECON-301-B.)
+    artifact: policy
+    owner: "maintainers with compliance reviewers"
+  - id: "DG-701-B"
+    priority: P1
+    fix: >-
+      Enforce and state retention in the reference stores that lack it (FileSnapshotStore already has it).
+      Replace 'no retention of its own' in hooks/README.md with a retention and export policy covering
+      .claude/audit.log, audit.head and its git-dir anchor, .claude/checkpoints/used and ended,
+      <git dir>/acs/checkpoints/commits and the adapter's call_records, including when a host must call
+      export_action_records before call_record_limit evicts records. Add rotation of .claude/audit.log with size
+      and age thresholds that archives each segment with a witness head, so tools/verify_audit_log.py can still
+      verify the chain. Add expiry by retention in JsonlEvidenceStore and the tracker's pruned_checkpoints.jsonl.
+      Have the SDK honour an audit step's requested retention, or report the retention it actually applies in
+      'store'. Add tests for each. (Merges GOV-202-D and the rotation part of ECON-301-C.)
+    artifact: hook
+    owner: "maintainers"
+  - id: "DG-701-C"
+    priority: P1
+    fix: >-
+      Document access control for audit trails in spec/SECURITY.md and the operator checklist (section 8.3):
+      who may read, append and verify .claude/audit.log, audit.head, <git dir>/acs/, .claude/checkpoints/, the
+      evidence store and the checkpoint archive, and which of them the agent itself can read. Bring the plugin
+      hooks in line with the SDK stores: create .claude, audit.log, audit.head and the checkpoints directories
+      under umask 077 (0600/0700). Add a mode test like tests/test_snapshots.py::test_private_modes. Record the
+      remaining gaps (same-user processes, no roles) in the conformance statements.
+    artifact: doc
+    owner: "security reviewers"
+  - id: "ETH-801-A"
+    priority: P1
+    fix: >-
+      Add a 'trust model rationale' appendix to Standard section 8 or docs/methodology. Name who sets the
+      canonical source_ranking.weights, trust_classes.weights and field_authority (maintainers, by RFC, with
+      which stakeholders consulted) and who sets a profile's trust_weights (the deployer; link the ISO 42001
+      operator, domain expert and owner roles). Justify each default weight, in particular human_note 0.55 below
+      derived_inference 0.65 and trust_classes.external 0.35, and record review notes. Give each shipped
+      profile's domain README a real justification in its 'Rationale' column, for example why healthcare's
+      patient_reported is 0.75 while personal_assistant ranks explicit user input 0.98.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ETH-801-B"
+    priority: P1
+    fix: >-
+      Add a harm scenario to SECURITY section 2.2 for systematic deprioritization, with its mitigations.
+      Examples: a patient's self-report outvoted by an EHR value under highest_score; a person's correction
+      (human_note) losing to a model inference; a second applied profile silently lowering a source, because the
+      lowest weight wins. Mitigations: escalate_to_human or a field_authority entry for fields a person owns, a
+      profile weight floor, and the section 8.4 override. State that trust_weights is the one profile rule that
+      can loosen.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ECO-901-A"
+    priority: P1
+    fix: >-
+      Replace the four inconsistent adoption paths (FAQ 'What's the adoption path?', GROUNDED_AGENCY section D.3,
+      WHITEPAPER 'Adoption Recommendation', Standard section 12.4) with one canonical 1.2 path that the others
+      link to. Key each stage to a component and class, with a checkable exit criterion: (1) validator in CI,
+      validate_workflows.py --catalog <c> --strict clean, with a version header (no W605) and B204 annotations;
+      (2) plugin hooks, stating what they gate and that they claim no class; (3) Python adapter or Standard
+      Agents binding, passing tests/conformance/bindings and calls under a conformance statement (SL); (4)
+      executor or WorkflowRunner, passing the runtime fixtures (EX); (5) profiles and trust model. Remove the
+      'achieve L2/L3 conformance' team milestones, which section 10.1 now reserves for validators. Fix the L2 vs
+      L3 'full type safety' contradiction, add SL and EX rows to section 12.4, and update the section D.3 footer
+      to 1.2.0.
+    artifact: doc
+    owner: "maintainers"
+  # P2
+  - id: "HF-101-F"
+    priority: P2
+    fix: >-
+      Correct the hooks summary in CLAUDE.md: Skill, Agent and Task are gated as mutate by the hook and as invoke
+      or delegate by the SDK mapper, not 'needs nothing'. Then add a short operator table (call kind, what is
+      needed, the code if refused, how to recover) before the 2,336-word paragraph in SECURITY.md section 5.1 and
+      before the long Checkpoint System section of hooks/README.md.
+    artifact: doc
+    owner: "maintainers"
+  - id: "HF-102-D"
+    priority: P2
+    fix: >-
+      Make section 8.4's anchors and audit record mandatory, or allow turning them off only with a warning when
+      the trust model loads and a note in recorded_by. Today audit_required: false lets an override take effect
+      with no record, and tests/test_audit_records.py L317 pins that behaviour.
+    artifact: policy
+    owner: "maintainers"
+  - id: "HF-102-E"
+    priority: P2
+    fix: >-
+      Show the person approving how to undo the change: put the restore point (checkpoint id and 'git stash
+      apply <commit>') in the approval reason of the hook's ask and of the adapter's F502 text.
+    artifact: hook
+    owner: "maintainers"
+  - id: "HF-102-F"
+    priority: P2
+    fix: >-
+      Document and measure the approval load and the operator cost of the new gating. State in the CHANGELOG
+      Upgrading notes and hooks/README.md that every Write, Edit, Skill, Agent, Task and unbound tool call needs
+      one git stash create and asks a person, plus the measured per-call hook overhead on every tool
+      (ECON-301-A). Add a benchmark scenario that counts prompts per typical task. List the knobs
+      (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE, permission modes) with what each costs in safety, and give
+      guidance that keeps approvals meaningful without reaching for ACS_HOOK_APPROVAL=off. (Merges ECON-301-E.)
+    artifact: benchmark
+    owner: "maintainers"
+  - id: "HF-103-C"
+    priority: P2
+    fix: >-
+      Add runtime fixtures in scripts/runtime_fixtures/ for an explain step under an attested grounding policy:
+      an explain step whose acs: anchors cite a bound audit or prior step output completes; citing an unbound
+      value fails with F505, and so does citing a file anchor the Output's evidence_seen does not list. Then
+      regenerate with scripts/gen_runtime_fixtures.py.
+    artifact: test
+    owner: "maintainers"
+  - id: "HF-103-D"
+    priority: P2
+    fix: >-
+      State the residual risk explicitly in Standard sections 3.1 and 5.20, spec/SECURITY.md and
+      skills/explain/SKILL.md: grounding establishes that the producer had the cited evidence, not that the
+      explanation's claims are faithful to it (RFC-0008 L80 lists per-field support only as a non-goal). Name
+      the run's trace and action records as the authoritative account of what was decided and done.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ORG-201-C"
+    priority: P2
+    fix: >-
+      Define profile version semantics in Standard section 5.21 or profile_schema.yaml, as section 11.6 does for
+      the ontology: which changes are MAJOR (any trust_weights change, any loosening) and which MINOR or PATCH.
+      Replace the informative trust_model_reviewed boolean and trust_model_reviewed_at date with a structured
+      review record: reviewer role, date, stakeholders consulted (including the affected parties, for example
+      patients for healthcare) and notes. Make tools/validate_profiles.py warn (extending SEC-009) when a shipped
+      profile lacks the record, or when its review predates the profile's last MAJOR version or is older than a
+      stated interval (the nonconformity procedure already treats 90 days as an observation). Re-review the
+      shipped trust_weights, which now take effect. (Merges ETH-801-D.)
+    artifact: policy
+    owner: "maintainers with domain experts"
+  - id: "ORG-201-D"
+    priority: P2
+    fix: >-
+      In spec/GOVERNANCE.md, apply EXTENSION_GOVERNANCE's 14-day minimum review, which today covers only
+      capability proposals, to every Standard and ontology RFC, and state how many approvers acceptance needs.
+      Have tools/validate_rfcs.py require each Accepted RFC to record who accepted it and its review window.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ORG-201-E"
+    priority: P2
+    fix: >-
+      Add a CI check that enforces section 11.6. It compares the ontology's risk, mutation,
+      requires_checkpoint, requires_approval and mutation_overridable flags, and its
+      requires/precedes/conflicts_with edges, with those of the last released ontology (from the release tag),
+      and fails unless meta.version has a new MAJOR when any of them changed.
+    artifact: test
+    owner: "maintainers"
+  - id: "ECON-301-C"
+    priority: P2
+    fix: >-
+      In hooks/hooks.json, set an explicit timeout on the PostToolUse/PostToolUseFailure log hook, the take hook
+      and the boundary hooks. In hooks/README.md, document storage growth: about 0.65 KB per audit line, one
+      marker file per gated call under used/ or ended/, and one commits/ entry per checkpoint (rotation is part
+      of DG-701-B).
+    artifact: hook
+    owner: "maintainers"
+  - id: "ECON-301-D"
+    priority: P2
+    fix: >-
+      State how long a plugin checkpoint can be restored. Restore points are unreferenced git stash create
+      commits, which git gc prunes (gc.pruneExpire, two weeks by default; at once with --prune=now). Either keep
+      each recorded commit reachable under a ref until its history entry is pruned, or document the git gc
+      window in hooks/README.md (Standard 1.2.0 section 4.4.1 retention).
+    artifact: hook
+    owner: "maintainers"
+  - id: "ECON-302-D"
+    priority: P2
+    fix: >-
+      Replace the unmeasured figures in docs/GROUNDED_AGENCY.md Appendix D.1 (L1087-1093, for example '50-80%
+      reduction', 'Minutes instead of hours') with the benchmark outputs, or label them as hypotheses and give
+      each a measurement plan: metric, data source and comparison baseline.
+    artifact: doc
+    owner: "maintainers"
+  - id: "SEC-401-C"
+    priority: P2
+    fix: >-
+      Let a profile or the adapter and binding config list the allowed capabilities (and optionally tools) of a
+      deployment, as a normative member, unlike the informative workflows member. Refuse any call outside the set
+      with F504, before approval, even when a person would approve it. Apply it in the plugin hook through an env
+      setting as well. Document it in SECURITY section 4.3 as the blast-radius control for unattended
+      deployments, and add call fixtures.
+    artifact: policy
+    owner: "spec editors"
+  - id: "SEC-402-D"
+    priority: P2
+    fix: >-
+      Add an injection benchmark scenario under benchmarks/scenarios/ with three cases: a retrieved page that
+      instructs a send to an attacker URL, a recalled memory entry that instructs a mutate, and a tool result
+      that asks for approval to be turned off. Measure that the destination policy, the always-ask mark and
+      person-only approval stop each one, and publish the results with the other scenarios (it complements
+      ECON-302-B).
+    artifact: benchmark
+    owner: "security reviewers"
+  - id: "CTRL-501-B"
+    priority: P2
+    fix: >-
+      Add an optional run-level budget (a workflow or host limit on total attempts, loops and wall-clock time)
+      that the executor enforces with its own failure code, distinct from MAX_TRANSITIONS, which resets on every
+      drive() call. Add a validator warning when timeout x (retry.max+1) x (1+sum of max_loops) for a step
+      exceeds a stated threshold. Cover both with runtime fixtures.
+    artifact: workflow
+    owner: "maintainers"
+  - id: "CTRL-501-C"
+    priority: P2
+    fix: >-
+      Ship a reference liveness watcher in grounded_agency/workflows and packages/acs-core. It counts consecutive
+      missed heartbeats or probes, resets the count when one arrives, and reports LivenessLost only after
+      failure_threshold misses. Add tests for a source that misses one heartbeat and then recovers, and for one
+      that keeps missing, so the debounce section 5.13 requires is enforced in reference code and not left
+      entirely to integrators.
+    artifact: test
+    owner: "maintainers"
+  - id: "ASSUR-601-D"
+    priority: P2
+    fix: >-
+      For SECURITY.md section 1.4 and Standard section 7.3 (identity merges), choose one: implement and test the
+      constraints in the reference implementation (refuse a merge with conflicting unique ids or incompatible
+      types, and record merges and splits in lineage), or mark section 1.4 as a requirement on hosts that the
+      reference implementation does not enforce and remove it from the 'Core Safety Invariants' the reference
+      layers are said to uphold.
+    artifact: test
+    owner: "maintainers"
+  - id: "ASSUR-601-E"
+    priority: P2
+    fix: >-
+      Change spec/CONFORMANCE.md L266 from 32 to 33 call fixtures, and add a test that the counts CONFORMANCE.md
+      states for tests/conformance/bindings and tests/conformance/calls equal the top-level *.json files there.
+    artifact: test
+    owner: "maintainers"
+  - id: "ASSUR-602-E"
+    priority: P2
+    fix: >-
+      Make the integrity monitor trustworthy by default. Have the log hook warn on every call while
+      AUDIT_HMAC_KEY is unset and the hostname-derived key (hooks/posttooluse_log_tool.sh L525) is in use, or
+      refuse outside a declared development mode. Document key provisioning in SECURITY.md section 8.3.
+    artifact: policy
+    owner: "security reviewers"
+  - id: "DG-701-D"
+    priority: P2
+    fix: >-
+      Add an evidence-minimization policy for personal data: a length cap on anchor excerpts, and an option to
+      drop excerpts under sensitive profiles (healthcare, personal_assistant). Document how to register PII
+      patterns with the Python Redactor(patterns=...). Give the TypeScript redactJson/redactAnchor a pattern
+      parameter (today it takes only exact values). Add an example anchor redaction pipeline and shared vectors
+      that pin it.
+    artifact: policy
+    owner: "maintainers"
+  - id: "ETH-801-E"
+    priority: P2
+    fix: >-
+      Document an appeal path for parties affected by a trust decision: who reviews the section 8.4 override
+      audit records, and how a resolved conflict is contested and re-opened. Have resolve() return or record,
+      with each resolution, the effective weights and the profile (domain and version) that set each one, so a
+      contested result can be traced to the weight that decided it.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ECO-901-B"
+    priority: P2
+    fix: >-
+      Add a release job that builds abi3 wheels with maturin for the supported platforms and publishes them, so
+      pip install grounded-agency (README L433) needs no Rust toolchain. Until then, say plainly in the README
+      install block that every install is a source build needing Rust >= 1.88. State the support policy behind
+      the Python >= 3.14 floor in the Upgrading notes.
+    artifact: workflow
+    owner: "maintainers"
+  - id: "ECO-901-C"
+    priority: P2
+    fix: >-
+      Open the ~1,700-line 'Upgrading from v2.0.0' section with a short triaged checklist per component (Python
+      SDK, plugin, binding, TS package, validator/executor). Sort the changes into three groups: must change (API
+      breaks such as the required header on start and the frozen ToolMapping), behaviour change with an opt-out
+      (approval now 'ask', approval='off' and ACS_HOOK_APPROVAL=off outside SL; unbound tools now the worst
+      case), and hardening that needs no action.
+    artifact: doc
+    owner: "maintainers"
+  - id: "ECO-901-D"
+    priority: P2
+    fix: >-
+      Make the 1.1 compatibility set explicit and enforced. List the runtime fixtures inherited from v2.0.0
+      (null or 1.1 header) as the compatibility set. Add a CI check that fails when one of their expectations is
+      changed or removed (adding is allowed) unless CHANGELOG Upgrading names the fixture. Pin their final record
+      statuses with run_record, so the one-time origin/main comparison recorded in PHASE4.md (and its two F503
+      differences) becomes a committed test.
+    artifact: test
+    owner: "maintainers"
+  - id: "ECO-901-E"
+    priority: P2
+    fix: >-
+      Ship a 'minimum viable conformance' starter for each domain profile under schemas/profiles: a small
+      catalog with a '# Standard version: 1.2.0' header, a GroundedAgentConfig or configureLayer setup applying
+      the profile, and the commands that prove stages 1 and 3 of the canonical path (strict validation and the
+      SL fixtures).
+    artifact: doc
+    owner: "maintainers"
