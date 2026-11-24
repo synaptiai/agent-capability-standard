@@ -28,11 +28,20 @@ hooks:
             # tee, dd, ...), or build its text when it runs; mv only moves the
             # project's records file aside in its own directory. So a file named with
             # quotes, a glob or a brace, or a record rewritten in two steps, is
-            # refused. In every command, a program that writes the files its input
-            # names (an archive or patch tool, git apply or a git alias, gunzip -N, a
-            # download a server or a configuration file names, find -exec or xargs
-            # running another) is refused, read again with no quoting at all where a
-            # command substitution's quotes may hide it. A name built only when a
+            # refused, as is an extglob pattern (@(...), once shopt -s extglob has
+            # run), whose words are not read here. In every command, a program that
+            # writes the files its input names (an archive or patch tool, a recursive
+            # copy, git apply or a git alias, a git command that writes the work tree
+            # from a commit: only git's reads and commands that write no file from a
+            # commit run, and checkout and restore only of literal paths after --
+            # that do not hold the records, gunzip -N, a download a server or a
+            # configuration file names, find -exec or xargs running another) is
+            # refused wherever it stands: as the program (after !, if, while), and
+            # after any program but one read here (a wrapper this check does not
+            # list, prlimit, setpriv, runs it); a here-document's lines are read as
+            # commands too, those a reader (cat) takes as data as before. It is read
+            # again with no quoting at all where a command substitution's quotes may
+            # hide it. A name built only when a
             # command runs, code inside a word (sh -c, an interpreter's, a script)
             # and a link planted under another name are not read here; the plugin's
             # pre-tool-use hook gates such a write as a mutate.
@@ -104,9 +113,9 @@ hooks:
               printf '%s\n' "$RUNS_IN" | grep -qi '\.claude' && INAUDIT=true
               if [ "$NAMED" = false ] && [ "$INAUDIT" = false ]; then
                 READ=false
-                case "$CMD" in *'*'* | *'?'* | *'['* | *'{'*) READ=true ;; esac
+                case "$CMD" in *'*'* | *'?'* | *'['* | *'{'* | *'@('* | *'!('* | *'+('*) READ=true ;; esac
                 case "$CMD" in *'>'*'$'* | *'$'*'>'* | *'>'*'`'* | *'`'*'>'*) READ=true ;; esac
-                printf '%s\n%s\n' "$CMD" "$JOINED" | tr -d "\"'\\\\" | grep -qE '(^|[^A-Za-z0-9_.-])(g?tar|bsdtar|pax|cpio|ar|unzip|7zr?a?|unar|unrar|rar|jar|cabextract|lha|unsquashfs|dpkg(-deb)?|rpm|patch|rsync|busybox|toybox|xargs|find|apply|am|update-index|read-tree|checkout-index|mktree|fast-import|alias|config-env|git|g?zip|gunzip|unpigz|pigz|GZIP|curl|wget|aria2c|https?|httpie|zipfile|tarfile|ditto|xar|aa|aunpack|atool|dtrx|patool)($|[^A-Za-z0-9_-])' && READ=true
+                printf '%s\n%s\n' "$CMD" "$JOINED" | tr -d "\"'\\\\" | grep -qE '(^|[^A-Za-z0-9_.-])(g?tar|bsdtar|pax|cpio|ar|unzip|7zr?a?|unar|unrar|rar|jar|cabextract|lha|unsquashfs|dpkg(-deb)?|rpm|patch|rsync|busybox|toybox|xargs|find|apply|am|update-index|read-tree|checkout-index|mktree|fast-import|alias|config-env|git|g?zip|gunzip|unpigz|pigz|GZIP|curl|wget|aria2c|https?|httpie|zipfile|tarfile|ditto|xar|aa|aunpack|atool|dtrx|patool|cp|gcp|scp|rclone|sftp|lftp|unison)($|[^A-Za-z0-9_-])' && READ=true
                 [ "$READ" = true ] || exit 0
               fi
               case "$CMD" in
@@ -136,10 +145,15 @@ hooks:
             # bash pairs them: a backslash escapes the next character (inside double
             # quotes or $'...' too, so an escaped quote never closes one), and a line
             # continuation (a backslash and a newline) is removed, inside an operator and
-            # before a comment as well. commands gives {why, cmds}: why names what this
-            # reading cannot follow (an unclosed quote, a here-document, a process
-            # substitution), else is null. jq's global match costs the text times its
-            # matches, so the caller bounds the command's length.
+            # before a comment as well. An unquoted extglob opener (@(, !(, +(, *( or
+            # ?(, a line continuation allowed before its parenthesis) is a token of its
+            # own, ext: once a command has run shopt -s extglob, bash reads the group as
+            # part of a word (blanks, ; and | included) and expands it as a pattern, and
+            # otherwise refuses the line. commands gives {why, cmds}: why names what this
+            # reading cannot follow (an unclosed quote, an extglob pattern, a
+            # here-document, a process substitution), else is null. jq's global match
+            # costs the text times its matches, so the caller bounds the command's
+            # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
@@ -162,8 +176,9 @@ hooks:
                  assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
             # Operators (a line continuation may stand between their characters: <\
             # < is <<), comments (a # where a word may start, after any continuation), a
-            # lone continuation, words, and a quote or a backslash that nothing closes.
-            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>]|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<bad>\\$'|['\"\\\\])"; "g")
+            # lone continuation, words, an extglob opener, and a quote or a backslash
+            # that nothing closes.
+            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>@!+*?]|[@!+*?](?!(?:\\\\\n)*\\()|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<ext>[@!+*?](?:\\\\\n)*\\()|(?<bad>\\$'|['\"\\\\])"; "g")
               | .captures | map(select(.string != null)) | .[0]
               | {(.name): (if .name == "op" then .string | split("\\\n") | add else .string end)}]
               | map(select(has("comment") or has("cont") | not));
@@ -172,6 +187,7 @@ hooks:
             # Each step is linear in the command: no list grows by copying.
             def commands: tokens as $t | ($t | length) as $n
               | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .ext) then {why: "extglob"}
                 elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
                 elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
                 else [range(0; $n) as $i | $t[$i]
@@ -199,13 +215,14 @@ hooks:
             # file by its last name), from the directory the command runs in: each of
             # its last components may match the path's, and the directories it leaves
             # out are the last ones of that directory. A glob character matches any run
-            # here (more than the shell's), but not a name's leading dot; a sequence of
-            # numbers gives a run of digits (\u0006).
+            # here (more than the shell's), but not a name's leading dot unless the
+            # command may turn on dotglob ($dots); a sequence of numbers gives a run of
+            # digits (\u0006).
             # (A pattern with more characters than the name, glob characters
             # aside, cannot match it: so no regex is built from a long word.)
             def glob_part($pattern): . as $name | ($pattern | ascii_downcase) as $p
               | ($p | explode | map(select(. != 1 and . != 6)) | length) <= ($name | length)
-              and (($name | startswith(".")) and ($p | startswith("\u0001")) | not)
+              and ($dots or ((($name | startswith(".")) and ($p | startswith("\u0001"))) | not))
                 and ($name | test("^" + ($p | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0006"; "[0-9-]*")) + "$"));
             def may_name_path($cwd; $file): . as $parts
               | ($file | length) as $n
@@ -308,18 +325,61 @@ hooks:
                       else null end
                   else null end
                 end;
+            # For each token, whether it lies in the body of a here-document that a
+            # reader takes as data: the program of the command that holds the << is
+            # a reader (cat <<'EOF' > notes.md, git commit -m "$(cat <<'EOF' ...)"), and
+            # no pipe follows it (cat <<EOF | sh is code). A body runs from the line
+            # after the << to a line that holds only its delimiter; bodies follow one
+            # another as their << do. One pass, linear in the command. The state's odd
+            # says a delimiter is not a plain word (letters, digits, _ . -), whose line
+            # this reading may split where bash does not.
+            def heredoc_data($t): ($t | length) as $n
+              | ([-1] + [range(0; $n) | select($t[.].op == "|")] | max) as $lastpipe
+              | [foreach range(0; $n) as $i ({pend: [], body: null, want: null, prog: null, cnt: 0, first: null, mark: false, odd: false};
+                  $t[$i] as $x
+                  | if .body != null then
+                      .mark = .body.data
+                      | if $x.op == "\n" then
+                          (if .cnt == 1 and .first == .body.delim then
+                             (if (.pend | length) > 0 then .body = .pend[0] | .pend = .pend[1:] else .body = null end)
+                           else . end)
+                          | .cnt = 0 | .first = null
+                        else .cnt += 1 | .first = (if .cnt == 1 and $x.word then word($x.word).d else null end) end
+                    else
+                      .mark = false
+                      | if .want != null then
+                          (if $x.word then word($x.word).d else null end) as $d
+                          | .pend += [{delim: ($d // "\u0000"), data: .want}] | .want = null
+                          | .odd = (.odd or (($d // "") | test("^[A-Za-z0-9_.-]+$") | not))
+                        elif $x.op and ($x.op | test("^[0-9]*<<-?$")) then
+                          .want = (((.prog // "") | IN(readers[])) and $i > $lastpipe)
+                        elif $x.op == "\n" then
+                          (if (.pend | length) > 0 then .body = .pend[0] | .pend = .pend[1:] else . end) | .prog = null
+                        elif $x.op and ($x.op | test("[<>]") | not) then .prog = null
+                        elif $x.word and .prog == null and (($i > 0 and ($t[$i - 1].op // "" | takes_target)) | not) then
+                          word($x.word) as $wd | if $wd.assign then . else .prog = ($wd.d | sub("^.*/"; "")) end
+                        else . end
+                    end;
+                  {mark, odd})];
             # The simple commands of any command, read even where the shared reader
             # stops: a here-document's body is read as commands too (more than bash
-            # runs), a lone quote is left out, and heredoc says whether it holds one.
+            # runs; each word of a body a reader takes as data marked data), a lone
+            # quote is left out, heredoc says whether it holds one, and ext whether it
+            # holds an extglob opener.
             def loose: tokens as $t | ($t | length) as $n
+              | heredoc_data($t) as $hd
               | [range(0; $n) as $i | $t[$i]
                  | if .word then
                      ($t[$i - 1].op // "") as $op
                      | word(.word) + {target: ($i > 0 and ($op | takes_target)),
-                                      writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                                      writes: ($i > 0 and ($op | takes_target) and ($op | test(">"))),
+                                      data: $hd[$i].mark}
                    else . end] as $w
               | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
               | {heredoc: any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)),
+                 ext: any($t[]; .ext),
+                 data: any($hd[]; .mark),
+                 odd: ($n > 0 and $hd[-1].odd),
                  cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)],
                  # whether these words are the ones bash reads: no quote is left
                  # unclosed and no word holds a command substitution
@@ -340,8 +400,25 @@ hooks:
             # configuration file gives), and git's commands that write files or the
             # index from a patch or from data (git checkout then writes what the index
             # holds).
-            def writers: ["gtar", "bsdtar", "pax", "cpio", "ar", "7z", "7za", "7zr", "unar", "unrar", "rar", "jar", "cabextract", "lha", "unsquashfs", "dpkg-deb", "patch", "rsync", "busybox", "toybox", "aria2c", "http", "https", "httpie", "ditto", "xar", "aa", "aunpack", "atool", "dtrx", "patool"];
+            def writers: ["gtar", "bsdtar", "pax", "cpio", "ar", "7z", "7za", "7zr", "unar", "unrar", "rar", "jar", "cabextract", "lha", "unsquashfs", "dpkg-deb", "patch", "rsync", "busybox", "toybox", "aria2c", "http", "https", "httpie", "ditto", "xar", "aa", "aunpack", "atool", "dtrx", "patool", "scp", "rclone", "sftp", "lftp", "unison"];
+            # Programs read with a rule of their own below.
+            def handled: ["tar", "unzip", "git", "find", "xargs", "gzip", "gunzip", "pigz", "unpigz", "curl", "wget", "dpkg", "rpm", "cp", "gcp"];
+            # Programs whose later words are their arguments, not programs they run
+            # (git log --grep tar): the readers, the writers, and those read with a
+            # rule of their own but xargs. After any other program (env, timeout, a
+            # wrapper this check does not list: prlimit, setpriv, runcon, a loader)
+            # every later word is read as a program it may run.
+            def known: readers + writers + [handled[] | select(. != "xargs")];
+            # The words before a command's program that bash reads as its own.
+            def reserved: ["!", "if", "then", "elif", "else", "do", "while", "until", "coproc", "{", "}", "fi", "done", "esac"];
             def git_writers: ["apply", "am", "update-index", "read-tree", "checkout-index", "mktree", "fast-import"];
+            # git's commands that read, or write no file of the work tree from a
+            # commit, a tree or data, and run no program their words name: any other
+            # (checkout, restore, switch, reset --hard, merge, pull, rebase,
+            # cherry-pick, revert, stash apply, worktree, submodule, sparse-checkout,
+            # clone, bisect, an alias a configuration file defines, ...) may write the
+            # records file from content this check never reads.
+            def git_reads: ["add", "annotate", "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "cherry", "commit", "commit-graph", "commit-tree", "config", "count-objects", "describe", "diff", "diff-files", "diff-index", "diff-tree", "fetch", "for-each-ref", "fsck", "gc", "grep", "hash-object", "help", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge-base", "mv", "name-rev", "pack-refs", "prune", "push", "range-diff", "reflog", "remote", "repack", "rev-list", "rev-parse", "rm", "shortlog", "show", "show-branch", "show-ref", "status", "symbolic-ref", "tag", "update-ref", "var", "verify-commit", "verify-tag", "version", "whatchanged", "write-tree"];
             # git's own commands: any other is an alias, which a configuration file or
             # variable may define (git x then runs git apply), or another program.
             def git_own: ["add", "am", "annotate", "apply", "archimport", "archive", "backfill", "bisect", "blame", "branch", "bugreport", "bundle", "cat-file", "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "checkout", "checkout-index", "cherry", "cherry-pick", "citool", "clean", "clone", "column", "commit", "commit-graph", "commit-tree", "config", "count-objects", "credential", "credential-cache", "credential-store", "cvsexportcommit", "cvsimport", "cvsserver", "daemon", "describe", "diagnose", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "fast-export", "fast-import", "fetch", "fetch-pack", "filter-branch", "fmt-merge-msg", "for-each-ref", "for-each-repo", "format-patch", "fsck", "fsck-objects", "gc", "get-tar-commit-id", "grep", "gui", "hash-object", "help", "hook", "http-backend", "http-fetch", "http-push", "imap-send", "index-pack", "init", "init-db", "instaweb", "interpret-trailers", "last-modified", "log", "ls-files", "ls-remote", "ls-tree", "mailinfo", "mailsplit", "maintenance", "merge", "merge-base", "merge-file", "merge-index", "merge-octopus", "merge-one-file", "merge-ours", "merge-recursive", "merge-recursive-ours", "merge-recursive-theirs", "merge-resolve", "merge-subtree", "merge-tree", "mergetool", "mktag", "mktree", "multi-pack-index", "mv", "name-rev", "notes", "p4", "pack-objects", "pack-redundant", "pack-refs", "patch-id", "pickaxe", "prune", "prune-packed", "pull", "push", "quiltimport", "range-diff", "read-tree", "rebase", "receive-pack", "reflog", "refs", "remote", "remote-ext", "remote-fd", "remote-ftp", "remote-ftps", "remote-http", "remote-https", "repack", "replace", "replay", "request-pull", "rerere", "reset", "restore", "rev-list", "rev-parse", "revert", "rm", "send-email", "send-pack", "shell", "shortlog", "show", "show-branch", "show-index", "show-ref", "sparse-checkout", "stage", "stash", "status", "stripspace", "submodule", "subtree", "svn", "switch", "symbolic-ref", "tag", "unpack-file", "unpack-objects", "update-index", "update-ref", "update-server-info", "upload-archive", "upload-pack", "var", "verify-commit", "verify-pack", "verify-tag", "version", "whatchanged", "worktree", "write-tree"];
@@ -374,11 +451,17 @@ hooks:
             # wget names files from the server (--content-disposition,
             # --trust-server-names), from the pages it follows (-r, -m, -p) or the URLs
             # it reads (-i, -x), runs wgetrc commands (-e), and reads ~/.wgetrc and
-            # /etc/wgetrc (which may set any of these) unless given --no-config.
+            # /etc/wgetrc (which may set any of these) unless given --no-config, read
+            # here as its first word (not an option's value, not after --).
             def wget_refusal($rest):
-              if any($rest[]; .d == "--no-config") | not then "wget without --no-config (its configuration file may name the files it writes)"
+              if ($rest[0].d // "") != "--no-config" then "wget without --no-config first (its configuration file may name the files it writes)"
               else (first($rest[] | select(sets("rmpxieBF"; "oaBtOTwQPUlARDIXnei"; ["--content-disposition", "--trust-server-names", "--recursive", "--mirror", "--page-requisites", "--force-directories", "--force-html", "--input-file", "--input-metalink", "--metalink-over-http", "--execute", "--config", "--base"]; 4))) // null) as $w
               | if $w != null then "wget \($w.d)" else null end end;
+            # cp copying a directory writes every file it holds (cp -r src/. . writes
+            # src/.claude/audit/records.jsonl over the records).
+            def cp_refusal($prog; $rest):
+              (first($rest[] | select(sets("rRa"; "St"; ["--recursive", "--archive"]; 4))) // null) as $w
+              | if $w != null then "\($prog) \($w.d)" else null end;
             # dpkg and rpm extract or install the files a package names.
             def package_refusal($prog; $rest):
               (if $prog == "dpkg" then [$rest[] | select(sets("xXiR"; ""; ["--extract", "--vextract", "--install", "--unpack", "--recursive"]; 5))]
@@ -401,20 +484,51 @@ hooks:
               | ($r | length) > 0 and ($r[0] | startswith("-"))
                 and ([$r[] | select(startswith("-")) | letters[]] as $ls
                      | all($ls[]; IN("l", "t", "v", "Z", "q", "z")) and any($ls[]; IN("l", "t", "v", "Z")));
+            # A path git checkout or restore may write from a commit: a literal path
+            # after --, resolved from the call's directory, that neither is the
+            # records file nor holds it (no glob, no pathspec magic, no .., ~ or
+            # expansion).
+            def pathspec_safe($records):
+              (.raw | test("[$`\\\\]") | not) and (.braces | not) and (.d | test("[*?\\[]|^:") | not)
+              and ((.d | resolved($cwd; $project)) as $r
+                   | $r != null and $r != $records and ($records | startswith($r + "/") | not));
             def git_refusal($rest):
-              (reduce $rest[] as $w ({skip: false, sub: null, alias: false};
-                 if .sub != null then .
+              (reduce range(0; $rest | length) as $i ({skip: false, sub: null, at: null, opts: false, alias: false};
+                 $rest[$i] as $w
+                 | if .sub != null then .
                  elif .skip then .skip = false | .alias = (.alias or ($w.d | ascii_downcase | startswith("alias.")))
                  elif $w.d | startswith("-") then
                    .skip = ($w.d | test("^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--attr-source)$"))
                    | .alias = (.alias or ($w.d | test("^-c.*alias\\.|^--config-env"; "i")))
-                 else .sub = $w.d end)) as $g
+                   | .opts = true
+                 else .sub = $w.d | .at = $i end)) as $g
+              | (if $g.at == null then [] else $rest[$g.at + 1:] end) as $sw
+              | ([$project + "/.claude/audit/records.jsonl"] | map(resolved($cwd; $cwd)) | .[0]) as $records
+              | (first(range(0; $sw | length) | select($sw[.].d == "--")) // null) as $dd
               | if $g.alias then "git -c alias.*"
                 elif $g.sub == null then null
                 elif any(git_writers[]; . == $g.sub) then "git \($g.sub)"
                 elif $g.sub == "config" and any($rest[]; .d | ascii_downcase | startswith("alias.")) then "git config alias.*"
                 elif ($g.sub | IN(git_own[])) | not then "git \($g.sub) (not one of git's own commands: an alias or another program)"
-                else null end;
+                elif $g.sub == "grep" then
+                  (if any($sw[]; .d | test("^-[A-Za-z]*O|^--op")) then "git grep -O (it runs the program it names)" else null end)
+                elif $g.sub | IN(git_reads[]) then null
+                # stash: list, show, create, store, drop and clear write no file
+                elif $g.sub == "stash" then
+                  (if (($sw[0].d // "") | IN("list", "show", "create", "store", "drop", "clear")) then null else "git stash \($sw[0].d // "push") (it writes the work tree)" end)
+                # reset: --soft and --mixed write the index, not the work tree
+                elif $g.sub == "reset" then
+                  (if all($sw[]; (.d | startswith("-") | not) or (.d | IN("--soft", "--mixed", "-q", "--quiet", "--"))) then null
+                   else "git reset \(first($sw[] | select(.d | startswith("-") and (IN("--soft", "--mixed", "-q", "--quiet", "--") | not)) | .d))" end)
+                # checkout and restore of literal paths after -- that do not hold the
+                # records, with no option of git's before the command
+                elif $g.sub | IN("checkout", "restore") then
+                  (if ($g.opts | not) and $records != null and $dd != null and ($sw | length) > $dd + 1
+                      and (any($sw[:$dd][]; .d | startswith("--pathspec")) | not)
+                      and all($sw[$dd + 1:][]; pathspec_safe($records))
+                   then null
+                   else "git \($g.sub) (but of literal paths after -- that do not hold the records)" end)
+                else "git \($g.sub) (it may write the work tree from a commit, or run a program)" end;
             def find_refusal($rest):
               first(range(0; $rest | length) as $i | $rest[$i].d as $d
                 | select(($d | IN("-fprint", "-fprint0", "-fprintf", "-fls"))
@@ -428,18 +542,25 @@ hooks:
                  else .prog = $w.d end)) as $x
               | if $x.prog == null or any(fed_readers[]; . == $x.prog) then null else "xargs \($x.prog)" end;
             # A program of a simple command that writes files its input names: its
-            # program, and any word after a program that runs another. Each is read
-            # over its next 64 words (no list grows with the command); a longer one is
-            # refused.
+            # program (after reserved words: ! tar xf, if git apply ...), and every
+            # later word unless the program is one whose words are its arguments
+            # (known). In a here-document's body a reader takes as data, read as
+            # before: its first word, and any word after a wrapper. Each is read
+            # over its next 64 words (no list grows with the command); a longer one
+            # is refused.
             def writer_refusal($words; $text):
               ($words | map(select(.target | not))) as $a
               | ($a | length) as $n
-              | (first(range(0; $n) | select($a[.].assign | not)) // $n) as $p
-              | (first(range($p; $n) | select($a[.].d | name_of | IN(wrappers[]))) // $n) as $wrap
+              | (any($words[]; .data) | not) as $strict
+              | (if $strict then first(range(0; $n) | select(($a[.].assign | not) and ($a[.].d | IN(reserved[]) | not))) // $n
+                 else first(range(0; $n) | select($a[.].assign | not)) // $n end) as $p
+              | (($a[$p].d // "") | name_of) as $pn
+              | (if $strict then (if ($pn | IN(known[])) or ($pn | test("^python[0-9.]*$")) then $n else $p end)
+                 else first(range($p; $n) | select($a[.].d | name_of | IN(wrappers[]))) // $n end) as $wrap
               | first(range($p; $n) as $i | select($i == $p or $i > $wrap)
                       | ($a[$i].d | name_of) as $prog | $a[$i + 1:$i + 65] as $rest
                       | if ($prog | IN(writers[])) then $prog
-                        elif ($prog | IN("tar", "unzip", "git", "find", "xargs", "gzip", "gunzip", "pigz", "unpigz", "curl", "wget", "dpkg", "rpm") or test("^python[0-9.]*$") | not) then empty
+                        elif ($prog | IN(handled[]) or test("^python[0-9.]*$") | not) then empty
                         elif $n - $i > 65 then "\($prog) with more than 64 words"
                         elif $prog == "tar" then (if tar_reads($rest) then empty else "tar" end)
                         elif $prog == "unzip" then (if unzip_reads($rest) then empty else "unzip" end)
@@ -450,6 +571,7 @@ hooks:
                         elif $prog == "curl" then (curl_refusal($rest) // empty)
                         elif $prog == "wget" then (wget_refusal($rest) // empty)
                         elif $prog | IN("dpkg", "rpm") then (package_refusal($prog; $rest) // empty)
+                        elif $prog | IN("cp", "gcp") then (cp_refusal($prog; $rest) // empty)
                         else (python_refusal($prog; $rest) // empty) end
                       | {kind: "writer", word: .}) // null;
             .tool_input.command // ""
@@ -458,16 +580,19 @@ hooks:
               else loose as $l
               # Where the reader cannot follow the command, it is read again with no
               # quoting at all, which reads more than bash runs
-              | (if $l.follows then [] else (unquoted_text | loose | .cmds) end) as $u
+              | (if $l.follows then {cmds: [], ext: false, data: false, odd: false} else (unquoted_text | loose) end) as $ul
+              | $ul.cmds as $u
               # A command that may name the records file, or a directory on its way, or
-              # that redirects output to a name the shell builds, is read as a whole
-              | if $named or $inaudit or any($l.cmds[][], $u[][]; may_name($cwd))
+              # that redirects output to a name the shell builds, or that holds an
+              # extglob pattern (which may match any name), is read as a whole
+              | if $named or $inaudit or $l.ext or $ul.ext or any($l.cmds[][], $u[][]; may_name($cwd))
                    or any($l.cmds[][]; .writes and ((.raw | test("[$`]")) or .braces)) then
                   # $'...' and $"..." are decoded or translated by bash, unread here
                   if test("\\$['\"]") then "subst "
                   elif [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] | map(select(startswith("'") | not)) | add // "" | test("\\$\\(|`|\\\\") then "subst "
                   else commands as $c
                   | if $c.why == "process substitution" then "subst "
+                    elif $c.why == "extglob" then "expands an extglob pattern, @(...) and its kin, which may match any name"
                     elif $c.why != null then "expands \($c.why)"
                     elif any($c.cmds[][]; .braces) then "expands an unquoted brace"
                     else (first($c.cmds[][] | select(.writes and (.d as $t | any(sinks[]; . == $t) | not))) // null) as $w
@@ -480,20 +605,29 @@ hooks:
                 # A here-document whose text a quote carries past a line's end: where
                 # its body ends, and what runs after it, are not read
                 elif $l.heredoc and any($l.cmds[][]; .raw | test("\n")) then "expands a here-document"
+                # A body read as data ends at its delimiter's line: where a line
+                # continuation or a delimiter other than a plain word may hide that
+                # line from this reading, what runs after it is not read as bash runs it
+                elif ($l.data or $ul.data) and (contains("\\\n") or $l.odd or $ul.odd) then "expands a here-document"
                 else (first($l.cmds[], $u[] | writer_refusal(.; $text) | select(. != null)) // null) as $r
                 | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
                 end
               end
             JQ
             )"
-              VERDICT="$(printf '%s' "$INPUT" | jq -r --arg cwd "$RUNS_IN" --arg project "${CLAUDE_PROJECT_DIR:-$RUNS_IN}" --argjson named "$NAMED" --argjson inaudit "$INAUDIT" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2; }
+              # Whether the command may turn on dotglob, so that a glob matches a
+              # leading dot (*laude matches .claude): shopt, GLOBIGNORE, BASHOPTS, or
+              # a file it sources or text it evaluates (quotes and backslashes removed)
+              DOTS=false
+              printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qE '(shopt|GLOBIGNORE|BASHOPTS|SHELLOPTS|dotglob)|(^|[[:space:];&|(])(\.|source|eval)([[:space:]]|$)' && DOTS=true
+              VERDICT="$(printf '%s' "$INPUT" | jq -r --arg cwd "$RUNS_IN" --arg project "${CLAUDE_PROJECT_DIR:-$RUNS_IN}" --argjson named "$NAMED" --argjson inaudit "$INAUDIT" --argjson dots "$DOTS" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2; }
               KIND="${VERDICT%% *}"
               WORD="${VERDICT#* }"
               ONE_FORM="append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)"
               case "$KIND" in
                 ok) ;;
                 writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed, braced, linked or built when the command runs may be the records file): $ONE_FORM" >&2; exit 2 ;;
-                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K or --variable, wget but with --no-config and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists): $ONE_FORM" >&2; exit 2 ;;
+                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, a recursive copy (cp -r, -R or -a, scp, rsync, rclone), git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, a git command that writes the work tree from a commit (checkout and restore but of literal paths after -- that do not hold the records, switch, reset but --soft or --mixed, merge, pull, rebase, cherry-pick, revert, stash but list, show, create, store, drop or clear, worktree, submodule, clone, ...), find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K or --variable, wget but with --no-config first and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists), wherever it stands: after !, if or while, and after any program but one read here (prlimit, setpriv, a loader): $ONE_FORM" >&2; exit 2 ;;
                 program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
                 mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, in the project's audit directory, as mv <project>/.claude/audit/records.jsonl <project>/.claude/audit/records.<UTC time>.jsonl with literal paths (no .., ~ or expansion); it does not run '$WORD', which could put another file in its place or take the records out: $ONE_FORM" >&2; exit 2 ;;
                 assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor PATH, IFS, ENV, BASH_ENV, CDPATH, LD_*, DYLD_* or OPENSSL_*, which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;

@@ -5147,3 +5147,240 @@ and §4.4.2 already require the refusals these fixes bring the layer to.
   brace case, the GBK premise with a locale built by `localedef`, the
   hooks' timings on 4 KB adversarial words. No CLI or nested agent was
   started; nothing was left running; the scratch copies were removed.
+
+### Batch 3: five reported defects
+
+Five defects, each reproduced by an independent verifier on 7d04aea and
+reproduced again here on 0a801a8 before any change (the skills' Bash hooks
+taken out of their frontmatter and run on Claude Code's JSON, under
+`timeout 120` and a 4 GB address-space limit): the send skill's hook exited
+0 on `! curl`, `if curl`, `prlimit curl`, `setpriv curl`, `! wget`, `! cp
+/usr/bin/curl fx; ./fx`, `prlimit install`, `if ln -sf`, wget's `-O
+--no-config`, `-U --no-config` and `-- --no-config`, `alias get=curl` then
+`get`, `hash -p /usr/bin/curl x`, `BASH_ALIASES[g]=curl` and `shopt -s
+extglob` then `/usr/bin/c@(u)rl`; the audit skill's hook exited 0 on the
+extglob records path, `cp -r SRC/. .` and `git checkout FETCH_HEAD -- .`;
+the rollback skill's hook exited 0 on `git st@(a)sh apply <unrecorded>`.
+None was fixed by an earlier batch: round 3 batch 3 #3 set the `-q` and
+`--no-config` rules behind the position test of round 2 #14 (copies),
+round 2 #16 named each archive and patch tool, and round 2 #17 read the
+rollback hook's words with no glob reading but `expands`. Neither the
+plugin's pre-tool-use hook nor the SDK mapper holds these rules (both gate
+every such command as `mutate`: `(` and `shopt` are refused by the hook's
+reading, the mapper classes them `mutate`), so no Python or TypeScript
+counterpart changed. Each fix has tests that fail on the code before it
+(below).
+
+#### 1. The send hook's configuration and copy rules were skipped after a reserved word or a wrapper missing from its list (medium); siblings: the tool as a redirection's source, the tool given to any other program, the audit hook's writers
+
+`check_request` applied the `curl -q`/`wget --no-config` rule only when
+`$at == 0` or a word before the tool was on `shells`, and the copy rule
+used the same test, so `!`, `if`, `while`, `until`, `coproc` and every
+wrapper missing from the list (`prlimit`, `setpriv`, `runcon`, `unbuffer`,
+`faketime`, a loader) put the tool where the hook read it as not running.
+
+- Fix (`skills/send/SKILL.md`, `check_command`): the command's program is
+  its first word that is not a reserved word. The tool runs when it is the
+  program, or after a program on `wrappers` (those that run the program a
+  later word names: `env`, `sudo`, `timeout`, `nice`, `exec`, `eval`, ...)
+  with only options and numbers between (`timeout 5`, `nice -n 10`); a tool
+  word given to any other program is refused (kind `argument`: the program
+  may run it unread or copy it), after its words are read as a request with
+  the configuration rule; only `which`, `whereis`, `type`, `echo` and
+  `printf`, which run nothing, and a package manager given the tool's bare
+  name (`apt-get install -y curl`), are exempt. The copy rule refuses a
+  copier anywhere from the program on, in a command where a word (a
+  redirection's target included) names the tool, unless the program is the
+  tool itself (whose words are URLs and file names: `curl -q
+  https://example.com/install`) or exempt. A variable set after a reserved
+  word (`! X=1 curl`) is read as one set on the line.
+- Siblings found here: `cat < /usr/bin/curl > fx` and `tee fx <
+  /usr/bin/curl` copied the tool unread (the rule read only arguments);
+  `head -c ... /usr/bin/curl > fx`, `gzip -c`, `awk 1 curl` from the tool's
+  directory copy it through a program that is no copier (now `argument`).
+  The audit hook's `writer_refusal` had the same position test: `! tar
+  -xf`, `if git apply`, `setpriv patch`, `runcon tar` passed; it now skips
+  reserved words and reads every later word of any program it does not read
+  with a rule of its own (`known`: the readers, the writers, the programs
+  with a rule but `xargs`), so an unlisted wrapper runs nothing unread. A
+  here-document's body, which the hook reads as commands, would then refuse
+  prose (`git commit -m "$(cat <<'EOF' ... Don't apply the patch ...)"`):
+  `heredoc_data` marks, in one linear pass, the body of a here-document
+  whose command's program is a reader and that no pipe follows, and such a
+  body is read with the old rule (its first word, and any word after a
+  listed wrapper); `cat <<'EOF' | sh` and `sh <<'EOF'` are read in full. A
+  data body's end is found at a line holding only its delimiter; a command
+  whose data body holds a line continuation (which this reading joins where
+  bash, with a quoted delimiter, does not) or ends at a delimiter other than
+  a plain word is refused (`expands a here-document`), so the lines after a
+  body are never read as data.
+- Tests (`tests/test_skill_hooks.py`): `TestSendReadsWhereTheToolRuns`
+  (11 configuration lines, 7 copies, 8 arguments; 16 controls still run:
+  `timeout 5 curl -q`, `sudo`, `env -i`, `nice -n 10`, `time`, `! curl -q`,
+  `which curl wget`, `apt-get install -y curl wget`, `curl -q
+  https://example.com/install`, ...), `TestAuditReadsEveryWriter` (the
+  reserved-word and wrapper lines, `cat <<'EOF' | sh` and `sh <<'EOF'`
+  bodies; the commit-message and `cat <<'EOF' > notes.md` controls), the
+  premise `test_curl_after_a_reserved_word_reads_its_configuration`
+  (Claude Code's wrapper, an unknown option in `~/.curlrc`).
+
+#### 2. wget's `--no-config` was accepted from any word (medium); sibling: `--` in every tool's reading, the audit hook's wget rule
+
+`any($words[]; .d == "--no-config")` took the value of `-O`, `-U`,
+`--header` or `--user-agent`, and a word after `--`, though wget then reads
+`~/.wgetrc` (verified offline: an unknown command there is reported with
+`-O --no-config` and `-O - -- --no-config`, not with the option).
+
+- Fix (`check_request`): the reduce records `--no-config` only where it
+  reads an option (not a value it skips, not after `--`); a word after `--`
+  is an operand for every tool, so `curl -q -- -H 127.1:18777/x` is read
+  as a URL (it skipped `127.1:18777` as `-H`'s value).
+- Sibling: the audit hook's `wget_refusal` took `--no-config` anywhere
+  too; it now requires it as wget's first word (strict; the documented form
+  is `wget --no-config ...`).
+- Tests: the six decoys in `TestSendReadsWhereTheToolRuns`, `curl -q --
+  -H 127.1:18777/x`, `wget -O --no-config` in `TestAuditReadsEveryWriter`,
+  the premise `test_wget_skips_its_configuration_only_for_the_option`;
+  `wget -O - --no-config https://example.com/` still runs.
+
+#### 3. `alias` and `hash -p` gave curl another name in the same command (medium); siblings: `BASH_ALIASES`, `BASH_CMDS`, `enable`, a path or a value in a command line in a word
+
+Claude Code's shell expands aliases, and `eval` parses each line after
+the one before ran: `alias get=curl` then `get -q 0x7f.1:18777/` reached
+the listener; `hash -p /usr/bin/curl x` too. `embedded` needed the name
+after a blank or an operator, so neither `get=curl` nor `sh -c
+'/usr/bin/curl ...'` was read as a command line (the second a sibling of
+round 2 #13).
+
+- Fix: in a command that names a tool, a word `alias`, `hash`, `enable` or
+  `function` is refused (kind `alias`), unless the program runs nothing
+  (`echo hash`); `BASH_ALIASES` and `BASH_CMDS` join `setting_vars` (so
+  `BASH_ALIASES[g]=curl`, `read 'BASH_ALIASES[g]'` and `declare` are read
+  as a setting); `embedded` takes the name after `=` or `/` and before `;`,
+  `&`, `|`, `)` or a quote (`eval 'alias g=curl'`, `sh -c 'alias g=curl;
+  g ...'`, `sh -c '/usr/bin/curl ...'`, `bash -c 'hash -p ...'`).
+- Tests: 14 lines in `test_another_name_for_a_tool_is_refused` (one,
+  `BASH_CMDS[x]=/usr/bin/curl`, held before as a glob: it is kept as a
+  control); the premise `test_a_name_runs_another_program` (alias, `hash
+  -p`, `BASH_ALIASES` through Claude Code's wrapper).
+
+#### 4. The shared word reader and the three gates did not read extglob patterns (medium); siblings: nocaseglob, dotglob, the rollback gate's plain globs
+
+`hooks/shell_words.jq` split `c@(u)rl` at `(`, and the gates reacted only
+to `*`, `?`, `[` and `{`; once a command has run `shopt -s extglob` (or a
+file it sources does), bash reads the group as part of a word, blanks and
+`;` included, and expands it as a pattern (verified: `@(a b)` is one word).
+
+- Fix (`hooks/shell_words.jq`, copied into the three skills): an unquoted
+  `[@!+*?](` (a line continuation allowed before the parenthesis) is a
+  token of its own, `ext`, and `commands` gives `why: "extglob"`. The send
+  hook refuses any command holding one (kind `program`, whatever it names);
+  the audit hook reads such a command in full, in the command and in its
+  unquoted re-reading, and refuses it (`expands an extglob pattern`); the
+  rollback hook reports it unread (F503). Each gate's first reading now
+  passes `@(`, `!(` and `+(` on (`*(` and `?(` hold `*` and `?`).
+- Siblings found here: `shopt -s nocaseglob` then `/usr/bin/CU?L` passed
+  the send hook (its tool-name match was case-sensitive): the pattern is
+  now matched in lower case. `shopt -s dotglob` then `cp t
+  *l?ude/au?it/rec?rds.js?nl` passed the audit hook, and `tee ~/*c?rlrc`
+  the send hook's setting-file rule (a glob matched a leading dot only by a
+  dot): where the command may turn on dotglob (it names `shopt`,
+  `GLOBIGNORE`, `BASHOPTS`, `SHELLOPTS` or `dotglob`, or sources a file or
+  evaluates text; `$dots`, passed from the shell), a glob matches a leading
+  dot too. The rollback gate read only a command naming `stash`, so `git
+  st?sh apply <unrecorded>` (a file named `stash` made by an earlier call)
+  restored unread: it now reads a command holding a glob, a brace or an
+  extglob opener, and a glob word counts as `stash`, `pop`, `apply` or
+  `branch` where its pattern (lower case, a class as any run) matches the
+  name; `git add *` is refused, `git add *.py` is not. Claude Code's
+  snapshot of the user's own shell options and aliases is the user's
+  configuration, like `.curlrc` was before -q: noted in SECURITY.md's
+  limitations.
+- Tests: extglob, nocaseglob and dotglob lines in
+  `test_another_name_for_a_tool_is_refused` and
+  `TestAuditReadsEveryWriter::test_blocks_a_pattern_or_text_it_cannot_read`,
+  `TestRollbackReadsGlobs` (4 globs and the extglob line refused; 4
+  controls run), the premises `test_a_name_runs_another_program` (extglob,
+  nocaseglob) and `test_dotglob_matches_a_leading_dot`, and end to end
+  `test_a_copy_or_a_commit_written_is_refused_before_it_runs` (extglob and
+  dotglob: refused, and run through Claude Code's wrapper each writes the
+  token into the records file) and
+  `test_the_rollback_hook_refuses_a_globbed_restore_before_it_runs`
+  (refused, and run each restores the unrecorded commit).
+
+#### 5. The audit hook's writer list missed recursive copies and the git commands that write the work tree from a commit (medium)
+
+`cp -r SRC/. .`, `git checkout FETCH_HEAD -- .`, `git restore
+--source=FETCH_HEAD .`, `git reset --hard`, `git pull`, `git merge`, `git
+switch` and `git cherry-pick` each passed and wrote the token into the
+records file: the early gate did not name `cp` or `scp`, and `git_refusal`
+refused only the plumbing of round 2 #16 and commands outside `git_own`.
+
+- Fix (`skills/audit/SKILL.md`): `cp` and `gcp` with a recursive option
+  (`-r`, `-R`, `-a`, `--recursive`, `--archive`, abbreviated) are refused
+  (`cp_refusal`), and `scp`, `rclone`, `sftp`, `lftp` and `unison` join
+  the writers (the gate names them all); git keeps its alias and
+  own-command rules, then allows only `git_reads` (reads, and commands that
+  write no file of the work tree from a commit: `add`, `commit`, `fetch`,
+  `push`, `branch`, `tag`, `rm`, `mv`, `config`, ...; `grep` but with
+  `-O`, which runs the program it names), `stash` only `list`, `show`,
+  `create`, `store`, `drop` and `clear`, `reset` only with `--soft`,
+  `--mixed`, `-q` (any other option, `--ha` among them, is refused), and
+  `checkout` and `restore` only with no option of git's before them and
+  only of literal paths after `--` (no glob, no `:` magic, no `..`, `~` or
+  expansion, no `--pathspec-from-file`) that neither are nor hold
+  `<project>/.claude/audit/records.jsonl`, resolved from the call's
+  directory: the rollback skill's own restore (`git restore --source=<sha>
+  --worktree -- <paths>`) still runs. Every other git command (`switch`,
+  `merge`, `pull`, `rebase`, `cherry-pick`, `revert`, `stash apply`,
+  `worktree`, `submodule`, `sparse-checkout`, `clone`, `bisect`, `checkout
+  <branch>`) is refused once the audit skill ran.
+- Tests: 32 lines in `test_blocks_a_program_that_writes_from_its_input`
+  (each reported line and its siblings), 18 controls (`git status`, `git
+  log --grep tar`, `git reset HEAD~1`, `git stash create`, the rollback
+  skill's restore, `git checkout main -- src`, `cp a b`, ...), and end to
+  end `test_a_copy_or_a_commit_written_is_refused_before_it_runs` (`cp -r`,
+  `! cp -r`, `git checkout FETCH_HEAD -- .`, `git reset --hard`: refused,
+  and each, run, writes the token; no path in them names records, jsonl,
+  audit or `.claude`).
+
+#### Documentation
+
+SECURITY.md §5.4: the send row (where a tool runs, the `argument`
+refusal, wget's option, `--`, `alias`/`hash`/`enable`/`BASH_ALIASES`/
+`BASH_CMDS`, a tool's path or value in a word, nocaseglob, dotglob,
+extglob, and the user's own shell configuration among what is not read),
+the audit row (dotglob, extglob, recursive copies, the git allowlist and
+its `checkout`/`restore` rule, wget's first word, reserved words and
+unlisted wrappers, data bodies), the rollback row (globs, extglob).
+`hooks/README.md` (the shared reader's `ext` token), the hooks' comments
+and refusal texts, CHANGELOG [Unreleased] Upgrading (what each skill hook
+now refuses once its skill ran). The Standard's text was not changed:
+these are host-specific additions (§5.18.10) whose documented promise in
+SECURITY.md the code now keeps.
+
+#### Checks after batch 3
+
+- Python: `pytest tests/` in bounded parts (each file under `timeout 120`;
+  `tests/test_skill_hooks.py` in six `-k` groups that together select all
+  of its 1752 tests): 7281 passed, 18 skipped (6980 before, plus the 301
+  new). ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the five generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: no package or binding source changed; the package's test
+  (2015, its build reused) and the binding's check and test (248 passed, 2
+  skipped).
+- Old code: the new tests against 0a801a8's `skills/` and `hooks/` (an
+  archive of HEAD with the new test file): 201 fail; all that pass are the
+  controls, the premises and the `BASH_CMDS` line noted above.
+- Probes, each under `timeout 120` and a 4 GB address-space limit: every
+  reported line through the three hooks before and after; the hooks on 16
+  KB adversarial commands (4000 here-documents on one line and 2000 on as
+  many lines, a data body of 2600 lines, 5300 `--` after a URL, 3200 tool
+  words after `prlimit`, 4000 `tar` words after `setpriv`, 5300 extglob
+  openers, a 900-line commit message in a here-document): each decided in
+  at most 2.1 s. No CLI or nested agent
+  was started; nothing was left running; the scratch copies were removed.

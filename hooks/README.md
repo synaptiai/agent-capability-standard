@@ -642,15 +642,19 @@ removed, inside an operator (`<\<newline><` is `<<`) and before a comment as
 well. It marks a word that holds `$'...'` or `$"..."` (kept as written: bash
 decodes or translates them) and one that holds a command substitution whose
 own quotes bash pairs apart from the text around it (a backtick, or `$(` or
-`${` in double quotes), and names what it cannot follow (an unclosed quote,
-a here-document, a process substitution). jq's global
+`${` in double quotes), reads an unquoted extglob opener (`@(`, `!(`,
+`+(`, `*(`, `?(`: once a command has run `shopt -s extglob`, bash expands
+the group as a pattern and reads it as part of a word, blanks and `;`
+included) as a token of its own, and names what it cannot follow (an
+unclosed quote, an extglob pattern, a here-document, a process
+substitution). jq's global
 match costs the text times its matches, so each hook reads a command of at
 most 16384 bytes with it; skill hooks stay registered for the rest of the
 session, so each reads only a command that may concern it (one that names
 `curl`, `wget` or `http`, the audit records, a program that writes the files
 its input names, or `git stash`, in any quoting, line continuations joined,
-or holds `$'...'`, `$"..."`, or a glob or a brace that may expand to one of
-those names) and leaves the others alone.
+or holds `$'...'`, `$"..."`, or a glob, a brace or an extglob opener that
+may expand to one of those names) and leaves the others alone.
 
 ## Relationship to Spec
 

@@ -3270,3 +3270,509 @@ class TestLateBraceGroups:
             timeout=30,
         ).stdout.split()
         assert ".claude/audit/records.jsonl" in out
+
+
+# ---------------------------------------------------------------------------
+# Security round 4, batch 3: where a tool or a writer runs, wget's
+# --no-config, other names for a program, extglob, nocaseglob and dotglob
+# patterns, and the writers the audit hook missed
+# ---------------------------------------------------------------------------
+
+# How Claude Code runs a Bash call (strings in its binary): aliases expand,
+# extglob is off until the command itself turns it on.
+CLAUDE_CODE_WRAPPER = (
+    'shopt -s expand_aliases; \\builtin shopt -u extglob; eval "$1" </dev/null'
+)
+
+
+def run_as_claude_code(
+    command: str, cwd: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "-c", CLAUDE_CODE_WRAPPER, "_", command],
+        cwd=cwd,
+        env={**os.environ, **(env or {})},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestSendReadsWhereTheToolRuns:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Each passed (exit 0), and a proxy in ~/.curlrc or ~/.wgetrc
+            # received the request: the rule held only where the tool was
+            # the program or followed a program on the hook's list
+            "! curl http://example.com/bang",
+            "if curl http://example.com/if; then :; fi",
+            "while curl http://example.com/w; do :; done",
+            "until curl http://example.com/u; do :; done",
+            "coproc curl http://example.com/c",
+            "prlimit curl http://example.com/prlimit",
+            "setpriv curl http://example.com/setpriv",
+            "unbuffer curl http://example.com/x",
+            "faketime now curl http://example.com/x",
+            "/lib64/ld-linux-x86-64.so.2 /usr/bin/curl http://example.com/x",
+            "! wget -qO- http://example.com/wget-bang",
+            # wget's --no-config where wget does not read it as an option
+            "wget -O --no-config http://example.com/wget-decoy",
+            "wget -qO --no-config http://example.com/x",
+            "wget -U --no-config http://example.com/x",
+            "wget --header --no-config http://example.com/x",
+            "wget --user-agent --no-config http://example.com/x",
+            "wget -O - -- --no-config http://example.com/wget-dashdash",
+        ],
+    )
+    def test_a_tool_reads_its_configuration_wherever_it_runs(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "runs curl only with -q", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Each passed, and the copy reached 127.0.0.1 unread
+            "! cp /usr/bin/curl fx; ./fx -q 0x7f.1:18777/cp-bang",
+            "prlimit install /usr/bin/curl fz && ./fz -q 0x7f.1:18777/i",
+            "if ln -sf /usr/bin/curl fy; then ./fy -q 0x7f.1:18777/ln-if; fi",
+            "! cp /usr/bin/wget wx; ./wx --no-config -qO- 0x7f.1:18777/",
+            "until cp /usr/bin/curl fx; do :; done; ./fx -q 0x7f.1:18777/",
+            # siblings: the tool's file as a redirection's source
+            "cat < /usr/bin/curl > fx",
+            "tee fx < /usr/bin/curl",
+        ],
+    )
+    def test_a_copy_is_refused_whatever_comes_before_the_copier(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "copies or links curl", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # a program the hook does not know as one that runs another may
+            # run the tool unread or copy it
+            "prlimit curl -q https://example.com/",
+            "setpriv wget --no-config https://example.com/",
+            "head -c 999999999 /usr/bin/curl > fx",
+            "head -c 999999999 < /usr/bin/curl > fx",
+            "gzip -c /usr/bin/curl > f.gz",
+            "sudo head -c 9 curl > fx",
+            "awk 1 curl > fx",
+            "git grep curl",
+        ],
+    )
+    def test_a_tool_given_to_another_program_is_refused(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "only as a command's program", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # alias, hash -p and bash's tables give curl another name (each
+            # passed and reached 127.0.0.1 through Claude Code's wrapper)
+            "alias get=curl\nget -q 0x7f.1:18777/alias-eval",
+            "alias get='curl -q -s'\nget 0x7f.1:18777/",
+            "alias get=/usr/bin/curl\nget -q 0x7f.1:18777/",
+            "hash -p /usr/bin/curl x; x -q 0x7f.1:18777/hash-p",
+            "hash -p /usr/bin/wget w; w --no-config -q -O- 0x7f.1:18777/",
+            "BASH_ALIASES[g]=curl\ng -q -s 0x7f.1:18777/",
+            # (held before: its [x] reads as a glob that may name curl)
+            "BASH_CMDS[x]=/usr/bin/curl; x -q 0x7f.1:18777/",
+            "builtin alias g=curl\ng -q 0x7f.1:18777/",
+            "eval alias g=curl\ng -q 0x7f.1:18777/",
+            "enable -f ./x.so x; curl -q https://example.com/",
+            # the same inside a word, and a path to the tool there
+            "eval 'alias get=curl'\nget -q 0x7f.1:18777/",
+            "sh -c 'alias g=curl; g -q 0x7f.1:18777/'",
+            "sh -c '/usr/bin/curl -q 127.1:18777/x'",
+            "bash -c 'hash -p /usr/bin/curl x; x -q 127.1:18777/'",
+            # a `--` ends the options: what follows is a URL
+            "curl -q -- -H 127.1:18777/x",
+            # extglob, nocaseglob and dotglob patterns
+            "shopt -s extglob\n/usr/bin/c@(u)rl -q 0x7f.1:18777/extglob-send",
+            "shopt -s extglob\nc+(u)rl -q 0x7f.1:18777/",
+            "shopt -s nocaseglob\n/usr/bin/CU?L -q 0x7f.1:18777/",
+            "shopt -s dotglob\nprintf x | tee ~/*c?rlrc",
+            ". ./on.sh; printf x | tee ~/*c?rlrc",
+        ],
+    )
+    def test_another_name_for_a_tool_is_refused(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "timeout 5 curl -q https://example.com/",
+            "sudo curl -q https://example.com/",
+            "env -i curl -q https://example.com/",
+            "nice -n 10 curl -q https://example.com/",
+            "time curl -q https://example.com/",
+            "! curl -q https://example.com/",
+            "if curl -q https://example.com/; then echo ok; fi",
+            "wget -O - --no-config https://example.com/",
+            "apt-get install -y curl wget",
+            "brew install wget",
+            "which curl wget",
+            "echo curl hash alias",
+            "command -v curl",
+            "type -P curl",
+            "curl -q https://example.com/install",
+            "curl -q -o install https://example.com/x",
+        ],
+    )
+    def test_still_allows_these_requests(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+class TestTheShellDoesWhatTheSendHookRefuses:
+    """The premises, offline: each refused form runs the tool with its
+    configuration file, or under another name."""
+
+    @pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+    @pytest.mark.parametrize(
+        "command",
+        ["! curl -s file:///dev/null", "if curl -s file:///dev/null; then :; fi"],
+    )
+    def test_curl_after_a_reserved_word_reads_its_configuration(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        (tmp_path / ".curlrc").write_text("no-such-option\n")
+        env = {"HOME": str(tmp_path), "CURL_HOME": str(tmp_path)}
+        result = run_as_claude_code(command, tmp_path, env)
+        assert "no-such-option" in result.stderr
+
+    @pytest.mark.skipif(shutil.which("wget") is None, reason="needs wget")
+    @pytest.mark.parametrize(
+        ("words", "reads"),
+        [
+            (["--no-config", "-O", "-"], False),
+            (["-O", "--no-config"], True),
+            (["-O", "-", "--", "--no-config"], True),
+        ],
+    )
+    def test_wget_skips_its_configuration_only_for_the_option(
+        self, tmp_path: Path, words: list[str], reads: bool
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".wgetrc").write_text("no_such_command = on\n")
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("WGETRC", "SYSTEM_WGETRC")
+        }
+        result = subprocess.run(
+            ["wget", *words, "-q", "--tries=1", "--timeout=5", "http://127.0.0.1:9/x"],
+            cwd=tmp_path,
+            env={**env, "HOME": str(home)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert ("no_such_command" in result.stderr) is reads
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "alias g=echo\ng named",
+            "hash -p /bin/echo g; g named",
+            "BASH_ALIASES[g]=echo\ng named",
+            "shopt -s extglob\n./n@(a)med",
+            "shopt -s nocaseglob\n./NA?ED",
+        ],
+    )
+    def test_a_name_runs_another_program(self, tmp_path: Path, command: str) -> None:
+        script = tmp_path / "named"
+        script.write_text("#!/bin/sh\necho named\n")
+        script.chmod(0o755)
+        result = run_as_claude_code(command, tmp_path)
+        assert result.stdout.strip() == "named", result.stderr
+
+    def test_dotglob_matches_a_leading_dot(self, tmp_path: Path) -> None:
+        (tmp_path / ".curlrc").write_text("")
+        result = run_as_claude_code(
+            "shopt -s dotglob\nprintf '%s\\n' *c?rlrc", tmp_path
+        )
+        assert result.stdout.strip() == ".curlrc"
+
+
+def _audit_project(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A project whose records file holds one line, a directory SRC holding
+    a records file with a token in it, and a repository SRCREPO with that
+    file committed (a fetched remote's stand-in)."""
+    project = tmp_path / "proj"
+    records = project / ".claude" / "audit" / "records.jsonl"
+    records.parent.mkdir(parents=True)
+    records.write_text('{"event":"ok"}\n')
+    git(project, "init", "-q")
+    leak = '{"event":"leak","note":"' + TOKEN + '"}\n'
+    src = tmp_path / "SRC"
+    (src / ".claude" / "audit").mkdir(parents=True)
+    (src / ".claude" / "audit" / "records.jsonl").write_text(leak)
+    srcrepo = tmp_path / "SRCREPO"
+    (srcrepo / ".claude" / "audit").mkdir(parents=True)
+    (srcrepo / ".claude" / "audit" / "records.jsonl").write_text(leak)
+    git(srcrepo, "init", "-q")
+    git(srcrepo, "add", "-f", ".claude")
+    git(srcrepo, "commit", "-q", "-m", "leak")
+    # the token's line in a file whose path names none of them
+    (tmp_path / "leakline").write_text(leak)
+    return project, src, srcrepo
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestAuditReadsEveryWriter:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 4: each passed (exit 0) and, run, left the
+            # token in the records file
+            "cp -r SRC/. .",
+            "cp -a SRC/. .",
+            "git fetch -q SRCREPO && git checkout FETCH_HEAD -- .",
+            "git fetch -q SRCREPO && git restore --source=FETCH_HEAD .",
+            "git fetch -q SRCREPO && git reset -q --hard FETCH_HEAD",
+            "git pull -q --no-rebase --allow-unrelated-histories --no-edit SRCREPO",
+            "git merge -X theirs FETCH_HEAD",
+            "git switch -f --detach FETCH_HEAD",
+            "git cherry-pick FETCH_HEAD",
+            # siblings
+            "cp -R SRC/. .",
+            "cp --recursive SRC/. .",
+            "cp -rT SRC .",
+            "gcp -a SRC/. .",
+            "scp -r SRC/. .",
+            "rclone copy SRC .",
+            "git reset --ha FETCH_HEAD",
+            "git revert HEAD",
+            "git rebase FETCH_HEAD",
+            "git stash",
+            "git stash apply",
+            "git worktree add x",
+            "git clone SRCREPO x",
+            "git submodule update",
+            "git sparse-checkout set x",
+            "git bisect start",
+            "git checkout main",
+            "git checkout -- ..",
+            "git restore -- 's*'",
+            "git restore -- :/",
+            "git -C src restore -- x",
+            "git restore --pathspec-from-file=list --",
+            "git grep -Ocp x",
+            # a writer after a reserved word or a wrapper the hook does not
+            # list
+            "! tar -xf notes.tar",
+            "if git apply notes.patch; then :; fi",
+            "while patch -p1 -i notes.patch; do :; done",
+            "setpriv patch -p1 -i notes.patch",
+            "runcon x tar xf notes.tar",
+            "/lib64/ld-linux-x86-64.so.2 /usr/bin/tar xf notes.tar",
+            "cat <<'EOF' | sh\nsetpriv patch -p1 -i notes.patch\nEOF",
+            "sh <<'EOF'\nsetpriv patch -p1 -i notes.patch\nEOF",
+            # wget's --no-config is read as its first word
+            "wget -O --no-config -q https://example.com/r",
+        ],
+    )
+    def test_blocks_a_program_that_writes_from_its_input(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        project, _, _ = _audit_project(tmp_path)
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(project)}
+        result = run_command(
+            hook, call, project, shell, {"CLAUDE_PROJECT_DIR": str(project)}
+        )
+        assert_blocked(result, "writes files its input names", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # extglob and dotglob patterns that name the records file (each
+            # passed, and bash wrote the token there)
+            "shopt -s extglob\ncp t .c@(l)aude/au@(d)it/rec@(o)rds.js@(o)nl",
+            "shopt -s dotglob\ncp t *l?ude/au?it/rec?rds.js?nl",
+            ". ./on.sh\ncp t *l?ude/au?it/rec?rds.js?nl",
+            # a here-document a reader takes as data ends at its delimiter's
+            # line, which a line continuation or an odd delimiter hides
+            "cat <<'EOF'\nx \\\nEOF\nsetpriv patch -p1 -i notes.patch",
+            "cat <<'a;b'\nx\na;b\nsetpriv patch -p1 -i notes.patch",
+        ],
+    )
+    def test_blocks_a_pattern_or_text_it_cannot_read(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        project, _, _ = _audit_project(tmp_path)
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(project)}
+        result = run_command(
+            hook, call, project, shell, {"CLAUDE_PROJECT_DIR": str(project)}
+        )
+        assert_blocked(result, "", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status",
+            "git log --grep tar",
+            "git grep -n tar",
+            "git reset HEAD~1",
+            "git reset --soft HEAD^",
+            "git stash create",
+            "git stash list",
+            "git stash show -p",
+            "git restore --source=abc --worktree -- src/a.py && "
+            "git restore --source=abc^2 --staged -- src/a.py",
+            "git checkout main -- src",
+            "git checkout -- src/a.py",
+            "git add -A && git commit -q -m x",
+            "git fetch origin",
+            "cp a b",
+            "cp -i notes.txt notes.bak",
+            "echo tar",
+            "cat <<'EOF' > notes.md\nFix the tar call, then git apply the patch\nEOF",
+            "! grep -q tar notes.md",
+        ],
+    )
+    def test_still_allows_these_commands(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        project, _, _ = _audit_project(tmp_path)
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(project)}
+        result = run_command(
+            hook, call, project, shell, {"CLAUDE_PROJECT_DIR": str(project)}
+        )
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None or shutil.which("bash") is None,
+    reason="needs git and bash",
+)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp -r {src}/. .",
+        "git fetch -q {srcrepo} && git checkout FETCH_HEAD -- .",
+        "git fetch -q {srcrepo} && git reset -q --hard FETCH_HEAD",
+        "! cp -r {src}/. .",
+        "shopt -s extglob\ncp {line} .c@(l)aude/au@(d)it/rec@(o)rds.js@(o)nl",
+        "shopt -s dotglob\ncp {line} *l?ude/au?it/rec?rds.js?nl",
+    ],
+)
+def test_a_copy_or_a_commit_written_is_refused_before_it_runs(
+    tmp_path: Path, command: str
+) -> None:
+    """End to end (the audit hook): it refuses each, and each, run as
+    Claude Code runs it, writes the token into the records file. No path
+    the command holds names records, jsonl, audit or .claude."""
+    project, src, srcrepo = _audit_project(tmp_path)
+    git(project, "add", "-f", ".claude")
+    git(project, "commit", "-q", "-m", "records")
+    text = command.format(src=src, srcrepo=srcrepo, line=tmp_path / "leakline")
+    assert not re.search("records|jsonl|audit|\\.claude", str(tmp_path), re.I)
+    hook = command_hook("audit", "PreToolUse", "Bash")
+    call = {**bash_call(text), "cwd": str(project)}
+    result = run_command(
+        hook, call, project, "bash", {"CLAUDE_PROJECT_DIR": str(project)}
+    )
+    assert_blocked(result, "", F504)
+    records = project / ".claude" / "audit" / "records.jsonl"
+    run_as_claude_code(text, project, GIT_ENV)
+    assert TOKEN in records.read_text()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+@pytest.mark.parametrize("shell", SHELLS)
+class TestRollbackReadsGlobs:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 4: a glob that bash expands to stash (a file
+            # named stash in the directory, made by an earlier call) was not
+            # read
+            "git st?sh apply {other}",
+            "git ST?SH apply {other}",
+            "git s* apply {other}",
+            "git [s]tash apply {other}",
+        ],
+    )
+    def test_blocks_a_glob_that_may_name_stash(
+        self, repo: Path, shell: str, command: str
+    ) -> None:
+        checkpoint(repo)
+        (repo / "stash").touch()
+        other = git(repo, "rev-parse", "HEAD").strip()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        text = command.replace("{other}", other)
+        result = run_command(hook, bash_call(text), repo, shell, ROLLBACK_ENV)
+        assert_blocked(
+            result,
+            "restores no checkpoint taken in this project",
+            "F503 ROLLBACK_FAILED: ",
+        )
+
+    def test_blocks_an_extglob_pattern(self, repo: Path, shell: str) -> None:
+        checkpoint(repo)
+        other = git(repo, "rev-parse", "HEAD").strip()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        text = f"touch stash; shopt -s extglob\ngit st@(a)sh apply {other}"
+        result = run_command(hook, bash_call(text), repo, shell, ROLLBACK_ENV)
+        assert_blocked(result, "an extglob pattern", "F503 ROLLBACK_FAILED: ")
+
+    @pytest.mark.parametrize(
+        "command", ["git add *.py", "git add src/*", "ls *.md", "git status"]
+    )
+    def test_still_allows_a_glob_that_cannot_name_stash(
+        self, repo: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None or shutil.which("bash") is None,
+    reason="needs git and bash",
+)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git st?sh apply {other}",
+        "touch stash; shopt -s extglob\ngit st@(a)sh apply {other}",
+    ],
+)
+def test_the_rollback_hook_refuses_a_globbed_restore_before_it_runs(
+    repo: Path, command: str
+) -> None:
+    """End to end: bash restores the unrecorded stash commit through each
+    (a file named stash made by an earlier call)."""
+    (repo / "stash").touch()
+    (repo / "a.txt").write_text("changed\n")
+    other = git(repo, "stash", "create").strip()
+    git(repo, "checkout", "-q", "--", "a.txt")
+    text = command.replace("{other}", other)
+    hook = command_hook("rollback", "PreToolUse", "Bash")
+    result = run_command(hook, bash_call(text), repo, "bash", ROLLBACK_ENV)
+    assert_blocked(result, "", "F503 ROLLBACK_FAILED: ")
+    run_as_claude_code(text, repo, GIT_ENV)
+    assert (repo / "a.txt").read_text() == "changed\n"

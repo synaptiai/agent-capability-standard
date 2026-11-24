@@ -68,10 +68,14 @@ hooks:
             # (env, xargs), a restore in a word (sh -c '...', code piped to a shell),
             # a word the shell expands or escapes ($, a backtick, \, a glob, a
             # brace), and a command these words cannot be read from (an unclosed
-            # quote, a here-document, a process substitution, over 16384 bytes).
-            # Skill hooks stay registered for the rest of the session, so only a
-            # command that names stash (quotes, backslashes, $ and line breaks
-            # removed) or holds $'...' or $"..." is read; a name built only when a command runs, or one
+            # quote, an extglob pattern, a here-document, a process substitution,
+            # over 16384 bytes). Skill hooks stay registered for the rest of the
+            # session, so only a command that names stash (quotes, backslashes, $
+            # and line breaks removed), holds $'...' or $"...", or holds a glob, a
+            # brace or an extglob opener (touch stash; git st?sh apply <id>, or
+            # git st@(a)sh once shopt -s extglob has run) is read; a glob counts as
+            # stash, pop, apply or branch where its pattern matches the name, in any
+            # letter case. A name built only when a command runs, or one
             # git's configuration gives, is not, and the plugin's pre-tool-use hook
             # gates such a command as a mutate. git runs with core.fsmonitor and
             # hooks turned off.
@@ -83,7 +87,7 @@ hooks:
             # (with its line continuations joined too: sta\<newline>sh, $\<newline>'...')
             JOINED="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "" | strings | split("\\\n") | add // ""' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             case "$CMD$JOINED" in
-              *"\$'"* | *'$"'*) ;;
+              *"\$'"* | *'$"'* | *'*'* | *'?'* | *'['* | *'{'* | *'@('* | *'!('* | *'+('*) ;;
               *) printf '%s\n' "$CMD" | tr -d "\"'\\\\\$\n" | grep -q stash || exit 0 ;;
             esac
             CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "" | strings | gsub("[\n\r]"; "")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
@@ -102,10 +106,15 @@ hooks:
             # bash pairs them: a backslash escapes the next character (inside double
             # quotes or $'...' too, so an escaped quote never closes one), and a line
             # continuation (a backslash and a newline) is removed, inside an operator and
-            # before a comment as well. commands gives {why, cmds}: why names what this
-            # reading cannot follow (an unclosed quote, a here-document, a process
-            # substitution), else is null. jq's global match costs the text times its
-            # matches, so the caller bounds the command's length.
+            # before a comment as well. An unquoted extglob opener (@(, !(, +(, *( or
+            # ?(, a line continuation allowed before its parenthesis) is a token of its
+            # own, ext: once a command has run shopt -s extglob, bash reads the group as
+            # part of a word (blanks, ; and | included) and expands it as a pattern, and
+            # otherwise refuses the line. commands gives {why, cmds}: why names what this
+            # reading cannot follow (an unclosed quote, an extglob pattern, a
+            # here-document, a process substitution), else is null. jq's global match
+            # costs the text times its matches, so the caller bounds the command's
+            # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
@@ -128,8 +137,9 @@ hooks:
                  assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
             # Operators (a line continuation may stand between their characters: <\
             # < is <<), comments (a # where a word may start, after any continuation), a
-            # lone continuation, words, and a quote or a backslash that nothing closes.
-            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>]|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<bad>\\$'|['\"\\\\])"; "g")
+            # lone continuation, words, an extglob opener, and a quote or a backslash
+            # that nothing closes.
+            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>@!+*?]|[@!+*?](?!(?:\\\\\n)*\\()|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<ext>[@!+*?](?:\\\\\n)*\\()|(?<bad>\\$'|['\"\\\\])"; "g")
               | .captures | map(select(.string != null)) | .[0]
               | {(.name): (if .name == "op" then .string | split("\\\n") | add else .string end)}]
               | map(select(has("comment") or has("cont") | not));
@@ -138,6 +148,7 @@ hooks:
             # Each step is linear in the command: no list grows by copying.
             def commands: tokens as $t | ($t | length) as $n
               | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .ext) then {why: "extglob"}
                 elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
                 elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
                 else [range(0; $n) as $i | $t[$i]
@@ -153,6 +164,14 @@ hooks:
 
             # A word the shell expands or escapes: any word at all after expansion.
             def expands: (.raw | test("[$`\\\\]")) or (.m | test("\u0001")) or .braces;
+            # Whether a word the shell expands may give one of $names: a glob whose
+            # pattern matches one (in any letter case, as with nocaseglob; a bracket
+            # class as any run), and any other expansion.
+            def may_be($names): if (.raw | test("[$`\\\\]")) or .braces then true
+              elif .m | test("\u0001") then
+                (.m | ascii_downcase | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*")) as $re
+                | any($names | split("|")[]; test("^" + $re + "$"))
+              else false end;
             # The word with its backslashes removed, as bash removes them.
             def plain: .d | gsub("\\\\"; "");
             def token($names): plain | test("(^|[^A-Za-z0-9_.-])(\($names))($|[^A-Za-z0-9_.-])");
@@ -170,7 +189,7 @@ hooks:
               | if any($words[]; (plain | test("\\s")) and token("stash") and token("pop|apply|branch")) then
                   {refuse: first($words[] | select((plain | test("\\s")) and token("stash") and token("pop|apply|branch")) | .d)}
                 elif ([range(0; $a | length) as $i | ($a[$i] | names_git or splits) or ($i == $p and ($a[$i] | expands))] | any)
-                     and any($a[]; token("stash") or expands) and any($a[]; token("pop|apply|branch") or expands) then
+                     and any($a[]; token("stash") or may_be("stash")) and any($a[]; token("pop|apply|branch") or may_be("pop|apply|branch")) then
                   if ($a | length) == 4 and $a[0].d == "git" and $a[1].d == "stash" and ($a[2].d == "pop" or $a[2].d == "apply")
                      and ($a[3].d | test("^([0-9a-f]{40}|[0-9a-f]{64})$")) and (any($a[]; expands) | not)
                   then {restore: "\($a[2].d) \($a[3].d)"}
@@ -180,7 +199,7 @@ hooks:
             .tool_input.command // ""
             | if utf8bytelength > 16384 then "unread over 16384 bytes"
               else commands as $c
-              | if $c.why != null then "unread \(if $c.why == "quote" then "an unclosed quote" elif $c.why == "heredoc" then "a here-document" else "a process substitution" end)"
+              | if $c.why != null then "unread \(if $c.why == "quote" then "an unclosed quote" elif $c.why == "heredoc" then "a here-document" elif $c.why == "extglob" then "an extglob pattern" else "a process substitution" end)"
                 else $c.cmds[] | restore(.) | select(. != null)
                 | if .restore then "restore \(.restore)" else "refuse \(.refuse | gsub("[\n\r]"; " ") | .[:200])" end
                 end

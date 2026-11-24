@@ -48,16 +48,26 @@ hooks:
             # the shell expands: its words as the shell passes them, the requests of
             # curl, wget and HTTPie (http) as those tools read them (options
             # abbreviated or in a cluster; a host with or without a scheme,
-            # http:/host, host:/path, in any numeric form; curl only with -q first and
-            # wget only with --no-config, so no configuration file is read, HTTPie
-            # only where its configuration file sets no default options, and no
-            # ipfs:// URL, which goes to a gateway), git's settings, the variables that
-            # set where a request goes (assigned, exported, read or looped over), a
-            # copy or a link of the tool, xargs feeding it, code a shell or an
-            # interpreter runs from a word, a pipe or a file, and any URL a program is
-            # given. In every command, a word the shell may expand (a glob, a brace) to
-            # the name of curl, wget or http, or to a file that sets where a request
-            # goes, is refused. A request another program makes with no such name in its text
+            # http:/host, host:/path, in any numeric form, every word after -- a URL;
+            # curl only with -q first and wget only with --no-config read as an
+            # option, so no configuration file is read, HTTPie only where its
+            # configuration file sets no default options, and no ipfs:// URL, which
+            # goes to a gateway) wherever the tool runs: as the program of its
+            # command, after !, if, while and the other reserved words, or after a
+            # program that runs the one a later word names (env, sudo, timeout, ...)
+            # with only options and numbers between; given to any other program
+            # (prlimit, a loader, head, an unknown one) it is refused, since that
+            # program may run it unread or copy it. Also git's settings, the
+            # variables that set where a request goes (assigned, exported, read or
+            # looped over, BASH_ALIASES and BASH_CMDS among them), alias, hash and
+            # enable, which give a program another name, a copy or a link of the tool
+            # (whatever comes before the copier), xargs feeding it, code a shell or
+            # an interpreter runs from a word, a pipe or a file, and any URL a
+            # program is given. In every command, a word the shell may expand (a
+            # glob, in any letter case, a brace, an extglob pattern) to the name of
+            # curl, wget or http, or to a file that sets where a request goes (a
+            # leading dot matched by a glob too where the command may turn on
+            # dotglob), is refused. A request another program makes with no such name in its text
             # (a program named by a variable, a copy made earlier under another name,
             # an interpreter's code), a name that resolves to an internal address, and
             # a redirect a server answers with, are not read here; the plugin's
@@ -78,8 +88,9 @@ hooks:
             printf '%s\n' "$CMD" | grep -qE '/dev/[^[:space:];&|<>/]*[$`\\]|[$`][^[:space:];&|<>]*/(tcp|udp)/' && NAMED=true
             if [ "$NAMED" = false ]; then
               # Read below: a word the shell may expand to the name of curl, wget or http
+              # (an extglob pattern too: @(, !(, +(; *( and ?( hold * and ?)
               case "$CMD" in
-                *'*'* | *'?'* | *'['* | *'{'*) ;;
+                *'*'* | *'?'* | *'['* | *'{'* | *'@('* | *'!('* | *'+('*) ;;
                 *) exit 0 ;;
               esac
             fi
@@ -150,10 +161,15 @@ hooks:
             # bash pairs them: a backslash escapes the next character (inside double
             # quotes or $'...' too, so an escaped quote never closes one), and a line
             # continuation (a backslash and a newline) is removed, inside an operator and
-            # before a comment as well. commands gives {why, cmds}: why names what this
-            # reading cannot follow (an unclosed quote, a here-document, a process
-            # substitution), else is null. jq's global match costs the text times its
-            # matches, so the caller bounds the command's length.
+            # before a comment as well. An unquoted extglob opener (@(, !(, +(, *( or
+            # ?(, a line continuation allowed before its parenthesis) is a token of its
+            # own, ext: once a command has run shopt -s extglob, bash reads the group as
+            # part of a word (blanks, ; and | included) and expands it as a pattern, and
+            # otherwise refuses the line. commands gives {why, cmds}: why names what this
+            # reading cannot follow (an unclosed quote, an extglob pattern, a
+            # here-document, a process substitution), else is null. jq's global match
+            # costs the text times its matches, so the caller bounds the command's
+            # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
@@ -176,8 +192,9 @@ hooks:
                  assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
             # Operators (a line continuation may stand between their characters: <\
             # < is <<), comments (a # where a word may start, after any continuation), a
-            # lone continuation, words, and a quote or a backslash that nothing closes.
-            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>]|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<bad>\\$'|['\"\\\\])"; "g")
+            # lone continuation, words, an extglob opener, and a quote or a backslash
+            # that nothing closes.
+            def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>@!+*?]|[@!+*?](?!(?:\\\\\n)*\\()|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<ext>[@!+*?](?:\\\\\n)*\\()|(?<bad>\\$'|['\"\\\\])"; "g")
               | .captures | map(select(.string != null)) | .[0]
               | {(.name): (if .name == "op" then .string | split("\\\n") | add else .string end)}]
               | map(select(has("comment") or has("cont") | not));
@@ -186,6 +203,7 @@ hooks:
             # Each step is linear in the command: no list grows by copying.
             def commands: tokens as $t | ($t | length) as $n
               | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .ext) then {why: "extglob"}
                 elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
                 elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
                 else [range(0; $n) as $i | $t[$i]
@@ -274,12 +292,14 @@ hooks:
             # Variables that send a request elsewhere or change the program that runs:
             # curl's and wget's configuration directories and files, a CA bundle, the
             # resolver's, a proxy, git's (GIT_CONFIG_*, GIT_SSH_COMMAND, ...) and the
-            # loader's. A variable is set without a = as well (for NAME in, read NAME,
-            # printf -v NAME, getopts, declare -n ref=NAME, then export NAME or set -a),
-            # so the name itself is refused, as a word or a word's part; HOME, PATH,
-            # ENV, IFS and XDG_CONFIG_HOME, as a word of their own, NAME=..., -vNAME or
-            # a nameref's =NAME.
-            def setting_vars: "(^-[A-Za-z]*|[^A-Za-z0-9_]|^)(CURL_HOME|WGETRC|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|HOSTALIASES|RES_OPTIONS|LOCALDOMAIN|IPFS_GATEWAY|IPFS_PATH|SYSTEM_WGETRC|HTTPIE_CONFIG_DIR|BASH_ENV|GIT_[A-Za-z0-9_]*|LD_[A-Za-z0-9_]*|DYLD_[A-Za-z0-9_]*|[A-Za-z_]*_[Pp][Rr][Oo][Xx][Yy])([^A-Za-z0-9_]|$)";
+            # loader's, and bash's tables of aliases and of the programs names run
+            # (BASH_ALIASES[g]=curl, BASH_CMDS[x]=/usr/bin/curl). A variable is set
+            # without a = as well (for NAME in, read NAME, printf -v NAME, getopts,
+            # declare -n ref=NAME, then export NAME or set -a), so the name itself is
+            # refused, as a word or a word's part; HOME, PATH, ENV, IFS and
+            # XDG_CONFIG_HOME, as a word of their own, NAME=..., -vNAME or a
+            # nameref's =NAME.
+            def setting_vars: "(^-[A-Za-z]*|[^A-Za-z0-9_]|^)(CURL_HOME|WGETRC|SSL_CERT_FILE|SSL_CERT_DIR|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|HOSTALIASES|RES_OPTIONS|LOCALDOMAIN|IPFS_GATEWAY|IPFS_PATH|SYSTEM_WGETRC|HTTPIE_CONFIG_DIR|BASH_ENV|BASH_ALIASES|BASH_CMDS|GIT_[A-Za-z0-9_]*|LD_[A-Za-z0-9_]*|DYLD_[A-Za-z0-9_]*|[A-Za-z_]*_[Pp][Rr][Oo][Xx][Yy])([^A-Za-z0-9_]|$)";
             def plain_vars: "^(-[A-Za-z]*)?(HOME|XDG_CONFIG_HOME|PATH|ENV|IFS)(\\+?=.*)?$|=(HOME|XDG_CONFIG_HOME|PATH|ENV|IFS)$";
             # (A long option's value is the tool's: check_request reads it.)
             def sensitive_var: (startswith("--") | not) and (test(setting_vars) or test(plain_vars));
@@ -293,14 +313,31 @@ hooks:
             def shells: "^(sh|bash|zsh|dash|ksh|mksh|fish|busybox|toybox|eval|exec|source|\\.|trap|alias|ssh|su|sudo|doas|runuser|xargs|parallel|env|nohup|timeout|nice|command|builtin|time|watch|script|setsid|stdbuf|ionice|taskset|chrt|flock|chroot|nsenter|unshare|firejail|strace|ltrace|systemd-run|tmux|screen|docker|podman|kubectl|at|batch|expect|tclsh|wish|gdb|vi|vim|nvim|ex|ed|emacs|less|more|sqlite3|psql|mysql|make|gmake|awk|gawk|mawk|nawk|sed|gsed|find|python[0-9.]*|node|nodejs|deno|bun|perl|ruby|php|lua|osascript|pwsh|powershell)$";
             # git's options that run a command line given as a word.
             def git_runs: "^(-x|--exec|--extcmd|foreach|--exec=.*|--extcmd=.*)$";
-            # A word holding a command line that runs a request tool.
-            def embedded: test("\\s") and test("(^|[\\s;&|(\"'`!])(curl|wget|https?)(\\s|$)"; "i");
+            # A word holding a command line that runs a request tool, by its name or
+            # its path, or that names it as a value (sh -c '/usr/bin/curl ...;',
+            # eval 'alias g=curl').
+            def embedded: test("\\s") and test("(^|[\\s;&|(\"'`!=/])(curl|wget|https?)([\\s;&|)\"'`]|$)"; "i");
             # Programs that copy or link a file (cp /usr/bin/curl fetch), and programs
             # that read a request's words from their input (xargs curl).
             def copiers: ["cp", "ln", "install", "mv", "rsync", "dd", "tee", "cat", "scp", "link", "ditto", "gcp", "gln", "ginstall", "busybox", "toybox"];
             def feeders: ["xargs", "parallel"];
             def tools: ["curl", "wget", "http", "https"];
             def name_of: sub("^.*/"; "");
+            # The words before a command's program that bash reads as its own (! curl,
+            # if curl ...; then, while, until, coproc, a group's {).
+            def reserved: ["!", "if", "then", "elif", "else", "do", "while", "until", "coproc", "{", "}", "fi", "done", "esac"];
+            # Programs that run the program a later word names, after options and
+            # numbers (timeout 5 curl, nice -n 10 curl, env -i curl, sudo curl).
+            def wrappers: ["env", "nohup", "timeout", "nice", "command", "builtin", "exec", "eval", "time", "sudo", "doas", "runuser", "setsid", "stdbuf", "ionice", "taskset", "chrt", "nsenter", "unshare", "firejail", "strace", "ltrace", "systemd-run", "watch", "busybox", "toybox"];
+            def option_or_number: test("^-") or test("^([0-9]+(\\.[0-9]+)?[smhdkKMG]?|0[xX][0-9a-fA-F]+)$");
+            # Programs that neither run nor copy a word they are given (which curl
+            # wget, echo curl), and package managers, which given a tool's bare name
+            # install its package (apt-get install -y curl).
+            def non_runners: ["which", "whereis", "type", "echo", "printf"];
+            def installers: ["apt-get", "apt", "dnf", "yum", "apk", "brew", "pacman", "zypper"];
+            # Builtins that give a program another name (alias get=curl, hash -p
+            # /usr/bin/curl x, enable -f lib.so x) or define a function.
+            def renamers: ["alias", "hash", "enable", "function"];
 
             # Brace expansion, as bash makes it of a word: a group opens at the first
             # { that a } closes, and runs to the first } after a , or .. at its own
@@ -357,19 +394,23 @@ hooks:
               else .n += 1 end) | .n;
             # A run of the command's text (split at blanks and operators, quotes and
             # backslashes removed) that the shell may expand to the name of curl, wget or
-            # http: c?rl, /usr/bin/c[u]rl, cu{r,r}l, wg?t. A pattern with no letter or
-            # digit of its own (*) names none.
+            # http: c?rl, /usr/bin/c[u]rl, cu{r,r}l, wg?t, in any letter case (shopt -s
+            # nocaseglob: /usr/bin/CU?L). A pattern with no letter or digit of its own
+            # (*) names none.
             # (the words a run gives, quotes and backslashes removed, braces
             # expanded: null for more than brace_words gives)
             def run_words: explode | map(select(. != 34 and . != 39 and . != 92)) | implode | brace_words;
             def may_expand_to_tool($ws):
               $ws == null
-                or any($ws[]; sub("^.*/"; "") | select(test("[A-Za-z0-9]") and literal_count <= 5)
+                or any($ws[]; sub("^.*/"; "") | ascii_downcase | select(test("[a-z0-9]") and literal_count <= 5)
                        | gsub("\\*+"; "*") | glob_regex as $re | any(tools[]; test($re)));
             # A run of the command's text the shell may expand to a file that sets where
             # a request goes: tee ~/.cu{r,r}lrc, /etc/ho?ts. Its last component must
-            # hold a letter or a digit (ls /etc/* names none).
-            def name_matches($g): ((startswith(".") and ($g | test("^[*?\\[]"))) | not)
+            # hold a letter or a digit (ls /etc/* names none). A glob matches a leading
+            # dot only by a dot, unless the command may turn on dotglob ($dots: shopt,
+            # GLOBIGNORE, BASHOPTS, or a file sourced or text evaluated, which may
+            # run either).
+            def name_matches($g): ((($dots | not) and startswith(".") and ($g | test("^[*?\\[]"))) | not)
               and test($g | ascii_downcase | gsub("\\*+"; "*") | glob_regex);
             def may_expand_to_setting_file($ws):
               $ws == null
@@ -404,16 +445,21 @@ hooks:
                       else false end; .);
 
             # The words of a request: curl's, wget's or HTTPie's, after the tool's name.
+            # Every word after -- is an operand (a URL), and wget's --no-config counts
+            # only where wget reads it as an option: not as an option's value (-O
+            # --no-config) nor after --.
             def check_request($tool; $words; $runs):
               tables[$tool] as $t
-              | reduce $words[] as $w ({skip: false, pos: 0, out: null};
+              | reduce $words[] as $w ({skip: false, end: false, noconfig: false, pos: 0, out: null};
                   if .out != null then .
                   elif .skip then .skip = false
-                  elif $w.d | test("^-.") then
+                  elif (.end | not) and $w.d == "--" then .end = true
+                  elif (.end | not) and ($w.d | test("^-.")) then
                     if $w.d | startswith("--") then ($w.d | sub("=.*$"; "")) as $name
                       | if [$t.danger_long[] | . as $dl | ($name | startswith($dl)) or (($name | length) >= 3 and ($dl | startswith($name)))] | any
                         then .out = {kind: "redirect", word: $w.d}
                         else .skip = (($w.d | contains("=") | not) and any($t.arg_long[]; . == $name))
+                          | .noconfig = (.noconfig or $w.d == "--no-config")
                         end
                     else ($w.d[1:] | explode | map([.] | implode)) as $letters
                       | (first(range(0; $letters | length) as $i | select($t.arg_short | contains($letters[$i])) | $i) // null) as $at
@@ -436,26 +482,44 @@ hooks:
               | if .out != null then .out
                 elif .pos == 0 or ($runs | not) then null
                 elif $tool == "curl" and (($words[0].d // "") | . == "--disable" or test("^-q") | not) then {kind: "config", word: "curl without -q first"}
-                elif $tool == "wget" and (any($words[]; .d == "--no-config") | not) then {kind: "config", word: "wget without --no-config"}
+                elif $tool == "wget" and (.noconfig | not) then {kind: "config", word: "wget without --no-config read as an option"}
                 elif $tool == "http" and $httpie_defaults then {kind: "config", word: "http (its configuration file sets default options)"}
                 else null end;
 
-            # The first refusal of a simple command, or null.
+            # The first refusal of a simple command, or null. Its program is its first
+            # word that is not a reserved word ($p). A word naming a tool (its name,
+            # its path, a redirection's target) is read wherever it stands: the tool
+            # runs as the program, or after wrappers with only options and numbers
+            # between (sudo, timeout 5); a word given to a program that neither runs
+            # nor copies it (which, echo; a package manager, by its bare name) is not
+            # run; given to any other program, which may run it unread or copy it, it
+            # is refused.
             def check_command($words):
               ($words | map(select(.target | not))) as $args
-              | (first(range(0; $args | length) as $i | select($args[$i].d | name_of as $n | any(tools[]; . == $n)) | $i) // null) as $at
-              | if $words[0].assign then {kind: "assign", word: $words[0].d}
+              | (first(range(0; $args | length) as $i | select($args[$i].d | IN(reserved[]) | not) | $i) // null) as $p
+              | (if $p == null then "" else $args[$p].d | name_of end) as $prog
+              | ($prog | IN(tools[])) as $runs_tool
+              | [range(0; $args | length) | select(. != $p and ($args[.].d | name_of | IN(tools[])))] as $tool_words
+              | any($words[]; .target and (.d | name_of | IN(tools[]))) as $tool_target
+              | (($tool_words | length) > 0 or $tool_target) as $given
+              | (($prog | IN(non_runners[]))
+                 or (($prog | IN(installers[])) and ($tool_target | not) and all($tool_words[]; $args[.].d | test("/") | not))) as $inert
+              | (if $runs_tool then $p else first($tool_words[]) // null end) as $at
+              | if $p != null and $args[$p].assign then {kind: "assign", word: $args[$p].d}
                 elif any($words[]; .d | test(setting_files; "i")) then
                   {kind: "file", word: first($words[] | select(.d | test(setting_files; "i")) | .d)}
                 elif any($words[]; .d | sensitive_var) then
                   {kind: "assign", word: first($words[] | select(.d | sensitive_var) | .d)}
+                # alias, hash and enable give a program another name, unread (a
+                # word of echo or which, which run nothing, aside)
+                elif ($inert | not) and any($args[]; .d | IN(renamers[])) then
+                  {kind: "alias", word: first($args[] | select(.d | IN(renamers[])) | .d)}
                 # A copy or a link of the tool runs under another name, unread: a
-                # copier the command runs (its program, or after a program that
-                # runs another: sudo cp ...)
-                elif $at != null and any(range(0; $at) as $i
-                       | select(($args[$i].d | name_of | IN(copiers[]))
-                                and ($i == 0 or any($args[:$i][]; .assign or (.d | name_of | test(shells))))); true) then
-                  {kind: "copy", word: ($args | map(.d) | join(" "))}
+                # copier anywhere in a command that names the tool, but as the
+                # tool's own word (curl -q https://example.com/install)
+                elif $given and ($runs_tool | not) and ($inert | not)
+                     and any($args[$p:][]; .d | name_of | IN(copiers[])) then
+                  {kind: "copy", word: ($words | map(.d) | join(" "))}
                 # xargs and parallel give the tool words from their input, unread
                 elif $at != null and any($args[:$at][]; .d | name_of | IN(feeders[])) then
                   {kind: "feeds", word: ($args | map(.d) | join(" "))}
@@ -471,13 +535,17 @@ hooks:
                                          or ($d == "config" and any($args[$i + 1:][]; .d | test("^[A-Za-z0-9-]+\\.") and (ascii_downcase | test(git_settings) | not))))
                                 | {kind: "redirect", word: $d}) // null
                      end) as $g
+                  # (the tool runs: it is the program, or wrappers run it)
+                  | ($runs_tool
+                     or ($at != null and ($prog | IN(wrappers[]))
+                         and all($args[$p + 1:$at][]; .d | option_or_number or (name_of | IN(wrappers[]))))) as $runs
                   | if $g != null then $g
                     else (if $at == null then null
                           else ($args[$at].d | name_of | if . == "https" then "http" else . end) as $tool
-                          # (the tool runs: it is the program, or a program that runs
-                          # another runs it, as sudo or timeout does)
-                          | check_request($tool; $args[$at + 1:]; $at == 0 or any($args[:$at][]; .d | name_of | test(shells))) end) as $r
+                          | check_request($tool; $args[$at + 1:]; $inert | not) end) as $r
                     | if $r != null then $r
+                      elif $given and ($runs | not) and ($inert | not) then
+                        {kind: "argument", word: ($words | map(.d) | join(" "))}
                       else (first($args[:($at // ($args | length))][] | select(.m | test("^[A-Za-z][A-Za-z0-9+.-]*:/")) | destination(.m; "url") as $why | select($why != null) | {kind: $why, word: .d}) // null)
                       end
                     end
@@ -492,11 +560,15 @@ hooks:
                     | map(scan("[^\\s;&|()<>]*[*?\\[\\]{}][^\\s;&|()<>]*")) | unique | map({run: ., ws: run_words})) as $runs
                 | (first($runs[] | select(may_expand_to_tool(.ws)) | .run) // null) as $p
                 | (first($runs[] | select(may_expand_to_setting_file(.ws)) | .run) // null) as $f
+                | commands as $c
                 | if $p != null then "program \($p | .[:200])"
                 elif $f != null then "file \($f | .[:200])"
+                # an extglob pattern (c@(u)rl, once shopt -s extglob has run) may
+                # expand to any name; its words are not read here
+                elif $c.why == "extglob" then "program an extglob pattern"
                 elif $named | not then "ok"
-                else commands as $c
-                | if $c.why != null then "expands \($c.why)"
+                else
+                  if $c.why != null then "expands \($c.why)"
                   elif any($c.cmds[][]; .braces) then "expands brace"
                   # A command line inside a word, where a program that runs one is in the
                   # command (sh -c '...', echo '...' | sh, trap '...' EXIT, sed '1e ...',
@@ -515,7 +587,12 @@ hooks:
               end
             JQ
             )"
-            VERDICT="$(printf '%s' "$INPUT" | jq -r --argjson named "$NAMED" --argjson httpie_defaults "$HTTPIE_DEFAULTS" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the send skill's check could not read the command" >&2; exit 2; }
+            # Whether the command may turn on dotglob, so that a glob matches a
+            # leading dot: shopt, GLOBIGNORE, BASHOPTS, or a file it sources or text
+            # it evaluates (quotes and backslashes removed)
+            DOTS=false
+            printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qE '(shopt|GLOBIGNORE|BASHOPTS|SHELLOPTS|dotglob)|(^|[[:space:];&|(])(\.|source|eval)([[:space:]]|$)' && DOTS=true
+            VERDICT="$(printf '%s' "$INPUT" | jq -r --argjson named "$NAMED" --argjson httpie_defaults "$HTTPIE_DEFAULTS" --argjson dots "$DOTS" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the send skill's check could not read the command" >&2; exit 2; }
             KIND="${VERDICT%% *}"
             WORD="${VERDICT#* }"
             case "$KIND" in
@@ -523,12 +600,14 @@ hooks:
               internal) echo "$INTERNAL: $WORD" >&2 ;;
               redirect) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose connection an option or a proxy setting redirects ($WORD), in any spelling (quoted, abbreviated, --proxy1.0, git -c http.*), nor curl's --variable and --expand-* options, which build text when the command runs, nor an ipfs:// or ipns:// URL, which goes to the gateway IPFS_GATEWAY or a file names: the address it reaches is not the one this check reads" >&2 ;;
               file) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that names bash's /dev/tcp or /dev/udp, which open a connection, or a file that sets where a request goes (.curlrc, .wgetrc, /etc/hosts, resolv.conf, ~/.ipfs/gateway, HTTPie's config.json), by its name or by a glob or a brace the shell may expand to it: $WORD" >&2 ;;
-              config) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl only with -q as its first option and wget only with --no-config, so no configuration file (.curlrc, .wgetrc, /etc/wgetrc) sets a proxy or a host this check does not read, and HTTPie only where its configuration file sets no default options: $WORD" >&2 ;;
+              config) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl only with -q as its first option and wget only with --no-config read as an option (not an option's value, not after --), wherever the tool runs (after !, if, while, a wrapper or a program this check does not know), so no configuration file (.curlrc, .wgetrc, /etc/wgetrc) sets a proxy or a host this check does not read, and HTTPie only where its configuration file sets no default options: $WORD" >&2 ;;
               assign) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a variable set on its line, nor one that names CURL_HOME, HOME, XDG_CONFIG_HOME, WGETRC, SYSTEM_WGETRC, IPFS_GATEWAY, IPFS_PATH, HTTPIE_CONFIG_DIR, PATH, a CA bundle, a proxy, git's or the loader's variables, with or without a value (export NAME, read NAME, for NAME in, printf -v NAME): '$WORD': a setting changes where the request goes, unseen by this check" >&2 ;;
               nested) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request inside a command line given as a word (sh -c, trap, awk's system, sed's e, an interpreter's code, git rebase -x), nor code a shell or an interpreter reads from a pipe or a file, in a command that names curl, wget or http: '$WORD', whose destination this check cannot read; run curl, wget or http directly" >&2 ;;
-              copy) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that copies or links curl, wget or http ('$WORD'): the copy runs under another name, unread by this check" >&2 ;;
+              copy) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that copies or links curl, wget or http ('$WORD'), whatever comes before the copier (!, if, a wrapper): the copy runs under another name, unread by this check" >&2 ;;
+              argument) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl, wget or http only as a command's program, or after a program that runs the one a later word names (env, sudo, timeout, nice, ...) with only options and numbers between; it does not give one to another program ('$WORD': prlimit, a loader, head, gzip, an unknown program), which may run it unread or copy it" >&2 ;;
+              alias) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run alias, hash, enable or a function definition in a command that names curl, wget or http ('$WORD'): each gives a program another name, which this check does not read" >&2 ;;
               feeds) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose words xargs or parallel read from their input ('$WORD'): the host it reaches is not one this check reads; write each URL in the command" >&2 ;;
-              program) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a word the shell may expand to the name of curl, wget or http ('$WORD': a glob or a brace, c?rl, cu{r,r}l): the program it runs is not one this check reads; name the program literally" >&2 ;;
+              program) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a word the shell may expand to the name of curl, wget or http ('$WORD': a glob in any letter case, a brace or an extglob pattern, c?rl, CU?L, cu{r,r}l, c@(u)rl): the program it runs is not one this check reads; name the program literally" >&2 ;;
               expands) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose text the shell expands or escapes (an unquoted brace, a glob character *, ?, [ or ] before a URL's path, an unclosed quote, a here-document): the host it reaches is not the one this check reads. Quote each URL whole, and send a payload from a file with -d @file" >&2 ;;
               unreadable) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose host this check cannot read ($WORD): a host is a name of ASCII letters, digits, dots and hyphens, or an IPv6 literal, with a port of digits, no percent-encoding and no braces or brackets curl expands" >&2 ;;
               long) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command longer than 16384 bytes that names curl, wget or http or holds a glob or a brace, which this check does not read; send a long payload from a file with -d @file" >&2 ;;

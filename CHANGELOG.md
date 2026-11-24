@@ -1067,6 +1067,46 @@ here and marked so.
     naming `IPFS_GATEWAY`, `IPFS_PATH`, `SYSTEM_WGETRC` or
     `HTTPIE_CONFIG_DIR`; and a new hook on Edit, Write, MultiEdit and
     NotebookEdit refuses an edit of those files.
+  - Skill hooks, security round 4. The shared word reader reads an
+    unquoted extglob opener (`@(`, `!(`, `+(`, `*(`, `?(`), which bash
+    expands as a pattern once a command has run `shopt -s extglob`, as text
+    it cannot read: the audit, rollback and send skills' hooks refuse such
+    a command (in the send skill's case, any command that holds one). The
+    send skill's hook applies the `curl -q`/`wget --no-config` rule and the
+    copy rule wherever the tool runs: after `!`, `if`, `while`, `until` or
+    `coproc`, and after any program; it runs a tool only as the command's
+    program or after a program that runs the one a later word names (`env`,
+    `sudo`, `timeout 5`, `nice -n 10`, ...) with only options and numbers
+    between, and refuses one given to another program (`prlimit curl`,
+    `setpriv`, a loader, `head -c ... /usr/bin/curl`, `git grep curl`;
+    `which curl`, `echo curl` and `apt-get install curl` still run); it
+    counts wget's `--no-config` only where wget reads it as an option (not
+    as `-O --no-config`, not after `--`) and reads every word after `--` as
+    a URL; it refuses `alias`, `hash`, `enable` and a word naming
+    `BASH_ALIASES` or `BASH_CMDS` in a command that names a tool, a command
+    line in a word that runs the tool by its path or names it as a value
+    (`sh -c '/usr/bin/curl ...'`, `eval 'alias g=curl'`), and a glob that
+    may expand to a tool's name in any letter case (`shopt -s nocaseglob`)
+    or, where the command may turn on dotglob (`shopt`, `GLOBIGNORE`, a
+    sourced file), to a setting file by a leading dot. The audit skill's
+    hook now refuses, in every command, a recursive copy (`cp -r`, `-R` or
+    `-a`, `scp`, `rclone`, `sftp`, `lftp`), every git command but git's
+    reads and those that write no file from a commit (`checkout` and
+    `restore` only of literal paths after `--` that do not hold the
+    records, `reset` only `--soft` or `--mixed`, `stash` only `list`,
+    `show`, `create`, `store`, `drop` or `clear`; `switch`, `merge`,
+    `pull`, `rebase`, `cherry-pick`, `revert`, `clone`, `worktree`,
+    `submodule` and the like are refused once the audit skill ran), `wget`
+    unless `--no-config` is its first word, and a writer after `!`, `if`
+    or `while` or after any program it does not read with a rule of its
+    own (`setpriv patch`, `runcon tar`); a here-document's body is read as
+    commands, with the old rule where a reader takes it as data (`cat
+    <<'EOF' > notes.md`, a commit message), and a command whose data body
+    holds a line continuation or ends at a delimiter other than a plain
+    word is refused. The rollback skill's hook reads a command holding a
+    glob or a brace too, and refuses one that may spell `git stash
+    apply|pop` (`git st?sh apply <id>` once a file named `stash` exists;
+    `git add *` is refused, `git add *.py` still runs).
   - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
     UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
     when an API error or an interrupt ended it, or a killed session, no

@@ -10,10 +10,15 @@
 # bash pairs them: a backslash escapes the next character (inside double
 # quotes or $'...' too, so an escaped quote never closes one), and a line
 # continuation (a backslash and a newline) is removed, inside an operator and
-# before a comment as well. commands gives {why, cmds}: why names what this
-# reading cannot follow (an unclosed quote, a here-document, a process
-# substitution), else is null. jq's global match costs the text times its
-# matches, so the caller bounds the command's length.
+# before a comment as well. An unquoted extglob opener (@(, !(, +(, *( or
+# ?(, a line continuation allowed before its parenthesis) is a token of its
+# own, ext: once a command has run shopt -s extglob, bash reads the group as
+# part of a word (blanks, ; and | included) and expands it as a pattern, and
+# otherwise refuses the line. commands gives {why, cmds}: why names what this
+# reading cannot follow (an unclosed quote, an extglob pattern, a
+# here-document, a process substitution), else is null. jq's global match
+# costs the text times its matches, so the caller bounds the command's
+# length.
 def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
 # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
 # newline is removed (a line continuation with its newline), any other stays.
@@ -36,8 +41,9 @@ def word($raw): ($raw | segments) as $s
      assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
 # Operators (a line continuation may stand between their characters: <\
 # < is <<), comments (a # where a word may start, after any continuation), a
-# lone continuation, words, and a quote or a backslash that nothing closes.
-def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>]|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<bad>\\$'|['\"\\\\])"; "g")
+# lone continuation, words, an extglob opener, and a quote or a backslash
+# that nothing closes.
+def tokens: [match("(?<op>\n|&(?:\\\\\n)*&|\\|(?:\\\\\n)*\\||;(?:\\\\\n)*;|[0-9]*(?:\\\\\n)*(?:(?:>(?:\\\\\n)*&|<(?:\\\\\n)*&)(?:(?:\\\\\n)*[0-9]+(?:(?:\\\\\n)*-)?|(?:\\\\\n)*-)?|<(?:\\\\\n)*<(?:\\\\\n)*<|<(?:\\\\\n)*<(?:(?:\\\\\n)*-)?|<(?:\\\\\n)*>|>(?:\\\\\n)*>|>(?:\\\\\n)*\\||&(?:\\\\\n)*>(?:(?:\\\\\n)*>)?|[<>])|[;&|()])|(?<comment>(?:\\\\\n)*#[^\n]*)|(?<cont>(?:\\\\\n)+)|(?<word>(?:\\$'(?:[^'\\\\]|\\\\[\\s\\S])*'|\\\\[\\s\\S]|\\$(?!')|[^\\s'\"\\\\$|&;()<>@!+*?]|[@!+*?](?!(?:\\\\\n)*\\()|'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\")+)|(?<ext>[@!+*?](?:\\\\\n)*\\()|(?<bad>\\$'|['\"\\\\])"; "g")
   | .captures | map(select(.string != null)) | .[0]
   | {(.name): (if .name == "op" then .string | split("\\\n") | add else .string end)}]
   | map(select(has("comment") or has("cont") | not));
@@ -46,6 +52,7 @@ def takes_target: test("[<>]") and (test("&([0-9]+-?|-)$") | not);
 # Each step is linear in the command: no list grows by copying.
 def commands: tokens as $t | ($t | length) as $n
   | if any($t[]; .bad) then {why: "quote"}
+    elif any($t[]; .ext) then {why: "extglob"}
     elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
     elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
     else [range(0; $n) as $i | $t[$i]
