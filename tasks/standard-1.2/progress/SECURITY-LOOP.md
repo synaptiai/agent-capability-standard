@@ -5384,3 +5384,238 @@ SECURITY.md the code now keeps.
   openers, a 900-line commit message in a here-document): each decided in
   at most 2.1 s. No CLI or nested agent
   was started; nothing was left running; the scratch copies were removed.
+
+### Batch 4: four reported defects
+
+Four defects, each reproduced by an independent verifier on 7d04aea, and
+reproduced again here on 89b67d3 before any change, with the new tests run
+against 89b67d3's `skills/`, `hooks/` and `src/acs/grounded.ts` (under
+`timeout 120` and a 4 GB address-space limit): the audit skill's hook
+exited 0 on each reported record and on 6 of the 10 data vectors of
+`tests/conformance/secrets/credentials.json` that hold a credential; the
+send skill's hook exited 0 on each reported wrapper line; the binding's
+nested grounded `classify` under a composite given the profiles was
+recorded `executed` at confidence 0.12 with no anchor; and the runtime's
+plain tool under the unregistered name `notify` sent to the attacker's
+host with no trace entry. None was fixed by an earlier batch: round 2 #24
+put `SECRET_MEMBER_JQ` in the plugin's pre-tool-use hook only, round 4
+batch 3 #1 chose the tool by the first word naming one, round 2 batch 5
+gave the composite's output rules to nested plain calls only, and round
+2 #21 counted only the layer's and the composite's policies. Each fix has
+tests that fail on the code before it (below).
+
+#### 1. The audit skill's hook let a record hold a value under a member named for a credential (medium)
+
+The append form's record was scanned only with `secret_in` over the
+command and the record's decoded text, whose rules need a quoted value of
+8 or more characters with no blank, or an unquoted one of 12 or more
+mixing letters and digits; `{"password":"hunter2"}`, a value in an array,
+one with blanks, a number (`{"token":4111111111111111}`), the value of a
+`{"name":"Authorization","value":...}` pair and the second of a
+`["Cookie",...]` tuple passed, though the plugin's pre-tool-use hook
+refuses the same data from a persist tool, the SDK's
+`Redactor.holds_credential` and the binding's `holdsCredential` refuse it,
+and §5.18.10's `audit` row (F504) and §6.7 forbid it.
+
+- Fix: the member rule moves to a shared file, `hooks/secret_member.jq`
+  (the jq port of `_secret_member_value`, between `# BEGIN secret-member`
+  and `# END secret-member`, with no single quote, since each copy sits in
+  a single-quoted shell string), copied verbatim into
+  `hooks/pretooluse_require_checkpoint.sh` (which held its own copy) and
+  into the audit skill's Bash hook, as `secret_scan.sh` is. The audit hook
+  runs `acs_held(false)` on the parsed record of the append form: `true`
+  is refused with the scan's F504 message, anything but `false` (jq could
+  not read it) with R407.
+- Tests (`tests/test_skill_hooks.py`):
+  `test_secret_member_copies_are_equal` (both copies equal to the file,
+  inside `SECRET_MEMBER_JQ='...'`, the file free of `'`);
+  `TestAuditCommandHook::test_blocks_a_value_under_a_credential_member`
+  (the 4 reported records, the verifier's 2, a cookie tuple and a nested
+  `client_secret`, in both append forms, under sh and bash);
+  `test_agrees_with_the_refusal_rule_on_data` (the 14 data vectors of the
+  shared credential vectors: refused exactly where `holds` says so); 6
+  controls (`token_count` a number, `password: true`, a placeholder
+  `<ref>`, a 3-character token, an `Accept` pair, no credential member).
+  On 89b67d3: the copy test, all 32 member lines and 12 of the 28 vector
+  runs (6 vectors, each shell) fail; the controls and the vectors both
+  layers decide alike pass.
+- Sibling found here (both hooks): the member rule tested each member's
+  name, and each value under a secret member, with a regular expression,
+  which jq compiles at each test (about 0.4 ms): the pre-tool-use hook took
+  22.4 s of its 30 on a TodoWrite holding 50,000 members (1.2 MB), and
+  14 s on 150,000 placeholders under one; the audit hook 22 s on a 1.1 MB
+  record. The shared rule now compares in ASCII lower case with string
+  functions (`ascii_downcase`, `endswith` over the 24 spellings the SDK's
+  pattern admits, `IN`; a placeholder by its first character and no line
+  break), the SDK's own folding (`re.ASCII`, IGNORECASE); a name outside
+  ASCII (`utf8bytelength` differs from `length`) is still tested with the
+  regular expression's Unicode folding, so the hooks find a name the SDK
+  does not in rare spellings (`ſecret`), never the reverse, and a
+  placeholder is matched in ASCII only, so no rare spelling hides a value.
+  The same inputs take 1.9 s, 0.9 s and 2.0 s. Tests: `test_many_members_are_decided_in_time`
+  (`tests/test_pretooluse_hooks.py`: 40,000 members refused and 120,000
+  placeholders allowed, each in under 5 s; both fail on 89b67d3's hook,
+  which took about 18 s and 11 s) and
+  `test_a_record_of_many_members_is_decided_in_time` (the audit hook, 1 MB,
+  under 5 s); the agreement tests with the adapter and the shared vectors
+  still pass.
+- Siblings checked: the persist skill's hook scans a file's text, which the
+  SDK and the binding read with the text rule too (no member rule applies
+  to a string), so it is not one; the binding's audit tool and nested
+  plain audit calls, and the SDK adapter, already apply the member rule.
+
+#### 2. The send skill's hook read curl's words with HTTPie's (or wget's) grammar after a wrapper's option whose value names a tool (medium); siblings: the redirect and configuration rules, the copy and argument rules, xargs
+
+`check_command` took `$at`, the request's program, as the first word naming
+a tool, so in `env -C http curl ...`, `env -u http curl ...` and `sudo -u
+http curl ...` (where curl runs) it read curl's words with HTTPie's table:
+`-s` and `-a` took the next word as their value and `x?a=b` from the third
+positional was a data item, so `0x7f.1:18777` reached the listener; the
+`curl -q` rule (`env -u http curl -s https://...`), the redirect rule
+(`--expand-connect-to`, read as a header item) and wget's table (`env -u
+wget curl -q -H --no-config -I ...`) were skipped the same way.
+
+- Fix (`skills/send/SKILL.md`, `check_command`): where the program is a
+  wrapper, the words that may stand between it and the tool it runs are
+  options, numbers, wrappers and words naming a tool (one may be an
+  option's value), up to the first other word; the tool runs when every
+  word naming one stands there, and then every such word is read as a
+  request with its own tool's grammar (`$reads`), the command refused when
+  any reading refuses. Reading every word costs the command's length
+  times their number, so more than 8 such words after a wrapper are
+  refused (kind `many`); an inert program (`echo`, `which`, a package
+  manager) and a program that runs none are read at their first word
+  naming a tool, as before, so each word is read at most 8 times. `xargs`
+  and `parallel` count before the last word naming a tool, not the first.
+- Siblings found here: `env -u http gzip -c curl > fx`, `env -u http
+  prlimit curl ...` and `env -u http xargs curl` passed for the same
+  reason (the copy-through and argument rules took `http` as the tool that
+  runs); each is refused now (argument, feeds). The audit skill's hook
+  reads every word after a program it does not know (`env` included) as a
+  program, so it reads both words already; the rollback hook reads no
+  tool's grammar; the plugin's pre-tool-use hook and the SDK mapper gate
+  every such command as a mutate.
+- Tests: `TestSendReadsWhereTheToolRuns::
+  test_a_wrapper_option_naming_a_tool_is_read_both_ways` (16 lines: each
+  reported line, the verifier's siblings, `sudo -u wget -g http curl`,
+  `sudo -u http wget -qO- ...`, and the three siblings above),
+  `test_more_than_eight_tool_words_after_a_wrapper_are_refused` (9
+  refused, 8 run), `test_many_tool_words_are_decided_in_time` (16 KB:
+  3200 `curl` after `echo`, 2000 `curl -q` and 3200 `http` after `env`,
+  1600 `http -s` after `prlimit`, each under 10 s; 1.2 to 1.7 s measured,
+  where reading every word took past 30 s for the first), 5 controls in
+  `test_still_allows_these_requests` (`sudo -u http curl -q https://...`,
+  `env -u http`, `env -C http`, 8 `curl -q` after `env`, `curl -q -o
+  out/curl ...`), and the premise
+  `test_a_wrapper_option_takes_a_tool_name_as_its_value` (`env -C http` and
+  `env -u http` run curl, which reads `-s` as its flag and fetches a
+  `file://` page). On 89b67d3, 28 of the 32 runs of the new refusals fail
+  (the two lines that pass were refused for another reason: `sudo -u wget
+  -g http curl`, read in wget's grammar, and `head -c 5`, whose `5` reads
+  as host 0.0.0.5) and the bound test fails; the controls, the timing and
+  the premise pass.
+
+#### 3. The binding applied a composite's profile output rules to a nested plain call only, not to a nested grounded one (medium); sibling: a nested call two composites deep
+
+`NestingToken` carried the composite's destination policies, not its
+output rules; a nested grounded call was checked against its own
+`policies` and `minimumConfidence` only, so an ungrounded `classify` below
+the healthcare profile's 0.9, invoked by a composite given that profile,
+was recorded `executed`, counted in `acs:executed` and returned as a
+success (§5.21.3: a layer applying a profile applies its rules to the
+outputs of the calls it covers).
+
+- Fix (`examples/standard_agents/src/acs/grounded.ts`): the token carries
+  the composite's grounding policies (its own option and its profiles')
+  and highest minimum confidence, with those of the composites enclosing
+  it; `check` returns them in the claim; `execute` checks the output
+  against the tool's own policies, then the enclosing ones that require
+  its capability (F505), then the higher of the two minimums (F504), in
+  the order a nested plain call's are checked (contract, grounding,
+  minimum confidence). They apply whenever the call takes the token,
+  covered or not, as the enclosing destinations do.
+- Sibling found here: a nested plain call made by a composite with no
+  profile of its own, enclosed by one given the profiles (`audit_all` ->
+  `review` -> `triage`), was checked against `review`'s rules only: the
+  nesting state now gets the enclosing rules joined to the composite's
+  own (`grounding: [...enclosingGrounding, ...allPolicies]`, `highest`).
+- Tests (`examples/standard_agents/test/nesting.test.ts`): "applies the
+  composite's profiles' output rules to a nested grounded call, as to a
+  plain one" (F504 below the minimum with a file anchor, F505 with no
+  anchor at 0.95 and at 0.12, executed with both; `covered_by` set; one
+  `classify` counted; the same tool called on its own still passes) and
+  "carries the output rules of every enclosing composite, to a grounded
+  and to a plain nested call" (two composites deep). Both fail on
+  89b67d3's `grounded.ts`; its plain-only variant fails too.
+
+#### 4. The binding invoked an unregistered name whose listed send tool's own profiles set a destination policy (medium); siblings: a listed tool that reaches one, `queueTool`
+
+`refusalOf` refused an unregistered listed name only while the layer's or
+the composite's (and enclosing composites') profiles set a destination
+policy; the policy of the profiles given to the listed tool itself, which
+the binding applies to that tool's sends, did not count, so the runtime's
+plain tool under the name sent to `attacker.example.net` with no trace
+entry (also with an empty allow-list, which allows no send), and
+`queueTool` queued it.
+
+- Fix: `POLICED`, a `WeakSet` beside `PERFORMS`, holds each grounded tool
+  whose own profiles set a destination policy or that invokes,
+  transitively, a tool in it; `refusalOf` also refuses an unregistered
+  name whose listed tool is in it (F504, the reason naming the policies
+  that count), and `queueTool`, which uses `refusalOf`, with it.
+- Tests: "refuses an unregistered name whose listed send tool's own
+  profiles set a destination policy" (an allow-list and an empty one:
+  F504, recorded `refused` with capability `send`, nothing sent or
+  invoked), "refuses an unregistered name listed for a composite that
+  reaches such a tool, and queues none" (`outer` -> `relay` -> `notify`,
+  and `queueTool('relay')` throws F504), and the control "runs the listed
+  send tool registered under its name, which checks its own policy" (F504
+  to the attacker, the allowed host sent). The three refusals fail on
+  89b67d3's `grounded.ts`; the control passes on both.
+
+#### Documentation
+
+SECURITY.md §5.4 (the audit row: the member rule and its R407; the send
+row: wrapper options naming a tool, the bound of 8) and the SL paragraph
+of §6 (nested grounded calls' output rules, the policies that make a
+listed name need registration); `hooks/README.md` (the shared
+`secret_member.jq`); the audit and send skills' hook comments and the
+audit skill's constraint line; the binding's option docs, its README's
+F504 row, the guide (`docs/integrations/standard_agents.md`: profiles,
+registration, the guarantees row) and the binding's conformance statement
+(the host gap names the policies that count); CHANGELOG [Unreleased]
+Upgrading (the audit and send hooks; the binding's output rules and
+registration). The Standard's text was not changed: each fix brings an
+implementation to what §5.18.10, §5.21.3, §4.4.2 and §6.7 already say.
+
+#### Checks after batch 4
+
+- Python: `pytest tests/` in bounded parts (each file under `timeout 120`;
+  `tests/test_skill_hooks.py` in seven `-k` groups that together select all
+  of its 1881 tests; `tests/test_discovery/`; the files that run the
+  pre-tool-use hook run again after the member rule's last change): 7412
+  passed, 18 skipped (7281 before, plus the 131 new). ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the five generators'
+  `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: the binding's check and test (254 passed, 2 skipped; 248
+  before, plus the 6 new); the package's test (2015, its build reused; no
+  package source changed).
+- Old code: the new shell tests against 89b67d3's `skills/` and `hooks/`
+  (an archive of HEAD with the new test files) and the new binding tests
+  against 89b67d3's `grounded.ts`: every refusal test fails, as counted
+  under each defect above; the controls, the premise and the timing of the
+  send hook pass.
+- Probes, each under `timeout 120` and a 4 GB address-space limit: every
+  reported line through the hooks before and after; the send hook on 16 KB
+  commands (3200 tool words after `echo`, 2000 `curl -q` and 3200 `http`
+  after `env`, 1600 `http -s` after `prlimit`), each decided in at most
+  1.7 s; the audit hook on a 1.1 MB record of 50,000 members (2.0 s), on
+  800 KB of array items (2.1 s) and on 5000 nested objects (refused at
+  once, not one object jq reads); the pre-tool-use hook on a 1.2 MB
+  TodoWrite of 50,000 members (1.9 s, 22.4 s before). No CLI or nested
+  agent was started; nothing was left running; the scratch copies were
+  removed.

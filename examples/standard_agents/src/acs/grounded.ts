@@ -212,8 +212,10 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * confidence) and records, under a name `registerTools` registered as
    * that very tool only; a tool with no binding the layer loads throws
    * (V107). A name registered as another tool than the one listed is
-   * refused, and, while a destination policy is in force, so is one no tool
-   * is registered under. `state.queueTool` queues only a listed grounded or
+   * refused, and, while a destination policy is in force (the layer's, this
+   * tool's profiles' or an enclosing composite's, or that of the profiles
+   * given to the listed tool or to a tool it invokes), so is one no tool is
+   * registered under. `state.queueTool` queues only a listed grounded or
    * control tool, which checks itself when it runs.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,8 +239,9 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * tool's outputs: when a policy requires the tool's capability, an output
    * that is neither grounded nor marked inferred is refused with F505 (the
    * call has run; its trace entry is `failed`). With its profiles' they
-   * apply too to the outputs of the nested calls it makes to plain tools,
-   * which have no options of their own, by those tools' capabilities.
+   * apply too to the outputs of the nested calls it covers, at any depth, by
+   * those tools' capabilities: a plain tool's, which has no options of its
+   * own, and a grounded tool's, after its own (§5.21.3).
    * Checked when the tool is defined: a capability the ontology does not
    * define throws (V101).
    * Without this option the output check is 1.1's: the contract's required
@@ -263,7 +266,8 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * a call of its own. Their grounding policies join `grounding`; and an
    * output below their minimum confidence, or whose `confidence` is not a
    * number from 0 to 1, fails with F504 (the call has run), this tool's and
-   * a nested plain call's. Their `allowed_destinations` join the layer's
+   * that of each nested call it covers, at any depth, a plain or a grounded
+   * tool's. Their `allowed_destinations` join the layer's
    * destination policies for this
    * tool's `send` calls (§4.4.2; see `configureLayer`) and, for a
    * composite, for the sends its code invokes at any depth: each nested
@@ -370,6 +374,15 @@ interface Performed {
  * the nested call's own.
  */
 const PERFORMS = new WeakMap<object, readonly Performed[]>();
+
+/**
+ * Each tool defined here whose own profiles set a destination policy, or
+ * that invokes, transitively, a tool whose profiles do (§4.4.2, §5.21.3):
+ * a composite that lists one invokes it only under a name `registerTools`
+ * registered as that very tool, since under another name the runtime may
+ * run a tool that sends anywhere, unchecked by that policy (§5.18.10).
+ */
+const POLICED = new WeakSet<object>();
 
 /**
  * What each name a tool defined here states for itself is bound to: its
@@ -519,6 +532,15 @@ interface NestingToken {
    */
   destinations: readonly (readonly string[])[];
   /**
+   * The output rules the composite applies to the calls it covers
+   * (§5.20, §5.21.3): its grounding policies, its own and its profiles', and
+   * those of every composite enclosing it. A nested call's output is checked
+   * against them after its own, whether the tool is plain or grounded.
+   */
+  grounding: readonly GroundingPolicy[];
+  /** The highest minimum confidence of those composites' profiles (§5.21.3), or null. */
+  minimumConfidence: number | null;
+  /**
    * The approval request whose decisions approved the composite's call (its
    * own, or the one that covered it): a nested call is covered only when
    * they are valid for its own approval too (§5.18.4).
@@ -532,6 +554,11 @@ interface NestingToken {
 
 /** The pending invocations of each thread. */
 const TOKENS = new Map<string, NestingToken[]>();
+
+/** The higher of two minimum confidences, either of which may be absent. */
+function highest(a: number | null, b: number | null): number | null {
+  return a === null ? b : b === null ? a : Math.max(a, b);
+}
 
 /**
  * The token of a pending invocation that matches this call, if any, while
@@ -565,7 +592,10 @@ function findToken(thread: string, flow: string | null, tool: string, argsDigest
  * the wrapper, is run only under a name registered as that very tool, since
  * its checks are those of the binding listed; and while a destination
  * policy is in force, so is any listed tool, since a tool the runtime runs
- * under an unregistered name may send anywhere (§4.4.2, §5.18.10).
+ * under an unregistered name may send anywhere (§4.4.2, §5.18.10): the
+ * layer's policies, those of the profiles given to the composite and to the
+ * composites enclosing it, and those of the profiles given to the listed
+ * tool or to a tool it invokes, transitively (POLICED).
  */
 function nestingState(
   state: ThreadState,
@@ -584,12 +614,17 @@ function nestingState(
     /** The listed tools not defined here, with the binding each loads as. */
     plain: ReadonlyMap<string, BoundTool>;
     /**
-     * The composite's grounding policies, its own and its applied profiles'
-     * (§5.20, §5.21.3): those requiring a nested plain call's capability
-     * apply to its output, as a plain tool has no options of its own.
+     * The composite's grounding policies, its own and its applied profiles',
+     * and those of the composites enclosing it (§5.20, §5.21.3): those
+     * requiring a nested call's capability apply to its output, a plain
+     * tool's (which has no options of its own) and a grounded tool's (after
+     * its own).
      */
     grounding: readonly GroundingPolicy[];
-    /** The highest minimum confidence of the composite's applied profiles (§5.21.3), or null. */
+    /**
+     * The highest minimum confidence of the applied profiles of the
+     * composite and of those enclosing it (§5.21.3), or null.
+     */
     minimumConfidence: number | null;
     recorded_by: RecordedBy;
     secrets: readonly string[];
@@ -680,8 +715,9 @@ function nestingState(
           ? `the tool registered under the name ${tool} (registerTools) is not the one ${composite.name} lists, so the checks the listed binding gives do not apply to the tool the runtime runs`
           : registered === undefined && composite.plain.has(tool)
             ? `${tool} is defined with plain defineTool, whose code runs without the wrapper, and no tool is registered under its name (registerTools), so the layer cannot tell that the tool the runtime runs under it is the one ${composite.name} lists, whose binding it would check`
-            : registered === undefined && (destinationPolicies().length > 0 || composite.destinations.length > 0)
-              ? `a destination policy is in force and no tool is registered under the name ${tool} (registerTools), so the layer cannot tell that the tool the runtime runs under it is the one ${composite.name} lists, which checks where it sends, and not one that may send anywhere (STANDARD 1.2.0 §4.4.2, §5.18.10)`
+            : registered === undefined &&
+                (destinationPolicies().length > 0 || composite.destinations.length > 0 || POLICED.has(composite.invokes[tool]!))
+              ? `a destination policy is in force (the layer's, a profile's given to ${composite.name} or a composite enclosing it, or one given to ${tool} or a tool it invokes) and no tool is registered under the name ${tool} (registerTools), so the layer cannot tell that the tool the runtime runs under it is the one ${composite.name} lists, which checks where it sends, and not one that may send anywhere (STANDARD 1.2.0 §4.4.2, §5.18.10)`
               : null;
     if (why === null) return null;
     return {
@@ -997,6 +1033,8 @@ function nestingState(
       checkpoint: composite.checkpoint,
       scope: composite.scope,
       destinations: composite.destinations,
+      grounding: composite.grounding,
+      minimumConfidence: composite.minimumConfidence,
       authority: composite.authority,
       flow: composite.flow,
       tool,
@@ -1069,6 +1107,10 @@ type Claim =
       recorded_by: RecordedBy;
       /** The destination policies enclosing composites' profiles put in force for this call. */
       enclosing: readonly (readonly string[])[];
+      /** The grounding policies of the composites enclosing this call (§5.20, §5.21.3). */
+      enclosingGrounding: readonly GroundingPolicy[];
+      /** The highest minimum confidence of the profiles of the composites enclosing this call, or null. */
+      enclosingMinimum: number | null;
       /** The approval request whose decisions approved the call: its own, or its composite's. */
       authority: ApprovalRecord | null;
       /** The call used a checkpoint: its own, or the one of the composite that covered it. */
@@ -1122,6 +1164,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     throw new Error(`groundedTool '${name}': ${problems.join('; ')} (STANDARD 1.2.0 §5.14)`);
   }
   let policy: ApprovalPolicy = declaredPolicy;
+  // Whether a destination policy of a profile given to a tool it invokes,
+  // transitively, applies to that tool's sends (POLICED).
+  let policed = false;
   // The listed tools not defined with groundedTool or controlTool, by the
   // binding their `acs` annotation loads as: the composite's nesting state
   // checks and records their calls (§5.18.4). One with no binding the layer
@@ -1133,6 +1178,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     if (computed !== undefined) {
       flags = joinFlags(flags, computed);
       person ||= PERSON.has(tool);
+      policed ||= POLICED.has(tool);
       nested.push(...(PERFORMS.get(tool) ?? []));
       policy = joinPolicy(policy, POLICY.get(tool));
       continue;
@@ -1382,10 +1428,13 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
 
       // The pending invocation of a running composite this call is, if any
-      // (§5.18.4): the destination policies of the profiles given to it and
-      // to the composites enclosing it reach this call (§5.21.3).
+      // (§5.18.4): the destination policies and the output rules of the
+      // profiles given to it and to the composites enclosing it, and their
+      // grounding policies, reach this call (§5.20, §5.21.3).
       const token = used.args_digest === undefined ? undefined : findToken(state.threadId, flow, name, used.args_digest);
       const enclosing = token?.destinations ?? [];
+      const enclosingGrounding = token?.grounding ?? [];
+      const enclosingMinimum = token?.minimumConfidence ?? null;
 
       // A send whose destination a policy in force does not allow, or
       // whose destination is not a string, is refused before approval and
@@ -1609,6 +1658,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         flow,
         recorded_by,
         enclosing,
+        enclosingGrounding,
+        enclosingMinimum,
         authority: request ?? (covered && token !== undefined ? token.authority : null),
         checkpointed: used.checkpoint_id !== undefined || (covered && token !== undefined && token.checkpoint),
         call: {
@@ -1684,7 +1735,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     }
     const claim = await serially(state.threadId, () => check(state, args as Json, secrets));
     if (claim.outcome) return claim.outcome;
-    const { started, call, flow, recorded_by, enclosing, authority, checkpointed } = claim;
+    const { started, call, flow, recorded_by, enclosing, enclosingGrounding, enclosingMinimum, authority, checkpointed } = claim;
+    // The output rules for this call: the tool's own, then those of the
+    // composites enclosing it (§5.20, §5.21.3), in the order a nested plain
+    // call's are checked (contract, grounding, minimum confidence).
+    const outputPolicies = [...policies, ...enclosingGrounding.filter((p) => p.require.includes(capability))];
+    const outputMinimum = highest(minimumConfidence, enclosingMinimum);
 
     // Run with the nesting state, check the output contract (§5.18.9),
     // record the outcome.
@@ -1707,8 +1763,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         flow,
         invokes,
         plain,
-        grounding: allPolicies,
-        minimumConfidence,
+        // Its output rules, with those enclosing it, reach the calls it covers.
+        grounding: [...enclosingGrounding, ...allPolicies],
+        minimumConfidence: highest(enclosingMinimum, minimumConfidence),
         recorded_by,
         secrets,
         now,
@@ -1754,12 +1811,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     // Grounding (§5.20), after the contract check: each policy that
     // requires the tool's capability applies on its own. The call's argument
     // names are what an `acs:` anchor may cite.
-    if (policies.length > 0) {
+    if (outputPolicies.length > 0) {
       let problem: string | null = null;
       try {
         const bound = Object.keys(args as object).filter((k) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(k));
         const seen = options.seen ? await options.seen({ state, args, output }) : null;
-        for (const policy of policies) {
+        for (const policy of outputPolicies) {
           const result = checkGrounding(output, policy, { bound, seen });
           if (result.code !== null) {
             problem = result.message;
@@ -1793,8 +1850,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
     }
 
-    // The applied profiles' minimum confidence (§5.21.3), after grounding.
-    const low = minimumConfidence === null ? null : confidenceFailure(output, minimumConfidence);
+    // The applied profiles' minimum confidence, and the enclosing
+    // composites' (§5.21.3), after grounding.
+    const low = outputMinimum === null ? null : confidenceFailure(output, outputMinimum);
     if (low !== null) {
       const result = refusal(
         'F504',
@@ -1876,6 +1934,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   POLICY.set(definition, policy);
   PERFORMS.set(definition, [...capabilities.map((capability) => ({ capability, risk })), ...nested]);
   if (person) PERSON.add(definition);
+  if (policed || profileDestinations.length > 0) POLICED.add(definition);
   noteBound(name, capability);
   return definition;
 }

@@ -149,6 +149,7 @@ OPENS = {
 F504 = "F504 CONSTRAINT_VIOLATED: "
 SECRET_SCAN = ROOT / "hooks" / "secret_scan.sh"
 SHELL_WORDS = ROOT / "hooks" / "shell_words.jq"
+SECRET_MEMBER = ROOT / "hooks" / "secret_member.jq"
 CREDENTIALS = json.loads(
     (ROOT / "tests" / "conformance" / "secrets" / "credentials.json").read_text(
         encoding="utf-8"
@@ -303,6 +304,28 @@ class TestFrontmatterHooks:
         end = hook.index("# END secret-scan") + len("# END secret-scan")
         assert hook[start:end] == source
         assert hook.count("# BEGIN secret-scan") == 1
+
+    def test_secret_member_copies_are_equal(self) -> None:
+        """The audit skill's Bash hook and the plugin's pre-tool-use hook
+        read JSON data with one rule for a value under a member named for a
+        credential (the SDK redactor's rule for data, STANDARD 1.2.0 §6.7):
+        each copies hooks/secret_member.jq verbatim, into a single-quoted
+        shell string, so the file holds no single quote (security round 4:
+        the audit hook had no copy, and a record holding
+        {"password":"hunter2"} was appended)."""
+        source = SECRET_MEMBER.read_text(encoding="utf-8").strip()
+        assert "'" not in source
+        hook = (ROOT / "hooks" / "pretooluse_require_checkpoint.sh").read_text(
+            encoding="utf-8"
+        )
+        audit = command_hook("audit", "PreToolUse", "Bash")
+        for text in (hook, audit):
+            assert text.count("# BEGIN secret-member") == 1
+            start = text.index("# BEGIN secret-member")
+            end = text.index("# END secret-member") + len("# END secret-member")
+            assert text[start:end] == source
+            assert text[:start].endswith("SECRET_MEMBER_JQ='\n")
+            assert text[end:].startswith("\n'\n")
 
     @pytest.mark.parametrize("skill", ["audit", "rollback", "send"])
     def test_shell_words_copies_are_equal(self, skill: str) -> None:
@@ -1888,6 +1911,102 @@ class TestAuditCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert_blocked(result, "cite it by reference or digest", F504)
 
+    # Security round 4: values the text scan does not see (short, in an
+    # array, with blanks, a number, a header given as a pair), each under a
+    # member named for a credential: the record is JSON data, and the layer
+    # refuses the same data as a persist tool's (F504).
+    MEMBER_RECORDS = [
+        '{"event":"login","password":"hunter2"}',
+        '{"event":"db","password":["Tr0ub4dor&3"]}',
+        '{"event":"cfg","api_key":"correct horse battery staple"}',
+        '{"event":"card","token":4111111111111111}',
+        '{"Authorization":"Basic dXNlcjpwYXNz"}',
+        '{"headers":[{"name":"Authorization","value":"abc123"}]}',
+        '{"headers":[["Cookie","sid=a1"]]}',
+        '{"event":"x","creds":{"client_secret":"abcd"}}',
+    ]
+
+    @pytest.mark.parametrize("record", MEMBER_RECORDS)
+    @pytest.mark.parametrize("form", ["project", "relative"])
+    def test_blocks_a_value_under_a_credential_member(
+        self, tmp_path: Path, shell: str, record: str, form: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        target = (
+            '"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"'
+            if form == "project"
+            else ".claude/audit/records.jsonl"
+        )
+        command = f"printf '%s\\n' '{record}' >> {target}"
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            '{"token_count":12345}',
+            '{"event":"login","password":true}',
+            '{"event":"login","user":"alice","outcome":"ok"}',
+            '{"headers":[{"name":"Accept","value":"text/plain"}]}',
+            '{"event":"rotate","secret":"<ref>"}',
+            '{"event":"x","token":"abc"}',
+        ],
+    )
+    def test_allows_a_record_whose_members_hold_no_credential(
+        self, tmp_path: Path, shell: str, record: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = f"printf '%s\\n' '{record}' >> .claude/audit/records.jsonl"
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_a_record_of_many_members_is_decided_in_time(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """About 1 MB: 40,000 members, then a password. The member rule
+        reads it with string functions (regular expressions, which jq
+        compiles at each test, took about 18 s of the hook's 30)."""
+        record = (
+            "{"
+            + ",".join(f'"m{i}":"value {i}"' for i in range(40_000))
+            + ',"password":"hunter2"}'
+        )
+        command = f"printf '%s\\n' '{record}' >> .claude/audit/records.jsonl"
+        assert len(command) <= 1_000_000
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        started = time.perf_counter()
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert time.perf_counter() - started < 5
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "vector",
+        [
+            v
+            for v in CREDENTIALS["vectors"]
+            if isinstance(v["input"], dict) and not v["secret_values"]
+        ],
+        ids=lambda v: v["name"],
+    )
+    def test_agrees_with_the_refusal_rule_on_data(
+        self, tmp_path: Path, shell: str, vector: dict[str, Any]
+    ) -> None:
+        """The record is refused exactly where the Python and TypeScript
+        refusal rule says the data holds a credential
+        (tests/conformance/secrets/credentials.json, its data vectors)."""
+        record = json.dumps(vector["input"], separators=(",", ":"))
+        assert "'" not in record
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = f"printf '%s\\n' '{record}' >> .claude/audit/records.jsonl"
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert (result.returncode == 2) == vector["expect"]["holds"], (
+            result.returncode,
+            result.stderr,
+        )
+        if result.returncode == 2:
+            assert result.stderr.startswith(F504), result.stderr
+
     @pytest.mark.parametrize(
         "command",
         [
@@ -3417,6 +3536,79 @@ class TestSendReadsWhereTheToolRuns:
     @pytest.mark.parametrize(
         "command",
         [
+            # Security round 4: a wrapper's option took a tool's name as its
+            # value, and the hook read curl's words with that tool's grammar
+            # (HTTPie's -s and -a take a value, its third positional x?a=b is
+            # a data item, wget's -I takes one): each passed (exit 0) and
+            # reached 127.0.0.1
+            "env -C http curl -q -s 0x7f.1:18777/env-http-s",
+            "env -C http curl -q https://example.com '0x7f.1:18777?envC=1'",
+            "sudo -u http curl -q -s 0x7f.1:18777/sudo-http-s",
+            "env -u http curl -q https://example.invalid '0x7f.1:18777?second=1'",
+            "env -u http curl -q -s 0x7f.1:18777/env-u-http",
+            "env -u https curl -q -s 0x7f.1:18777/env-u-https",
+            "env -u http curl -q -a 0x7f.1:18777/dash-a",
+            "env -u wget curl -q -H --no-config -I 0x7f.1:18777/wget-grammar",
+            "sudo -u wget -g http curl -q -s 0x7f.1:18777/two",
+            # the redirect option and the configuration rule, read in curl's
+            # grammar
+            "env -u http curl -q http://a/x1 http://a/x2 "
+            "--expand-connect-to a::127.0.0.1:18777",
+            "env -u http curl -s https://example.com/no-q",
+            "sudo -u http wget -qO- https://example.com/no-config",
+            # a program between, as the value or after it
+            "env -u http prlimit curl -q https://example.com/",
+            "env -u http head -c 5 /usr/bin/curl > fx",
+            "env -u http gzip -c curl > fx",
+            "env -u http xargs curl -q",
+        ],
+    )
+    def test_a_wrapper_option_naming_a_tool_is_read_both_ways(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "", F504)
+
+    def test_more_than_eight_tool_words_after_a_wrapper_are_refused(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call("env " + "http " * 9 + "example.com"), tmp_path, shell
+        )
+        assert_blocked(result, "reads at most 8 words naming curl", F504)
+        result = run_command(
+            hook, bash_call("env " + "http " * 8 + "example.com"), tmp_path, shell
+        )
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # 16 KB: each word naming a tool read once at most (an inert
+            # program's first, a wrapper's at most 8), in time linear in the
+            # command's length
+            "echo " + "curl " * 3200,
+            "env " + "curl -q " * 2000 + "https://example.com/",
+            "env " + "http " * 3200 + "example.com",
+            "prlimit " + "http -s " * 1600 + "x",
+        ],
+        ids=["echo", "env-curl", "env-http", "prlimit"],
+    )
+    def test_many_tool_words_are_decided_in_time(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        assert len(command) <= 16384
+        hook = command_hook("send", "PreToolUse", "Bash")
+        started = time.perf_counter()
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert time.perf_counter() - started < 10
+        assert result.returncode in (0, 2), result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             "timeout 5 curl -q https://example.com/",
             "sudo curl -q https://example.com/",
             "env -i curl -q https://example.com/",
@@ -3433,6 +3625,12 @@ class TestSendReadsWhereTheToolRuns:
             "type -P curl",
             "curl -q https://example.com/install",
             "curl -q -o install https://example.com/x",
+            # a wrapper's option whose value names a tool: both read
+            "sudo -u http curl -q https://example.com/",
+            "env -u http curl -q https://example.com/",
+            "env -C http curl -q https://example.com/",
+            "env " + "curl -q " * 8 + "https://example.com/",
+            "curl -q -o out/curl https://example.com/x https://example.com/y",
         ],
     )
     def test_still_allows_these_requests(
@@ -3505,6 +3703,19 @@ class TestTheShellDoesWhatTheSendHookRefuses:
         script.chmod(0o755)
         result = run_as_claude_code(command, tmp_path)
         assert result.stdout.strip() == "named", result.stderr
+
+    @pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+    @pytest.mark.parametrize("words", [["-C", "http"], ["-u", "http"]])
+    def test_a_wrapper_option_takes_a_tool_name_as_its_value(
+        self, tmp_path: Path, words: list[str]
+    ) -> None:
+        """env -C and -u take a value, so curl runs, not http, and reads -s
+        as its own flag and the next word as its URL."""
+        (tmp_path / "http").mkdir()
+        (tmp_path / "page").write_text("curl ran\n")
+        command = f"env {' '.join(words)} curl -q -s file://{tmp_path}/page"
+        result = run_as_claude_code(command, tmp_path)
+        assert result.stdout.strip() == "curl ran", result.stderr
 
     def test_dotglob_matches_a_leading_dot(self, tmp_path: Path) -> None:
         (tmp_path / ".curlrc").write_text("")

@@ -820,6 +820,93 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
       expect((await entriesOf(t, 'triage')).at(-1)?.evidence_anchors).toEqual(anchors);
       expect((await readExecuted(t.state))['classify']).toBe(1);
     });
+
+    // Security round 4: the profiles given to a composite reached a nested
+    // grounded call's flags, person and destination, not its output: an
+    // ungrounded classify below the minimum was recorded executed, counted
+    // in acs:executed and handed to the composite's code as a success.
+    const reviewProfiles = () =>
+      bindingProfiles(
+        {
+          checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+          profileFlags: (_p: Json[], capability: CapabilityId): ProfileFlags => ({ ...effectiveFlags(capability).flags, person: false }),
+          profilePolicy: (): ProfilePolicy => ({
+            minimum_confidence: 0.9,
+            grounding: [{ require: ['classify'], kinds: ['file'] }],
+            destinations: [],
+            trust_weights: {},
+          }),
+        },
+        [{ domain: 'security' }],
+      );
+    const groundedTriage = () =>
+      groundedTool({
+        name: 'triage',
+        capability: 'classify',
+        description: 'triage',
+        args,
+        execute: async (_s, a) => ({
+          labels: ['benign'],
+          confidence: a['confidence'] as number,
+          evidence_anchors: a['anchors'] as never,
+        }),
+      });
+    const OUTPUT_CASES = [
+      [{ confidence: 0.12, anchors: [{ ref: 'file:ticket.md', kind: 'file' }] }, 'F504', 'below_minimum_confidence'],
+      [{ confidence: 0.95, anchors: [] }, 'F505', undefined],
+      [{ confidence: 0.12, anchors: [] }, 'F505', undefined],
+      [{ confidence: 0.95, anchors: [{ ref: 'file:ticket.md', kind: 'file' }] }, undefined, undefined],
+    ] as const;
+
+    it("applies the composite's profiles' output rules to a nested grounded call, as to a plain one (§5.21.3)", async () => {
+      const t = memoryThread();
+      const triage = groundedTriage();
+      registerTools({ triage });
+      const { tool: review, nested } = compositeOf('review', { triage }, 'triage', { profiles: reviewProfiles() });
+      t.tools.set('triage', triage as never);
+      t.tools.set('review', review);
+      for (const [given, code, reason] of OUTPUT_CASES) {
+        expect((await run(t, 'review', given)).status).toBe('success');
+        expect(nested.at(-1)?.error_code ?? null, JSON.stringify(given)).toBe(code ?? null);
+        const entry = (await entriesOf(t, 'triage')).at(-1);
+        expect(entry?.status).toBe(code === undefined ? 'executed' : 'failed');
+        expect(entry?.code).toBe(code);
+        expect(entry?.reason_code).toBe(reason);
+        expect(entry?.covered_by).toBe((await entriesOf(t, 'review')).at(-1)?.seq);
+      }
+      expect((await readExecuted(t.state))['classify']).toBe(1);
+      // Called on its own, the grounded tool applies only its own rules.
+      expect((await run(t, 'triage', OUTPUT_CASES[0][0])).status).toBe('success');
+    });
+
+    it('carries the output rules of every enclosing composite, to a grounded and to a plain nested call', async () => {
+      for (const kind of ['grounded', 'plain'] as const) {
+        resetLayer();
+        const t = memoryThread();
+        const triage =
+          kind === 'grounded'
+            ? groundedTriage()
+            : plainTool({ tool: 'triage', capability: 'classify' }, (a) =>
+                text({ labels: ['benign'], confidence: a['confidence'], evidence_anchors: a['anchors'] as Json }),
+              );
+        // review (no profile of its own) invokes triage; audit_all, given
+        // the profiles, invokes review.
+        const { tool: review } = compositeOf('review', { triage }, 'triage');
+        const { tool: outer } = compositeOf('audit_all', { review }, 'review', { profiles: reviewProfiles() });
+        registerTools({ triage, review });
+        t.tools.set('triage', triage as never);
+        t.tools.set('review', review);
+        t.tools.set('audit_all', outer);
+        for (const [given, code, reason] of OUTPUT_CASES) {
+          expect((await run(t, 'audit_all', given)).status).toBe('success');
+          const entry = (await entriesOf(t, 'triage')).at(-1);
+          expect(entry?.status, `${kind} ${JSON.stringify(given)}`).toBe(code === undefined ? 'executed' : 'failed');
+          expect(entry?.code).toBe(code);
+          expect(entry?.reason_code).toBe(reason);
+        }
+        expect((await readExecuted(t.state))['classify']).toBe(1);
+      }
+    });
   });
 
   describe('a call queued through the composite state (§5.18.4)', () => {
@@ -1066,6 +1153,119 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
       resetLayer();
       expect((await run(t, 'agg2', evil)).status).toBe('success');
       expect(nested[2]?.status).toBe('success');
+    });
+
+    // Security round 4: the destination policy of the profiles given to the
+    // listed send tool itself (or to a tool it reaches) did not count, so the
+    // runtime's own tool ran under the unregistered name and sent anywhere,
+    // with no trace entry.
+    function ownPolicySetup(allowList: readonly string[]) {
+      const t = memoryThread();
+      const sent: string[] = [];
+      const profiles = bindingProfiles(
+        {
+          checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+          profileFlags: (_p: Json[], capability: CapabilityId): ProfileFlags => ({ ...effectiveFlags(capability).flags, person: false }),
+          profilePolicy: (): ProfilePolicy => ({ minimum_confidence: null, grounding: [], destinations: [[...allowList]], trust_weights: {} }),
+        },
+        [{ domain: 'ehr' }],
+      );
+      const notify = groundedTool({
+        name: 'notify',
+        capability: 'send',
+        destination: '/to',
+        profiles,
+        description: 'notify',
+        args,
+        execute: async (_s, a) => {
+          sent.push(`listed:${String(a['to'])}`);
+          return { sent: true, evidence_anchors: [] };
+        },
+      });
+      // What the runtime runs under the name: a plain send to any address.
+      const running = defineTool({
+        description: 'notify',
+        args,
+        execute: async (_s: unknown, a: Record<string, unknown>) => {
+          sent.push(String(a['to']));
+          return text({ sent: true, evidence_anchors: [] });
+        },
+      });
+      const { tool: relay, nested } = compositeOf('relay', { notify }, 'notify');
+      // relay lists notify, and outer lists relay: relay reaches the policy.
+      const { tool: outer, nested: outerNested } = compositeOf('outer', { relay }, 'relay');
+      t.tools.set('notify', running as never);
+      t.tools.set('relay', relay);
+      t.tools.set('outer', outer);
+      t.tools.set('save', checkpointTool());
+      return { t, sent, nested, outerNested, notify, relay, running };
+    }
+    const attacker = { to: 'https://attacker.example.net/collect' };
+
+    for (const allowList of [['https://ehr.example.org/*'], []]) {
+      it(`refuses an unregistered name whose listed send tool's own profiles set a destination policy (${JSON.stringify(allowList)})`, async () => {
+        const { t, sent, nested } = ownPolicySetup(allowList);
+        await run(t, 'save');
+        await approve(t, 'relay', 'invoke', attacker);
+        expect((await run(t, 'relay', attacker)).status).toBe('success');
+        expect(nested[0]?.error_code).toBe('F504');
+        expect(nested[0]?.error).toContain('registerTools');
+        expect(sent).toEqual([]);
+        expect(t.invoked).toEqual([]);
+        expect((await entriesOf(t, 'notify'))).toMatchObject([{ status: 'refused', code: 'F504', capability: 'send' }]);
+      });
+    }
+
+    it('refuses an unregistered name listed for a composite that reaches such a tool, and queues none', async () => {
+      const { t, sent, outerNested, relay } = ownPolicySetup(['https://ehr.example.org/*']);
+      // outer -> relay: the runtime runs another tool under 'relay'.
+      t.tools.set('relay', defineTool({ description: 'relay', args, execute: async () => text({ result: true, evidence_anchors: [] }) }) as never);
+      await run(t, 'save');
+      await approve(t, 'outer', 'invoke', attacker);
+      expect((await run(t, 'outer', attacker)).status).toBe('success');
+      expect(outerNested[0]?.error_code).toBe('F504');
+      expect(t.invoked).toEqual([]);
+      expect(sent).toEqual([]);
+      // queueTool takes the same refusal.
+      const thrown: unknown[] = [];
+      const queuer = groundedTool({
+        name: 'queuer',
+        capability: 'invoke',
+        invokes: { relay } as never,
+        description: 'queuer',
+        args,
+        execute: async (state, a) => {
+          try {
+            state.queueTool('relay', a as Record<string, unknown>);
+          } catch (error) {
+            thrown.push(error);
+          }
+          return { result: true, evidence_anchors: [] };
+        },
+      });
+      t.tools.set('queuer', queuer);
+      await run(t, 'save');
+      await approve(t, 'queuer', 'invoke', attacker);
+      expect((await run(t, 'queuer', attacker)).status).toBe('success');
+      expect(String(thrown[0])).toContain('F504');
+      expect(t.queuedTools).toEqual([]);
+    });
+
+    it('runs the listed send tool registered under its name, which checks its own policy', async () => {
+      const { t, sent, nested, notify } = ownPolicySetup(['https://ehr.example.org/*']);
+      registerTools({ notify });
+      t.tools.set('notify', notify);
+      await run(t, 'save');
+      await approve(t, 'relay', 'invoke', attacker);
+      expect((await run(t, 'relay', attacker)).status).toBe('success');
+      expect(nested[0]?.error_code).toBe('F504');
+      expect(sent).toEqual([]);
+      const allowed = { to: 'https://ehr.example.org/notes' };
+      await run(t, 'save');
+      await approve(t, 'relay', 'invoke', allowed);
+      expect((await run(t, 'relay', allowed)).status).toBe('success');
+      expect(nested[1]?.status).toBe('success');
+      expect(sent).toEqual(['listed:https://ehr.example.org/notes']);
     });
 
     it('validates what registerTools is given', () => {

@@ -1107,6 +1107,20 @@ here and marked so.
     glob or a brace too, and refuses one that may spell `git stash
     apply|pop` (`git st?sh apply <id>` once a file named `stash` exists;
     `git add *` is refused, `git add *.py` still runs).
+  - Skill hooks, security round 4 (batch 4). The audit skill's hook
+    refuses a record holding a value under a member named for a credential
+    (`{"password":"hunter2"}`, `{"token":4111111111111111}`, a value in an
+    array, one with blanks, the value of a `{"name": "Authorization",
+    "value": ...}` pair, the second of a `["Cookie", ...]` tuple), as the
+    plugin's pre-tool-use hook refuses the same data from a persist tool
+    and the SDK redactor reads it (`hooks/secret_member.jq`, copied into
+    both): write such a record by reference (`<ref>`) or digest. The send
+    skill's hook reads every word naming a tool after a wrapper as a
+    request's program (a wrapper's option may take a tool's name as its
+    value: in `env -u http curl ...` and `sudo -u http curl ...` curl runs,
+    and its words were read with HTTPie's grammar), so each reading must
+    pass; such a value may stand between the wrapper and the tool, and a
+    command with more than 8 such words after a wrapper is refused.
   - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
     UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
     when an API error or an interrupt ended it, or a killed session, no
@@ -1397,19 +1411,27 @@ here and marked so.
   agent's tools, by the names the runtime runs them under, once they are
   defined. Without it such a call is refused (F504), as is an invocation of
   any listed name registered as another tool than the one listed, or as two,
-  and, while a destination policy is in force (the layer's or a composite's
-  profiles'), an invocation of any listed name not registered, a grounded
-  tool's included.
+  and, while a destination policy is in force (the layer's, a composite's
+  profiles', or, security round 4, the profiles' given to the listed tool
+  or to a tool it invokes, transitively), an invocation of any listed name
+  not registered, a grounded tool's included.
   Such a nested call is now checked as a grounded tool's call is: a
   `persist` or `audit` call whose data holds a secret is refused (F504),
   and what it returns is checked against its capability's output contract
   (R402), the composite's grounding policies (F505) and its profiles'
   minimum confidence (F504), so a plain tool must return its output's JSON
   text (a plain `checkpoint` that returns other text takes none, and no
-  rollback runs on it). A composite's state refuses `queueTool` (it throws
-  the F504 refusal, which is recorded) for a tool the composite does not
-  list, a listed plain tool, and any tool once its call has ended; a listed
-  grounded or control tool is queued as before. A grounded tool with no
+  rollback runs on it). Security round 4: the output rules of the profiles
+  given to a composite (their grounding policies and minimum confidence),
+  with its own `grounding`, now reach the output of every nested call it
+  covers, at any depth, a grounded tool's (after the tool's own rules) as
+  well as a plain tool's, where before they reached only a plain tool's
+  call the composite itself made: a nested grounded call whose output they
+  refuse fails (F505, F504) and is not counted as executed. A composite's
+  state refuses `queueTool` (it throws the F504 refusal, which is
+  recorded) for a tool the composite does not list, a listed plain tool,
+  and any tool once its call has ended; a listed grounded or control tool
+  is queued as before. A grounded tool with no
   `invokes` now declares `uses: []`, so a runtime that enforces `uses`
   refuses its `invokeTool` and `queueTool` calls.
 - Standard Agents binding, secrets (Standard 1.2.0 §6.7):

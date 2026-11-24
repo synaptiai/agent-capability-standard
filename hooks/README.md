@@ -245,11 +245,11 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   permission mode (STANDARD 1.2.0 §5.18.10, §6.7), as the SDK adapter
   refuses it: the shared scan (`secret_scan.sh`, copied into the hook) over
   every string of the input and its JSON text, and the SDK redactor's rule
-  for data, a value of 4 or more characters (or a number) that is not a
-  placeholder under a member named for a credential, the value of a
-  `{"name": "Authorization", "value": ...}` pair, or the second of a
-  `["Cookie", ...]` tuple. A test keeps the hook's verdict the adapter's on
-  the credential vectors and on data forms.
+  for data (`secret_member.jq`, copied too), a value of 4 or more
+  characters (or a number) that is not a placeholder under a member named
+  for a credential, the value of a `{"name": "Authorization", "value": ...}`
+  pair, or the second of a `["Cookie", ...]` tuple. A test keeps the
+  hook's verdict the adapter's on the credential vectors and on data forms.
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
@@ -629,6 +629,23 @@ attempt's run can hold another (a URL's scheme from the start of its run)
 or read a bounded run (a user option's name, at most 256 characters); time
 it with grep's output to a pipe, as the scan reads it, not to `/dev/null`,
 where grep stops at the first match.
+
+The `audit` skill's `Bash` hook and `pretooluse_require_checkpoint.sh` also
+share the SDK redactor's rule for JSON data, `secret_member.jq` in this
+directory, copied the same way between `# BEGIN secret-member` and `# END
+secret-member` (inside a single-quoted shell string, so the file holds no
+single quote) and kept equal by the same tests: a value of 4 or more
+characters, or a number, that is not a placeholder under a member named
+for a credential, the value of a `{"name": "Authorization", "value": ...}`
+pair, or the second of a `["Cookie", ...]` tuple. The pre-tool-use hook
+applies it to what a persist tool stores, the audit hook to the record an
+append writes (`{"password":"hunter2"}`, which the text scan, needing a
+long or quoted value, does not see), each refusing with `F504
+CONSTRAINT_VIOLATED:`. It compares names in ASCII lower case, as the SDK
+does, with string functions rather than regular expressions, which jq
+compiles at each test (1 MB of members took 22 s that way, 2 s now); a
+name outside ASCII is also tested with Unicode case folding, so the hooks
+find a name the SDK does not in rare spellings, never the reverse.
 
 The `send`, `audit` and `rollback` skills' `Bash` hooks share one reader of
 a command's words, `shell_words.jq` in this directory, copied the same way

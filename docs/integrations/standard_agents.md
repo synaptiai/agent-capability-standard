@@ -692,10 +692,11 @@ export default groundedTool({
   registered as that very tool; and an invocation of a name registered as
   another tool than the one listed, or as two, is refused (F504). A name a
   composite lists for a grounded tool needs registration only while a
-  destination policy is in force (the layer's, or the composite's
-  profiles'): the tool that runs checks itself if it is grounded, but under
-  a policy the binding invokes no name whose tool may be one that sends
-  anywhere (F504).
+  destination policy is in force (the layer's, the profiles' given to the
+  composite or to a composite enclosing it, or the profiles' given to the
+  listed tool or to a tool it invokes, transitively): the tool that runs
+  checks itself if it is grounded, but under a policy the binding invokes
+  no name whose tool may be one that sends anywhere (F504).
 - **Queued calls.** A call queued with `state.queueTool` runs after the
   composite's call has ended, as a call of its own. The composite's state
   queues a listed grounded or control tool, which checks itself when it
@@ -828,7 +829,11 @@ A grounded tool takes four more options:
   nested call that needs a person is not covered by an approval no person
   gave. Their grounding policies join `grounding`; and an output below
   their `minimum_confidence` fails with F504 (`reason_code`), after the
-  grounding check. Their `allowed_destinations` join the layer's
+  grounding check. Given to a composite, these output rules, with the
+  composite's own `grounding`, reach the output of every nested call it
+  covers, at any depth: a plain tool's (which has no options of its own)
+  and a grounded tool's, after the tool's own rules (§5.21.3). Their
+  `allowed_destinations` join the layer's
   destination policies for the tool's `send` calls (§4.4.2) and, given to a
   composite, for every send its code invokes, at any depth: a nested call
   the binding attributes to the composite (§5.18.4) is checked against the
@@ -874,7 +879,7 @@ parent the model's text for an action that never ran. Bind a
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
-| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force, a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force (the layer's, nor one of the profiles given to the composite, to a composite enclosing it, or to the listed tool or a tool it invokes), a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
 | Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and

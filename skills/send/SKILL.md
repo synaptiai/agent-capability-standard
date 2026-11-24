@@ -55,7 +55,10 @@ hooks:
             # goes to a gateway) wherever the tool runs: as the program of its
             # command, after !, if, while and the other reserved words, or after a
             # program that runs the one a later word names (env, sudo, timeout, ...)
-            # with only options and numbers between; given to any other program
+            # with only options, numbers and such programs' and tools' names between
+            # (an option's value may name a tool, env -C http curl, so each word
+            # naming a tool there is read as the request's program, at most 8);
+            # given to any other program
             # (prlimit, a loader, head, an unknown one) it is refused, since that
             # program may run it unread or copy it. Also git's settings, the
             # variables that set where a request goes (assigned, exported, read or
@@ -493,7 +496,12 @@ hooks:
             # between (sudo, timeout 5); a word given to a program that neither runs
             # nor copies it (which, echo; a package manager, by its bare name) is not
             # run; given to any other program, which may run it unread or copy it, it
-            # is refused.
+            # is refused. A wrapper's option may take a tool's name as its value (env
+            # -C http curl, sudo -u http curl: curl runs, not http), so a word naming a
+            # tool may stand between the wrapper and the tool, and where a wrapper runs
+            # one, every word naming a tool is read as a request with that tool's
+            # grammar ($reads), at most 8 of them: the command is refused when any
+            # reading refuses.
             def check_command($words):
               ($words | map(select(.target | not))) as $args
               | (first(range(0; $args | length) as $i | select($args[$i].d | IN(reserved[]) | not) | $i) // null) as $p
@@ -504,7 +512,18 @@ hooks:
               | (($tool_words | length) > 0 or $tool_target) as $given
               | (($prog | IN(non_runners[]))
                  or (($prog | IN(installers[])) and ($tool_target | not) and all($tool_words[]; $args[.].d | test("/") | not))) as $inert
-              | (if $runs_tool then $p else first($tool_words[]) // null end) as $at
+              # (the tool runs: it is the program, or wrappers run it, with only
+              # options, numbers, wrappers and words naming a tool between, which run
+              # to the first other word, $q)
+              | (if $p == null then 0
+                 else first(range($p + 1; $args | length) as $i
+                            | select($args[$i].d | option_or_number or (name_of | IN(wrappers[]) or IN(tools[])) | not) | $i)
+                      // ($args | length) end) as $q
+              | ($runs_tool
+                 or (($tool_words | length) > 0 and ($prog | IN(wrappers[])) and $tool_words[-1] < $q)) as $runs
+              | (if $runs_tool then [$p] elif $runs then $tool_words else $tool_words[:1] end) as $reads
+              | $reads[0] as $at
+              | (if $runs_tool then $p else $tool_words[-1] end) as $last
               | if $p != null and $args[$p].assign then {kind: "assign", word: $args[$p].d}
                 elif any($words[]; .d | test(setting_files; "i")) then
                   {kind: "file", word: first($words[] | select(.d | test(setting_files; "i")) | .d)}
@@ -521,7 +540,7 @@ hooks:
                      and any($args[$p:][]; .d | name_of | IN(copiers[])) then
                   {kind: "copy", word: ($words | map(.d) | join(" "))}
                 # xargs and parallel give the tool words from their input, unread
-                elif $at != null and any($args[:$at][]; .d | name_of | IN(feeders[])) then
+                elif $last != null and any($args[:$last][]; .d | name_of | IN(feeders[])) then
                   {kind: "feeds", word: ($args | map(.d) | join(" "))}
                 else
                   # git's settings (git -c NAME=VALUE, --config-env, git config NAME),
@@ -535,14 +554,11 @@ hooks:
                                          or ($d == "config" and any($args[$i + 1:][]; .d | test("^[A-Za-z0-9-]+\\.") and (ascii_downcase | test(git_settings) | not))))
                                 | {kind: "redirect", word: $d}) // null
                      end) as $g
-                  # (the tool runs: it is the program, or wrappers run it)
-                  | ($runs_tool
-                     or ($at != null and ($prog | IN(wrappers[]))
-                         and all($args[$p + 1:$at][]; .d | option_or_number or (name_of | IN(wrappers[]))))) as $runs
                   | if $g != null then $g
-                    else (if $at == null then null
-                          else ($args[$at].d | name_of | if . == "https" then "http" else . end) as $tool
-                          | check_request($tool; $args[$at + 1:]; $inert | not) end) as $r
+                    elif ($reads | length) > 8 then {kind: "many", word: ($words | map(.d) | join(" "))}
+                    else (first($reads[] as $j
+                                | ($args[$j].d | name_of | if . == "https" then "http" else . end) as $tool
+                                | check_request($tool; $args[$j + 1:]; $inert | not) | select(. != null)) // null) as $r
                     | if $r != null then $r
                       elif $given and ($runs | not) and ($inert | not) then
                         {kind: "argument", word: ($words | map(.d) | join(" "))}
@@ -604,7 +620,8 @@ hooks:
               assign) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a variable set on its line, nor one that names CURL_HOME, HOME, XDG_CONFIG_HOME, WGETRC, SYSTEM_WGETRC, IPFS_GATEWAY, IPFS_PATH, HTTPIE_CONFIG_DIR, PATH, a CA bundle, a proxy, git's or the loader's variables, with or without a value (export NAME, read NAME, for NAME in, printf -v NAME): '$WORD': a setting changes where the request goes, unseen by this check" >&2 ;;
               nested) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request inside a command line given as a word (sh -c, trap, awk's system, sed's e, an interpreter's code, git rebase -x), nor code a shell or an interpreter reads from a pipe or a file, in a command that names curl, wget or http: '$WORD', whose destination this check cannot read; run curl, wget or http directly" >&2 ;;
               copy) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that copies or links curl, wget or http ('$WORD'), whatever comes before the copier (!, if, a wrapper): the copy runs under another name, unread by this check" >&2 ;;
-              argument) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl, wget or http only as a command's program, or after a program that runs the one a later word names (env, sudo, timeout, nice, ...) with only options and numbers between; it does not give one to another program ('$WORD': prlimit, a loader, head, gzip, an unknown program), which may run it unread or copy it" >&2 ;;
+              argument) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl, wget or http only as a command's program, or after a program that runs the one a later word names (env, sudo, timeout, nice, ...) with only options, numbers and the names of such programs or tools between; it does not give one to another program ('$WORD': prlimit, a loader, head, gzip, an unknown program), which may run it unread or copy it" >&2 ;;
+              many) echo "F504 CONSTRAINT_VIOLATED: the send skill reads at most 8 words naming curl, wget or http after a program that runs another (env, sudo, ...): a wrapper's option may take a tool's name as its value (env -C http curl), so each such word is read as the request's program, and this command holds more ('$WORD')" >&2 ;;
               alias) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run alias, hash, enable or a function definition in a command that names curl, wget or http ('$WORD'): each gives a program another name, which this check does not read" >&2 ;;
               feeds) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose words xargs or parallel read from their input ('$WORD'): the host it reaches is not one this check reads; write each URL in the command" >&2 ;;
               program) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a word the shell may expand to the name of curl, wget or http ('$WORD': a glob in any letter case, a brace or an extglob pattern, c?rl, CU?L, cu{r,r}l, c@(u)rl): the program it runs is not one this check reads; name the program literally" >&2 ;;

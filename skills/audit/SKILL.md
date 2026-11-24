@@ -680,8 +680,62 @@ hooks:
                 sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
             }
             # END secret-scan
-            if secret_in "$CMD" || secret_in "$DECODED"; then
+            # A value under a member named for a credential, in the record's data:
+            # the shared rule (hooks/secret_member.jq, copied below), which the
+            # plugin's pre-tool-use hook applies to the data a persist tool stores and
+            # the SDK redactor to data. The text scan above needs a long or quoted
+            # value; {"password":"hunter2"}, a value in an array, one with blanks or
+            # a number are found only here. A record jq cannot read this way is
+            # refused (R407).
+            SECRET_MEMBER_JQ='
+            # BEGIN secret-member (source: hooks/secret_member.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # acs_held(false): whether JSON data holds, in a member named for a
+            # credential, a value redaction replaces that is not a placeholder: the rule
+            # the SDK redactor applies to data (grounded_agency/state/redaction.py,
+            # _secret_member_value; STANDARD 1.2.0 §6.7). A member is secret when its
+            # name ends in a credential name or names a header that carries one
+            # (Authorization, Cookie), when it is the value of a name/value pair whose
+            # name is such a name ({"name": "Authorization", "value": ...}), the second
+            # of a [name, value] tuple, or inside a secret member. Its value counts when
+            # it is a number, or a string of 4 or more characters other than [REDACTED]
+            # that is not a placeholder (<...>, ${...}, ****, password, token, ...).
+            # Names are compared in ASCII lower case, as the SDK compares them (re.ASCII,
+            # IGNORECASE), with string functions: jq compiles a regular expression at
+            # each test, about 0.4 ms a member, so a record of 1 MB took 22 s. A name
+            # outside ASCII (utf8bytelength differs from length) is also tested with
+            # Unicode case folding, so this rule finds a name the SDK does not in rare
+            # spellings, never the reverse; a placeholder is matched in ASCII only, so
+            # no rare spelling hides a value. A copy sits in a single-quoted shell
+            # string, so this text holds no single quote.
+            def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "authorization", "cookie", "cookies"];
+            def acs_name: (ascii_downcase as $n | any(acs_names[]; . as $s | $n | endswith($s)))
+              or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|authorization|cookies?)\\z"; "i"));
+            def acs_is($words): (ascii_downcase | IN($words[])) or (utf8bytelength != length and test("\\A(" + ($words | join("|")) + ")\\z"; "i"));
+            def acs_scalar: (type == "string" and length >= 4 and . != "[REDACTED]") or type == "number";
+            def acs_placeholder: type == "string"
+              and (((.[0:1] | IN("$", "<", "{", "*", "[")) and (contains("\n") | not))
+                   or (ascii_downcase | IN("password", "passwd", "pwd", "pass", "secret", "token")));
+            def acs_held($secret):
+              if $secret and acs_scalar then (acs_placeholder | not)
+              elif type == "object" then
+                (($secret | not) and any(to_entries[]; (.key | acs_is(["name", "key", "header"])) and (.value | type == "string" and acs_name))) as $pair
+                | any(to_entries[]; .key as $k | .value | acs_held($secret or ($k | acs_name) or ($pair and ($k | acs_is(["value"])))))
+              elif type == "array" then
+                (($secret | not) and length == 2 and (.[0] | type == "string" and acs_name)) as $tuple
+                | any(to_entries[]; .key as $i | .value | acs_held($secret or ($tuple and $i == 1)))
+              else false end;
+            # END secret-member
+            '
+            HELD=false
+            if [ -n "$RECORD" ]; then
+              HELD="$(printf '%s' "$RECORD" | jq -r "$SECRET_MEMBER_JQ"' acs_held(false)' 2>/dev/null)" || HELD=unread
+            fi
+            if [ "$HELD" = true ] || secret_in "$CMD" || secret_in "$DECODED"; then
               echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
+              exit 2
+            fi
+            if [ "$HELD" != false ]; then
+              echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the record's members" >&2
               exit 2
             fi
             exit 0
@@ -1034,7 +1088,7 @@ Apply the following verification patterns:
 - Include failed actions, not just successes
 - Redact sensitive information (credentials, PII) from audit output
 - Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log`
-- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one, read with its JSON escapes resolved (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
+- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one, read with its JSON escapes resolved, or any value but a placeholder (`<ref>`) under a member named for a credential (`"password": "hunter2"`, `"token": 4111111111111111`) (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
 - A literal record (§5.18.10): the hook reads the record only in step 6's form, one JSON object on one line with no single quote, and refuses (F504) any other command naming the records file that holds `$` (but in `${CLAUDE_PROJECT_DIR:-.}`), a backtick, `\`, `<` or `>`, which could build its text when the command runs. Compute the HMAC, and a moved-aside file's time, in commands of their own, then write them literally
 
 ## Composition Patterns

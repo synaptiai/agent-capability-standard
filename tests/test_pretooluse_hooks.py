@@ -1225,6 +1225,44 @@ class TestShellHookPersistSecrets:
         assert result.returncode == 2 and result.stderr.startswith("F504")
         assert elapsed < 5
 
+    # Security round 4: the member rule tested each name and each value
+    # with a regular expression, which jq compiles at each test (about 0.4
+    # ms): 40,000 members took about 18 s of the hook's 30, and 120,000
+    # placeholders under a secret member about 11 s. String functions read
+    # the same input in under 2 s.
+    @pytest.mark.parametrize(
+        ("data", "refused"),
+        [
+            (
+                {
+                    **{f"m{i}": f"value {i}" for i in range(40_000)},
+                    "password": "hunter2",
+                },
+                True,
+            ),
+            ({"password": ["<ab>"] * 120_000}, False),
+        ],
+        ids=["members", "placeholders"],
+    )
+    def test_many_members_are_decided_in_time(
+        self, tmp_path: Path, data: dict, refused: bool
+    ):
+        tool_input = {"todos": [{"content": "x", "status": "pending", "meta": data}]}
+        assert len(json.dumps(tool_input)) <= 1_000_000
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": tool_input}),
+            tmp_path,
+            timeout=60,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == (2 if refused else 0), result.stderr[:200]
+        if refused:
+            assert result.stderr.startswith(
+                "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+            )
+        assert elapsed < 5
+
     # A credential after a long run that each stage reading matches out of
     # the text (grep -o) once read again from each of its positions: a URL
     # scheme's characters (the reported TodoWrite: rc 124 after 30 s under
