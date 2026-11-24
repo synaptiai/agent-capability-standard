@@ -184,7 +184,7 @@ In strict mode such a tool is refused until a checkpoint exists, then put to the
 adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve")
 ```
 
-A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused.
+A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
 
 ### Bash Command Classification
 

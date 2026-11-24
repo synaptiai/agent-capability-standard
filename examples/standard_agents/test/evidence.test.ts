@@ -6,7 +6,8 @@
  * `acs.evidence_recorded` notification and the thread's evidence export.
  */
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { refsIn, type Json } from '@synaptiai/acs-core';
+import { digest, refsIn, type Json } from '@synaptiai/acs-core';
+import type { ToolResult } from '@standardagents/spec';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import checkpointConfig from '../agents/tools/checkpoint_config.js';
@@ -20,7 +21,7 @@ import {
   getEvidence,
 } from '../src/acs/evidence.js';
 import { recordToolCall } from '../src/acs/audit.js';
-import { groundedTool } from '../src/acs/grounded.js';
+import { controlTool, groundedTool } from '../src/acs/grounded.js';
 import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH, fileAnchor, readSettings } from '../src/example/settings.js';
@@ -342,5 +343,140 @@ describe('the evidence notification and export (§6.6)', () => {
     const lines = (await exportEvidenceJsonl(t.state)).split('\n');
     expect(lines.at(-1)).toBe('');
     expect(lines.slice(0, -1).map((l) => JSON.parse(l) as unknown)).toEqual(all);
+  });
+});
+
+// Security round 5, batch 5: only the refusals of a composite's nesting state
+// were redacted. Every other result a grounded call returned (the R407 of a
+// failing secrets function or of a check that could not be completed, the
+// R402 that names an output member, the tool's own error, the F502 with the
+// arguments shown) went back to the runtime, the thread's messages and the
+// model as it was built, though its trace entry was redacted (§6.7: no
+// secret in a diagnostic, §9.8, or a returned Error message).
+describe('what a grounded call returns holds no secret (security round 5, batch 5)', () => {
+  const GH = 'ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8';
+  const REG = 'Zq8vN3pL0wX4-host-db-password';
+  const leaks = (value: unknown) => {
+    const text = JSON.stringify(value);
+    return text.includes(GH) || text.includes(REG);
+  };
+  /** The returned result holds none, and neither does what the thread stores. */
+  const expectClean = (t: ReturnType<typeof memoryThread>, result: ToolResult) => {
+    expect(result.status).toBe('error');
+    expect(leaks(result)).toBe(false);
+    expect(leaks([...t.values.values()].filter((v) => !v.includes('"shown"')))).toBe(false);
+  };
+  const retrieve = (output: () => Promise<Record<string, Json>>, secrets?: () => Promise<readonly string[]>) =>
+    groundedTool({
+      name: 'fetch',
+      capability: 'retrieve',
+      description: 'x',
+      args,
+      ...(secrets !== undefined ? { secrets } : {}),
+      execute: output as never,
+    });
+  const write = (execute: () => Promise<never> = async () => ({ success: true, evidence_anchors: [] }) as never) =>
+    groundedTool({ name: 'write', capability: 'mutate', description: 'x', args, execute });
+
+  it('(a) redacts the R407 of a secrets function that fails', async () => {
+    configureLayer({ secrets: [REG] });
+    try {
+      const t = memoryThread();
+      const tool = retrieve(
+        async () => ({ data: 1, confidence: 1, evidence_anchors: [] }),
+        async () => {
+          throw new Error(`vault login failed with token ${GH} and ${REG}`);
+        },
+      );
+      const result = await tool.execute(t.state, {});
+      expect(result).toMatchObject({ error_code: 'R407' });
+      expect(result.error).toMatch(/secrets could not be read: vault login failed with token \[REDACTED\]/);
+      expectClean(t, result);
+    } finally {
+      resetLayer();
+    }
+  });
+
+  it("(b) redacts the R407 of a check that could not be completed, which quotes the store's error", async () => {
+    configureLayer({ secrets: [REG] });
+    try {
+      const t = memoryThread();
+      const failing = new Proxy(t.state, {
+        get(target, property) {
+          if (property === 'setValue') {
+            return async (key: string, value: unknown) => {
+              if (key.startsWith('acs:approval:')) throw new Error(`write failed: postgres://app:${REG}@db.internal/acs`);
+              return target.setValue(key, value);
+            };
+          }
+          return Reflect.get(target, property) as unknown;
+        },
+      });
+      const result = await write().execute(failing, { key: 'retries' });
+      expect(result).toMatchObject({ error_code: 'R407' });
+      expect(result.error).toMatch(/could not be completed: write failed/);
+      expectClean(t, result);
+    } finally {
+      resetLayer();
+    }
+  });
+
+  it("(c) redacts the tool's own error", async () => {
+    const t = memoryThread();
+    const tool = retrieve(async () => {
+      throw new Error(`GET https://api.example/v1/items?access_token=${GH} returned 500`);
+    });
+    const result = await tool.execute(t.state, {});
+    expect(result.error).toMatch(/^GET https:\/\/api\.example\/v1\/items\?access_token=\[REDACTED\] returned 500$/);
+    expectClean(t, result);
+  });
+
+  it('(d) redacts the R402 that names an output member holding a secret', async () => {
+    const t = memoryThread();
+    const tool = retrieve(async () => ({ data: { [GH]: 18000000000000000 }, confidence: 0.9, evidence_anchors: [] }));
+    const result = await tool.execute(t.state, {});
+    expect(result).toMatchObject({ error_code: 'R402' });
+    expect((result.error_data as { message: string }).message).toContain('[REDACTED]');
+    expectClean(t, result);
+  });
+
+  it('(e) shows the arguments of an F502 with their secrets replaced, its digest that of the values', async () => {
+    const t = memoryThread();
+    const callArgs = { header: `Authorization: Bearer ${GH}` };
+    const result = await write().execute(t.state, callArgs);
+    expect(result).toMatchObject({ error_code: 'F502' });
+    const shown = (result.error_data as { shown: { args: { header: string } }[]; digest: string }).shown;
+    expect(shown[0]?.args.header).toBe('Authorization: Bearer [REDACTED]');
+    // The digest is that of the values the approver decides on (§6.7).
+    expect((result.error_data as { digest: string }).digest).toBe(
+      await digest([{ action: 'write', capability: 'mutate', args: callArgs }] as Json),
+    );
+    expectClean(t, result);
+  });
+
+  it("redacts a control tool's own error result", async () => {
+    configureLayer({ secrets: [REG] });
+    try {
+      const t = memoryThread();
+      const done = controlTool({
+        name: 'done',
+        description: 'x',
+        args,
+        execute: async () => ({ status: 'error', error: `report upload refused ${GH}`, error_data: { dsn: `postgres://a:${REG}@h/d` } }),
+      });
+      const result = await done.execute(t.state, {});
+      expect(result.error).toBe('report upload refused [REDACTED]');
+      expectClean(t, result);
+    } finally {
+      resetLayer();
+    }
+  });
+
+  it('returns a success as the tool gave it (control)', async () => {
+    const t = memoryThread();
+    const tool = retrieve(async () => ({ data: { note: 'plain' }, confidence: 0.9, evidence_anchors: [] }));
+    const result = await tool.execute(t.state, {});
+    expect(result.status).toBe('success');
+    expect(JSON.parse(result.result as string)).toEqual({ data: { note: 'plain' }, confidence: 0.9, evidence_anchors: [] });
   });
 });

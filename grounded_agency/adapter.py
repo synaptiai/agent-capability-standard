@@ -2383,6 +2383,11 @@ class GroundedAgentAdapter:
         asks = self.config.approval != "off"
 
         def decide(decision: str, message: str) -> dict[str, Any]:
+            # The reason is a diagnostic (§9.8) the host's permission flow
+            # shows and passes on: it names the tool the model called, which
+            # may hold a secret, so it is redacted as the call record is
+            # (§6.7; a refusal's `_refuse` already redacted its message).
+            message, _ = self.redactor.redact_text(message)
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -2643,7 +2648,9 @@ class GroundedAgentAdapter:
                         permission_mode=mode,
                         checkpoint_id=tracker.held_by(call) if held and call else None,
                     )
-                    logger.info("PreToolUse asks: %s", message)
+                    logger.info(
+                        "PreToolUse asks: %s", self.redactor.redact_text(message)[0]
+                    )
                     return decide("ask", message)
 
                 self._allow_token(tool_name, tool_input, call=call)

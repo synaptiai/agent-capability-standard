@@ -545,6 +545,15 @@ export interface CheckBindingsOptions {
   hostTakesCheckpoints?: boolean;
   /** Bindings loaded earlier, which an `invokes` name may resolve to. */
   known?: Record<string, BoundTool>;
+  /**
+   * Flags a layer applies to a loaded tool beyond its record, by the record's
+   * `tool`: those the domain profiles it applies raise (§5.21.3), its nested
+   * calls' included, as the layer computed them. They are effective flags,
+   * so they join the tool's: in the bindings returned and in the checks of
+   * the offered tools (V102 for a raised `requires_checkpoint`, F506 for a
+   * host action tied to a tool they make refusable).
+   */
+  raised?: Readonly<Record<string, SafetyFlags>>;
 }
 
 /**
@@ -674,11 +683,14 @@ export function checkBindings(
 
   // 7. Prerequisites of the capabilities each record names.
   const effective: Record<string, BoundTool> = {};
+  const raised = options.raised ?? {};
   for (const [tool, binding] of candidates) {
     const capabilities = capabilitiesOf(binding) as CapabilityId[];
     const approval = resolveApproval(tool);
+    // A control-only tool performs no capability: no profile raises it.
+    const extra = !binding.control && Object.hasOwn(raised, tool) ? raised[tool] : undefined;
     effective[tool] = {
-      ...resolve(tool),
+      ...(extra !== undefined ? joinFlags(resolve(tool), extra) : resolve(tool)),
       capabilities,
       prerequisites: prerequisitesOf(capabilities),
       invokes: [...binding.invokes],

@@ -7031,3 +7031,196 @@ by "the decisions the composite's call counted".
   controls and 7 Write paths; the audit hook's curl lines and records; the
   binding's two scenarios and controls. No CLI or nested agent was
   started; the scratch directories were removed.
+
+### Batch 5: four reported defects
+
+Four defects, each reproduced by an independent verifier on 4d17c00, all in
+the TypeScript binding (and its lint's package function), and reproduced
+again here on 84960fc before any change by the tests below (the binding's
+vitest under `timeout 120` and a 4 GB address-space limit, the memory
+runtime of `test/memory_thread.ts` with a runtime that parses a tool's
+arguments with its zod schema): a grounded call returned, unredacted, the
+R407 of a `secrets` function that threw a vault token, the R407 of a check
+whose store write threw a database password, the tool's own error with a
+token in a URL, an R402 naming an output member that is a token, and an
+F502 whose `error_data.shown` held an `Authorization` header, while its
+trace entries were redacted; a composite whose profiles allow only
+`ok.example` got its nested `notify` sent to `evil.example` once the
+runtime added a zod default (or stripped a key) to the arguments, after a
+person approved the nested call's own request; `lintAgentBindings` passed a
+stop tool whose profiles (its own or the layer's) make it need approval or
+a checkpoint, which its call is then refused for, and `lintPromptTools`
+passed the raised checkpoint with no checkpoint tool offered; and a
+composite running outside an execution (an endpoint's state, or at rest)
+gave its nested grounded call none of its profiles' minimum confidence,
+grounding and destination policies, so an output at confidence 0.12 was
+accepted and counted as executed, and an inner composite's unregistered
+name ran a sender while the outer composite's destination policy was in
+force. None was fixed by an earlier batch: round 4 batch 5 redacted only
+the refusals of `nestingState`; round 4 batch 4 put the composite's output
+rules on the token, which a call takes only by its digest, stated name and
+execution; the lint has read the record alone since S1. Each fix has tests
+that fail on the code before it (below).
+
+#### 1. A grounded tool's returned refusals and failures held secrets its trace entries redact (medium); siblings: a nested result, a control tool's error, the SDK adapter's ask reason
+
+Only `nestingState`'s refusals went through `redactedRefusal`. Every other
+result `execute` returned (each `refusal(...)` of `check` and `execute`,
+the R402 built from `cause.diagnostic`, `{status: 'error', error:
+message}` for the tool's own error, the F502 with `shown`) reached the
+runtime, the thread's messages and the model as built, though §6.7 keeps
+secrets out of a diagnostic (§9.8) and a returned Error message.
+
+- Fix (`grounded.ts`): the call is `callOf`, which notes the secrets it
+  read; `execute` returns its result as it is when it is a success and
+  through `redactedRefusal` (the call's secrets, the default patterns and
+  the layer's; the layer's alone when the secrets could not be read)
+  otherwise. An F502's `shown` arguments have their secrets replaced, and
+  its `digest` stays that of the values (§6.7: a channel may show them
+  with secrets replaced); the approvals endpoint still shows the request's
+  values, which the approver decides on.
+- Sibling: the nesting state's `invokeTool` redacts every result that is
+  not a success, whichever tool the runtime ran (a nested grounded call's
+  own failure through it, a nested plain tool's own error, which the trace
+  redacted); `controlTool` redacts its own error result.
+- Sibling (Python): the SDK adapter's PreToolUse `decide` built an ask's
+  reason (`_approval_request`, F502) with the tool's name verbatim, though
+  the call record redacted it; a refusal's reason came from `_refuse`,
+  already redacted. `decide` now redacts every reason, and the ask's log
+  line is redacted too. The plugin's pre-tool-use hook already gave
+  `[REDACTED]` for such a name (round 5 batch 2).
+- Observed, not changed: the redactors' default patterns read a token only
+  at a word boundary, so `mcp__srv__ghp_...` keeps its token in both the
+  binding and the adapter (a registered value is replaced anywhere); the
+  plugin's hooks read a name by a grammar instead. §6.7 leaves the
+  recogniser to the host.
+- Tests: `evidence.test.ts` "what a grounded call returns holds no secret"
+  (the five reported cases, a control tool's error, a success unchanged)
+  and `nesting.test.ts` "what an invocation through a composite's state
+  returns holds no secret" (a nested grounded failure and a nested plain
+  error, a nested success unchanged); `tests/test_redaction.py`
+  `test_layer_asks_with_no_secret_in_its_reason` (a token and a registered
+  value). On 84960fc's `grounded.ts` 8 of 10 binding tests fail (the two
+  controls pass); on its `adapter.py` both Python cases fail.
+
+#### 2. A nested send whose arguments the runtime validates escaped the composite's profile destination policy (medium); siblings: grounding and minimum confidence, a listed tool stating another name
+
+`check` took the enclosing destination policies, grounding policies and
+minimum confidence only from the token `findToken` matched, by the
+arguments' digest, the stated name and the execution. The runtime gives a
+tool its validated arguments, so a zod `.default()`, `.transform()` or a
+stripped key changed the digest, and a listed tool whose stated name is
+not the name it is invoked under never matched: the nested call was
+checked on its own, against the layer's policies and its own profiles'.
+
+- Fix: `pendingRules` joins the rules of every token pending in the thread
+  for the tool (by the invoked name or by the listed tool itself, the new
+  `listed` member), whether or not the call takes one, used or not, open or
+  not; `check` applies them to the send (before approval) and the output
+  (`enclosing`, `enclosingGrounding`, `enclosingMinimum`), and a composite
+  passes them on to its own nesting state. Coverage is unchanged: such a
+  call takes no token and asks its own approval and checkpoint. The layer
+  cannot tell such a nested call from another call of the tool made at that
+  moment (a parallel call, an endpoint's), so it holds that call to the
+  rules too (§5.18.10: a layer that cannot tell refuses).
+- Considered, not changed: a call queued through a composite's state runs
+  after the composite's call as a call of its own (§5.18.4) with the layer's
+  and the tool's own policies, which a direct call has too; a tool invoked
+  in another realm finds no token (host gap 1 of the statement).
+- Tests: `nesting.test.ts` "the rules of a composite's profiles reach its
+  nested grounded calls whatever the token": the reported zod default and a
+  stripped key (F504 twice, nothing sent, no request of the nested call
+  made), a listed tool stated as `notify_v2`, a minimum confidence and a
+  grounding policy with changed arguments; controls with the arguments
+  unchanged (F504, as before) and an allowed destination (asks its own
+  approval). On 84960fc's `grounded.ts` 4 of these fail.
+
+#### 3. `lintAgentBindings` missed F506 for a stop tool its profiles make refusable (medium); sibling: `lintPromptTools` V102
+
+The lint built records from the annotations (`annotationRecord` drops the
+effective-flag copies) and `checkBindings` computed the flags from the
+ontology and the declared flags, without the domain profiles the tool
+applies, which raise effective flags (§5.21.3).
+
+- Fix (package): `checkBindings` takes `raised`, the flags a layer applies
+  to a loaded tool beyond its record by its `tool`, joined into its
+  effective flags (in what it returns and in the checks of the offered
+  tools); a control-only tool is never raised. Binding: `computedFlags`
+  (`grounded.ts`) gives a tool's computed flags (`EFFECTIVE`), and
+  `recordsOf` passes them for each tool defined here to both lints.
+- Python: `check_offered` checks the mappings it is given; the mapper's
+  `map_tool` gives them with the profiles' flags (`_apply_profiles`), so it
+  agrees when given those (docstring and `claude_agent_sdk.md` say so).
+- Tests: `grounded.test.ts` "flags the applied profiles raise" (the tool's
+  own profiles and the layer's raising approval, F506 with the call F502;
+  a raised checkpoint, F506, and V102 until a checkpoint tool is offered,
+  with the call F501; a control); the package's `bindings.test.ts` "flags a
+  layer raises beyond the record" (F506, V102, a control-only tool and an
+  unnamed tool not raised); `tests/test_profiles.py`
+  `test_check_offered_reads_the_flags_the_profiles_raise` (healthcare:
+  F506 with `map_tool`'s mapping, none with the record's alone). On
+  84960fc's `lint.ts` 3 of 4 binding tests fail, and on its `binding.ts` 2
+  of 3 package tests (the controls pass); the Python test passes on both
+  (no Python code changed).
+
+#### 4. A composite running outside an execution issued no nesting token, so its profiles' rules skipped its nested grounded calls (medium); sibling: an enclosing destination policy and unregistered names
+
+`nestingState.invokeTool` returned `state.invokeTool(tool, args)` for a
+flow-null composite before any token was built, so the composite's
+grounding, minimum confidence and destination policies (its profiles' and
+those enclosing it) never reached a nested grounded call, though a plain
+one got them from `invokePlain`; and a nested composite's own nesting
+state lacked the enclosing destination policy, which `refusalOf` reads for
+an unregistered name.
+
+- Fix: the early return is gone; a flow-null composite issues tokens too
+  (`flow: string | null`). `findToken` still matches none outside an
+  execution, so they cover nothing (no approval or checkpoint authorises
+  such a call), and `pendingRules` carries their rules (#2).
+- Tests: in the same `nesting.test.ts` block: a nested output below the
+  minimum confidence (F504) or not grounded (F505), recorded `failed` and
+  not counted as executed, in an execution, in an endpoint's state and at
+  rest; an inner composite's unregistered name refused (F504, nothing sent)
+  under the outer composite's destination policy from an endpoint's state;
+  a control output that meets the rules in no execution. On 84960fc's
+  `grounded.ts` 3 of these fail (the execution case and the control pass).
+
+#### Documentation
+
+SECURITY.md (the binding's secrets bullet: every result redacted, an
+F502's `shown`, the adapter's decision reasons; the SL paragraph: rules on
+every call of a tool with a pending invocation, the lint's computed flags,
+`check_offered`), the Standard Agents guide (the secrets bullet, a
+composite's "Rules that reach a nested call without a token", the lint
+table, the guarantees row on tokens), the binding's statement (host gap 2:
+a changed argument or new execution asks its own approval, the rules still
+apply), `claude_agent_sdk.md` (`check_offered` with `map_tool`'s
+mappings), `grounded.ts` and `lint.ts` comments, CHANGELOG [Unreleased]
+Upgrading (Python tool calls; the binding's composites and secrets
+entries; the package and lint entry). The Standard's text was not changed:
+§6.7 already keeps secrets out of a diagnostic and a returned Error
+message, §5.21.3 makes raised flags effective flags (§5.18.3 F506 reads
+those), and a layer may hold a call it cannot attribute to stricter rules
+(§5.18.4 checks it as a call of its own; §5.18.10).
+
+#### Checks after batch 5
+
+- Python: `pytest tests/` file by file, each run under `timeout 120` and a
+  4 GB address-space limit (`tests/test_skill_hooks.py` and
+  `tests/test_redaction.py` by test, in runs of at most 60 and 120, their
+  timing tests in runs of 8): 8099 passed, 19 skipped, none failed (the
+  three new tests included). ruff check and format with CI's lists; mypy;
+  every `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py
+  --strict` and every domain catalog and example `--strict`;
+  `sync_skill_schemas.py --check` and the five generators' `--check`;
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build, check and test (2077 passed: three new
+  `raised` tests); the binding's check and test (293 passed, 2 skipped: 25
+  new).
+- Old code: the new tests against 84960fc's `grounded.ts` and `lint.ts`
+  (copied in place, then restored): 18 of 25 fail, the 7 controls (and the
+  in-execution case, which the token already covered) pass; against its
+  `binding.ts`, 2 of 3 package tests fail; against its `adapter.py`, both
+  Python ask cases fail.
+- No CLI or nested agent was started; the scratch outputs were removed.

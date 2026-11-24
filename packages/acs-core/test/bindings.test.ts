@@ -106,6 +106,37 @@ describe('parseRecord', () => {
   });
 });
 
+// Security round 5, batch 5: flags the domain profiles a layer applies raise
+// are effective flags (§5.21.3), which a record does not state; a layer
+// passes them as `raised`, so the offered-tool checks see them.
+describe('flags a layer raises beyond the record (§5.21.3)', () => {
+  const finish = { tool: 'finish', ontology: '2.2.0', capability: 'classify' };
+  const approval = { risk: 'low', mutation: false, requires_checkpoint: false, requires_approval: true } as const;
+  const checkpoint = { risk: 'low', mutation: false, requires_checkpoint: true, requires_approval: false } as const;
+  const codes = (records: unknown[], options: Parameters<typeof checkBindings>[1]) =>
+    checkBindings(records, options).diagnostics.map((d) => [d.code, d.location.tool]);
+
+  it('reports F506 for a host action tied to a tool they make need approval, and joins them into its flags', () => {
+    const options = { offered: { finish: 'finish' }, hostActions: [{ action: 'stopTool', tool: 'finish' }] };
+    expect(codes([finish], options)).toEqual([]);
+    expect(codes([finish], { ...options, raised: { finish: approval } })).toEqual([['F506', 'finish']]);
+    expect(checkBindings([finish], { raised: { finish: approval } }).effective['finish']).toMatchObject({ requires_approval: true });
+  });
+
+  it('reports V102 for a raised requires_checkpoint when no offered tool takes one', () => {
+    const save = { tool: 'save', ontology: '2.2.0', capability: 'checkpoint' };
+    expect(codes([finish], { offered: { finish: 'finish' }, raised: { finish: checkpoint } })).toEqual([['V102', 'finish']]);
+    expect(codes([finish, save], { offered: { finish: 'finish', save: 'save' }, raised: { finish: checkpoint } })).toEqual([]);
+  });
+
+  it('raises no control-only tool, and no tool it does not name', () => {
+    const stop = { tool: 'stop', ontology: '2.2.0', control: true };
+    const options = { offered: { stop: 'stop', finish: 'finish' }, hostActions: [{ action: 'stopTool', tool: 'stop' }] };
+    expect(codes([stop, finish], { ...options, raised: { stop: approval } })).toEqual([]);
+    expect(checkBindings([stop, finish], { raised: { stop: approval } }).effective['finish']).toMatchObject({ requires_approval: false });
+  });
+});
+
 describe('diagnostic fields (§9.8: keys joined by a dot)', () => {
   it('names a weaker flag by its path in the record', () => {
     const { diagnostics } = checkBindings([

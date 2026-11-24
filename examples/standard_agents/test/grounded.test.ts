@@ -1,6 +1,6 @@
 import { validateAgentDefinition, type HookToolCall, type PackedExports, type ToolResult } from '@standardagents/spec';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import approvalsGet from '../agents/api/acs/approvals.get.js';
 import approvalsPost from '../agents/api/acs/approvals.post.js';
@@ -19,11 +19,13 @@ import {
   readApproval,
   type ApprovalPolicy,
 } from '../src/acs/approval.js';
-import { digest } from '@synaptiai/acs-core';
+import { digest, type Json } from '@synaptiai/acs-core';
+import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
-import { resetLayer } from '../src/acs/layer.js';
+import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
-import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
+import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
+import { bindingProfiles } from '../src/acs/profiles.js';
 import { KEYS, readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
 import annotationSchema from '../../../schemas/interop/standard_agents_annotation.schema.json' with { type: 'json' };
@@ -1201,6 +1203,67 @@ describe('the agent definition', () => {
     expect(lintAgentBindings(unbound, { ...tools, web_search: {} }).map((d) => [d.code, d.location.tool])).toEqual([
       ['F506', 'web_search'],
     ]);
+  });
+
+  // Security round 5, batch 5: the lint read each tool's flags from its
+  // record alone, so a tool whose domain profiles (its own or the layer's)
+  // raise `requires_approval` or `requires_checkpoint` (§5.21.3: effective
+  // flags) passed F506 and V102, and its call was refused while the stop
+  // action still fired.
+  describe('flags the applied profiles raise (security round 5, batch 5)', () => {
+    afterEach(() => resetLayer());
+    const profiles = (flags: (c: CapabilityId) => Partial<ProfileFlags>) =>
+      bindingProfiles(
+        {
+          checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+          profileFlags: (_p: Json[], c: CapabilityId): ProfileFlags => ({ ...effectiveFlags(c).flags, person: false, ...flags(c) }),
+          profilePolicy: (): ProfilePolicy => ({ minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} }),
+        },
+        [{ domain: 'core' }],
+      );
+    const human = profiles(() => ({ requires_approval: true, person: true }));
+    const always = profiles((c) => (c === 'checkpoint' ? {} : { requires_checkpoint: true }));
+    const finishing = { name: 'finisher', sideA: { prompt: 'p', stopTool: 'finish' }, sideB: { human: true } } as const;
+    const finishOf = (capability: 'classify' | 'retrieve', given?: ReturnType<typeof profiles>) =>
+      groundedTool({
+        name: 'finish',
+        capability,
+        description: 'finish',
+        args: z.object({}).passthrough(),
+        ...(given !== undefined ? { profiles: given } : {}),
+        execute: async () => ({ labels: ['done'], data: 1, confidence: 1, evidence_anchors: [] }) as never,
+      });
+
+    it("reports F506 for a stop tool a tool's own profiles make need approval, which its call is refused for", async () => {
+      const finish = finishOf('classify', human);
+      expect(acsAnnotation(finish)?.requires_approval).toBe(true);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it("reports F506 for a stop tool the layer's profiles make need approval", async () => {
+      configureLayer({ profiles: human });
+      const finish = finishOf('retrieve');
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it('reports F506 for a stop tool the profiles make need a checkpoint, and V102 when no checkpoint tool is offered', async () => {
+      const finish = finishOf('retrieve', always);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect(lintPromptTools('p', { finish }).map((d) => [d.code, d.location])).toEqual([
+        ['V102', { prompt: 'p', tool: 'finish', capability: 'retrieve', prerequisite: 'checkpoint' }],
+      ]);
+      expect(lintPromptTools('p', { finish, checkpoint_config: checkpointConfig })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F501');
+    });
+
+    it('reports nothing for a stop tool no profile raises (control)', async () => {
+      const finish = finishOf('retrieve', profiles(() => ({})));
+      expect(lintAgentBindings(finishing, { finish })).toEqual([]);
+      expect(lintPromptTools('p', { finish })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).status).toBe('success');
+    });
   });
 
   it('offers only grounded tools, each with an annotation the schema accepts', () => {

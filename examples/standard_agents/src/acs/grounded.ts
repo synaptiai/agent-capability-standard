@@ -37,7 +37,13 @@
  * composite's approval and checkpoint only if it takes a token that matches
  * its execution, its name and its arguments, and only if the decisions that
  * approved the composite are valid for its own approval. Same thread or
- * execution is not evidence that the composite's own code made the call. An
+ * execution is not evidence that the composite's own code made the call.
+ * The rules of the composite's profiles (destination policies, grounding,
+ * minimum confidence) apply to every call of the tool while the invocation
+ * is pending, whether or not it takes the token: the runtime may change the
+ * arguments it validates, and a composite outside an execution issues
+ * tokens that cover nothing. Every result that is not a success is
+ * returned redacted (§6.7), as its trace entry is written. An
  * invocation of a listed tool defined with plain `defineTool` and a binding
  * record is checked and recorded by the composite's nesting state itself,
  * what it returns included, and runs only under a name `registerTools`
@@ -273,7 +279,11 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * destination policies for this
    * tool's `send` calls (§4.4.2; see `configureLayer`) and, for a
    * composite, for the sends its code invokes at any depth: each nested
-   * call the binding attributes to it (§5.18.4).
+   * call the binding attributes to it (§5.18.4), and each call of a tool
+   * while the composite's invocation of it is pending, which the binding
+   * cannot tell from it (the runtime may change the arguments it
+   * validates). Its output rules reach those calls the same way, the
+   * composite's own call made in an execution or not.
    */
   profiles?: BindingProfiles;
   /**
@@ -351,9 +361,12 @@ function refusal(
 /**
  * A refusal or failure the layer returns with every secret in its `error`
  * and its diagnostic replaced (STANDARD 1.2.0 §6.7: no secret in a
- * diagnostic): the default patterns, the secrets registered layer-wide and
- * `secrets`. A nested call's refusal names the tool a composite's code
- * invoked, a name its arguments or a prompt can choose.
+ * diagnostic or a returned Error message): the default patterns, the
+ * secrets registered layer-wide and `secrets`. Every result a grounded
+ * call or a composite's nesting state returns that is not a success passes
+ * through it: a nested call's refusal names the tool a composite's code
+ * invoked, a name its arguments or a prompt can choose, and a call's own
+ * may quote a store's error, an output member or the arguments shown.
  */
 function redactedRefusal(result: ToolResult, secrets: readonly string[]): ToolResult {
   const values = [...secrets, ...layerSecrets()];
@@ -368,6 +381,17 @@ const STATED_NAMES = new WeakMap<object, string>();
 
 /** The effective flags each tool defined here computed for itself. */
 const EFFECTIVE = new WeakMap<object, SafetyFlags>();
+
+/**
+ * The effective flags a tool defined with `groundedTool` or `controlTool`
+ * computed for itself: its capabilities', the tools it invokes' and those
+ * the applied domain profiles raise (§5.21.3), its own and the layer's,
+ * which its record does not state. The lint checks with them (F506, V102),
+ * as the tool's calls are checked. Undefined for any other tool.
+ */
+export function computedFlags(tool: object): SafetyFlags | undefined {
+  return EFFECTIVE.get(tool);
+}
 
 /**
  * The tools defined here whose calls an applied domain profile requires a
@@ -566,8 +590,12 @@ interface NestingToken {
    * covered only when they are valid for its own approval too (§5.18.4).
    */
   authority: ApprovalRecord | null;
-  flow: string;
+  /** The composite's execution, or null for one running outside any (an endpoint, an effect): such a token covers nothing. */
+  flow: string | null;
+  /** The name the composite's code invoked. */
   tool: string;
+  /** The tool the composite lists under that name. */
+  listed: object;
   digest: string;
   used: boolean;
 }
@@ -583,13 +611,46 @@ function highest(a: number | null, b: number | null): number | null {
 /**
  * The token of a pending invocation that matches this call, if any, while
  * the composite that made it still runs; taking it (`used`) is the
- * caller's, once the checks that precede coverage passed.
+ * caller's, once the checks that precede coverage passed. A call outside an
+ * execution takes none: neither an approval nor a checkpoint authorises it.
  */
 function findToken(thread: string, flow: string | null, tool: string, argsDigest: string): NestingToken | undefined {
   if (flow === null) return undefined;
   return (TOKENS.get(thread) ?? []).find(
     (t) => !t.used && t.scope.open && t.flow === flow && t.tool === tool && t.digest === argsDigest,
   );
+}
+
+/** The rules enclosing composites put on a call (§4.4.2, §5.20, §5.21.3). */
+interface EnclosingRules {
+  destinations: readonly (readonly string[])[];
+  grounding: readonly GroundingPolicy[];
+  minimumConfidence: number | null;
+}
+
+/**
+ * The rules of every composite whose invocation of this tool is pending in
+ * the thread: the destination policies, grounding policies and minimum
+ * confidence its token carries (its profiles' and those of the composites
+ * enclosing it), joined, so a send must be allowed by each and an output
+ * must pass each. They apply whether or not the call takes a token
+ * (coverage, `findToken`): the runtime gives a tool its validated arguments
+ * (a zod default or transform, a key stripped), which change the digest; a
+ * listed tool may state another name than the one it is invoked under; and
+ * a composite running outside an execution issues tokens that cover
+ * nothing. The layer cannot tell such a nested call from another call of
+ * the tool made at that moment (a parallel call, an endpoint's), so it
+ * applies them to both rather than drop them (§5.18.10: a layer that cannot
+ * tell refuses). A token counts while it is pending, whether or not the
+ * composite still runs or a call took it.
+ */
+function pendingRules(thread: string, tool: string, definition: object): EnclosingRules {
+  const tokens = (TOKENS.get(thread) ?? []).filter((t) => t.tool === tool || t.listed === definition);
+  return {
+    destinations: tokens.flatMap((t) => t.destinations),
+    grounding: tokens.flatMap((t) => t.grounding),
+    minimumConfidence: tokens.reduce<number | null>((m, t) => highest(m, t.minimumConfidence), null),
+  };
 }
 
 /**
@@ -1021,7 +1082,8 @@ function nestingState(
     return result;
   };
 
-  const invokeTool = async (tool: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
+  /** An invocation, before its result is redacted (`invokeTool`). */
+  const invokeChecked = async (tool: string, args: Record<string, unknown>): Promise<ToolResult> => {
     const refused = refusalOf(tool);
     if (refused !== null) {
       await recordRefusal(tool, refused.result, refused.attributed);
@@ -1029,7 +1091,9 @@ function nestingState(
     }
     const plain = composite.plain.get(tool);
     if (plain !== undefined) return invokePlain(tool, plain, args);
-    if (composite.flow === null) return state.invokeTool(tool, args);
+    // A composite running outside an execution issues a token too: it covers
+    // nothing (`findToken`), but carries the rules its profiles and those
+    // enclosing it put on the call (`pendingRules`).
     let digest: string;
     try {
       digest = await digestOf(args as Json);
@@ -1067,6 +1131,7 @@ function nestingState(
       authority: composite.authority,
       flow: composite.flow,
       tool,
+      listed: composite.invokes[tool]!,
       digest,
       used: false,
     };
@@ -1081,6 +1146,17 @@ function nestingState(
       if (at >= 0) list.splice(at, 1);
       if (list.length === 0) TOKENS.delete(state.threadId);
     }
+  };
+
+  /**
+   * An invocation through the composite's state. What it returns that is
+   * not a success reaches the composite's code, and through it the runtime
+   * and the model, so it is redacted (§6.7) whichever tool the runtime ran:
+   * a plain tool's own error included, as its trace entry is.
+   */
+  const invokeTool = async (tool: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
+    const result = await invokeChecked(tool, args);
+    return result.status === 'success' ? result : redactedRefusal(result, composite.secrets);
   };
 
   /**
@@ -1457,13 +1533,16 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
 
       // The pending invocation of a running composite this call is, if any
-      // (§5.18.4): the destination policies and the output rules of the
-      // profiles given to it and to the composites enclosing it, and their
-      // grounding policies, reach this call (§5.20, §5.21.3).
+      // (§5.18.4), which may cover it. The destination policies and the
+      // output rules of the profiles given to each composite whose
+      // invocation of this tool is pending, and to the composites enclosing
+      // it, and their grounding policies, reach this call whether or not it
+      // takes that token (§5.20, §5.21.3; `pendingRules`).
       const token = used.args_digest === undefined ? undefined : findToken(state.threadId, flow, name, used.args_digest);
-      const enclosing = token?.destinations ?? [];
-      const enclosingGrounding = token?.grounding ?? [];
-      const enclosingMinimum = token?.minimumConfidence ?? null;
+      const rules = pendingRules(state.threadId, name, definition);
+      const enclosing = rules.destinations;
+      const enclosingGrounding = rules.grounding;
+      const enclosingMinimum = rules.minimumConfidence;
 
       // A send whose destination a policy in force does not allow, or
       // whose destination is not a string, is refused before approval and
@@ -1735,10 +1814,16 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     }
   };
 
-  const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
+  /**
+   * One call, from reading the secrets to its outcome. `read` holds the
+   * secrets the call read, once it has, for `execute` to redact its result
+   * with.
+   */
+  const callOf = async (state: ThreadState, args: z.infer<Args>, read: { secrets: readonly string[] }): Promise<ToolResult> => {
     let secrets: readonly string[];
     try {
       secrets = await secretsOf(state);
+      read.secrets = secrets;
     } catch (cause) {
       // The layer cannot tell what the call's data may hold, so it refuses
       // the call (R407, §5.18.8) and records the refusal as it records any
@@ -1949,6 +2034,22 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     return { status: 'success', result: text };
   };
 
+  /**
+   * A call, whose refusal or failure is returned redacted (§6.7): each is a
+   * §9.8 diagnostic or an Error message (an R407 quoting a store's or a
+   * secrets function's error, an R402 naming an output member, the tool's
+   * own error, an F502 showing the arguments) that reaches the runtime, the
+   * thread's messages and the model, as its trace entry is redacted. The
+   * secrets are the call's, or, when it could not read them, the default
+   * patterns and the layer's. An F502's `digest` stays that of the values
+   * shown. A success is the tool's output, as it returned it.
+   */
+  const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
+    const read: { secrets: readonly string[] } = { secrets: [] };
+    const result = await callOf(state, args, read);
+    return result.status === 'success' ? result : redactedRefusal(result, read.secrets);
+  };
+
   const definition = defineTool<ThreadState, Args>({
     description: options.description,
     args: options.args,
@@ -2031,8 +2132,11 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
     } catch (error) {
       onRecordFailure(error);
     }
-    if (options.execute) return options.execute(state, args);
-    return { status: 'success', result: 'ok' };
+    if (!options.execute) return { status: 'success', result: 'ok' };
+    // What it returns that is not a success reaches the runtime and the
+    // model as a grounded tool's error does, so it is redacted (§6.7).
+    const result = await options.execute(state, args);
+    return result.status === 'success' ? result : redactedRefusal(result, []);
   };
 
   const definition = defineTool<ThreadState, Args>({

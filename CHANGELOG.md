@@ -93,6 +93,12 @@ here and marked so.
   the new policy's `min_approvers` above 1 or `role` is F502 too, and its
   `approval.expires` counts from PreToolUse's ask. Register a tool before
   its calls, not while one waits for a decision.
+- Python SDK, tool calls (security round 5, batch 5): the reason of every
+  PreToolUse decision, an ask's F502 included, is redacted as the call
+  record is (§6.7): an ask named the tool the model called verbatim, a name
+  that may hold a secret, in the text a host's `can_use_tool` callback and
+  permission prompt show. `check_offered` is unchanged; give it the
+  mappings `adapter.mapper.map_tool` gives under domain profiles (below).
 - Python SDK, `wrap_options()` (Changed): tools pre-approved in
   `allowed_tools` now count against the rate limit (raise
   `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
@@ -1526,6 +1532,17 @@ here and marked so.
   userinfo password and an `Authorization` header's value included.
 - Standard Agents binding: `LintDiagnostic.code` gains `V107` and
   `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+- TypeScript package and Standard Agents binding, the lint (security round
+  5, batch 5): `checkBindings` takes `raised`, the flags a layer applies to
+  a loaded tool beyond its record (those its domain profiles raise,
+  §5.21.3), joined into the tool's effective flags and the checks of the
+  offered tools. `lintAgentBindings` and `lintPromptTools` pass the flags
+  each tool defined with `groundedTool` computed (`computedFlags`), so a
+  stop or session action tied to a tool whose profiles, or the layer's,
+  make it need approval or a checkpoint is now F506, and a checkpoint they
+  require that no offered tool takes is V102, where both passed before.
+  The Python SDK's `check_offered` checks the mappings it is given: pass
+  those `adapter.mapper.map_tool` gives, which carry the profiles' flags.
 - TypeScript package: `checkBindings(records, {known})` reports V105 for a
   cycle that runs through the `known` bindings too (a record that invokes a
   known composite that invokes it), and does not load the record, as the
@@ -1579,7 +1596,21 @@ here and marked so.
   deployment attests as an agent's, given to the composite's request, no
   longer covers a nested call that needs a person once the person's
   approval has expired: the nested call is checked as a call of its own
-  (F502 for a plain tool, or its own request for a grounded one).
+  (F502 for a plain tool, or its own request for a grounded one). Security
+  round 5, batch 5: the destination policies and output rules (grounding,
+  minimum confidence) of the profiles given to a composite, and to those
+  enclosing it, now apply to every call of a tool the composite has a
+  pending invocation of, whether or not the call takes the invocation's
+  token: a runtime that gives the tool its validated arguments (a zod
+  `.default()` or `.transform()`, a stripped key) changed their digest, a
+  listed tool that states another name than the one it is invoked under
+  never matched, and a composite running outside an execution (an
+  endpoint, an effect) issued no token, so the nested call ran with none
+  of them. Such a call still asks its own approval and checkpoint; a send
+  those policies forbid is now refused (F504) and an output they refuse
+  fails (F505, F504). Another call of the tool made while the invocation is
+  pending (a parallel call, an endpoint's), which the binding cannot tell
+  from it, is held to them too.
 - Standard Agents binding, composites and plain tools (Standard 1.2.0
   §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
   `defineTool` runs only under a name the new `registerTools` (in
@@ -1645,7 +1676,17 @@ here and marked so.
   composite's state returns for a nested call (or throws, for
   `queueTool`) is redacted, the tool it names included. The Python
   adapter's call records, the audit records exported from them and its
-  diagnostics redact the tool's name likewise.
+  diagnostics redact the tool's name likewise. Security round 5 (batch 5):
+  every result a grounded call returns that is not a success is redacted
+  before the runtime stores it and the model reads it, as its trace entry
+  is: the R407 of a `secrets` function that throws or of a check the
+  layer cannot complete (which quoted the store's error), an R402 that
+  names an output member, the tool's own error (which a thrown `Error`'s
+  message becomes), and an F502's `error_data.shown`, whose arguments now
+  have their secrets replaced (its `digest` stays that of the values the
+  approver decides on, which the approvals endpoint still shows); and so is
+  every result a composite's state returns that is not a success, a nested
+  plain tool's own error included, and a control tool's own error result.
 
 **Interoperability data.**
 

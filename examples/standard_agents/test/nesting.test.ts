@@ -1470,3 +1470,298 @@ describe('a nested tool name that holds a secret (security round 4, batch 5)', (
     expect((await readTrace(t.state)).map((e) => e.action)).toEqual(['dispatch', 'lookup']);
   });
 });
+
+// Security round 5, batch 5: a nested grounded call's own refusals and
+// failures, and a nested plain tool's error, reached the composite's code
+// (and through it the runtime and the model) unredacted (§6.7).
+describe("what an invocation through a composite's state returns holds no secret (security round 5, batch 5)", () => {
+  afterEach(() => resetLayer());
+  const GH = 'ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8';
+  const REG = 'Zq8vN3pL0wX4-host-db-password';
+  const args = z.object({}).passthrough();
+  const leaks = (value: unknown) => JSON.stringify(value).includes(GH) || JSON.stringify(value).includes(REG);
+
+  function setup(fetch: ToolResult | (() => Promise<never>), plain: boolean) {
+    const t = memoryThread();
+    const fetchTool = plain
+      ? defineTool({
+          description: 'fetch',
+          args,
+          annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', tool: 'fetch', capability: 'retrieve' } },
+          execute: async () => fetch as ToolResult,
+        })
+      : groundedTool({ name: 'fetch', capability: 'retrieve', description: 'fetch', args, execute: fetch as () => Promise<never> });
+    const nested: ToolResult[] = [];
+    const gather = groundedTool({
+      name: 'gather',
+      capability: 'invoke',
+      invokes: { fetch: fetchTool } as never,
+      description: 'gather',
+      args,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('fetch', {}));
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    registerTools({ fetch: fetchTool, gather });
+    t.tools.set('fetch', fetchTool as never);
+    t.tools.set('gather', gather);
+    return { t, nested };
+  }
+
+  it("redacts a nested grounded call's own failure in what the composite's code receives", async () => {
+    configureLayer({ secrets: [REG] });
+    const { t, nested } = setup(async () => {
+      throw new Error(`GET https://api.example/v1?access_token=${GH} with ${REG} returned 500`);
+    }, false);
+    expect((await run(t, 'gather')).status).toBe('success');
+    expect(nested[0]?.status).toBe('error');
+    expect(nested[0]?.error).toContain('[REDACTED]');
+    expect(leaks(nested)).toBe(false);
+    expect(leaks([...t.values.values()])).toBe(false);
+  });
+
+  it("redacts a nested plain tool's own error in what the composite's code receives", async () => {
+    configureLayer({ secrets: [REG] });
+    const { t, nested } = setup(
+      { status: 'error', error: `upstream refused token ${GH}`, error_data: { detail: `postgres://app:${REG}@db/acs` } },
+      true,
+    );
+    expect((await run(t, 'gather')).status).toBe('success');
+    expect(nested[0]?.status).toBe('error');
+    expect(nested[0]?.error).toBe('upstream refused token [REDACTED]');
+    expect(leaks(nested)).toBe(false);
+    expect(leaks([...t.values.values()])).toBe(false);
+  });
+
+  it("returns a nested call's success as it was (control)", async () => {
+    const { t, nested } = setup({ status: 'success', result: JSON.stringify({ data: 1, confidence: 1, evidence_anchors: [] }) }, true);
+    expect((await run(t, 'gather')).status).toBe('success');
+    expect(nested[0]).toEqual({ status: 'success', result: JSON.stringify({ data: 1, confidence: 1, evidence_anchors: [] }) });
+  });
+});
+
+// Security round 5, batch 5: the rules a composite's profiles put on the
+// nested calls it covers (destination policies, grounding, minimum
+// confidence) reached a nested grounded call only through the token it took,
+// matched by its arguments' digest, its stated name and its execution. A
+// runtime that validates the arguments before the tool sees them (a zod
+// default or a stripped key), a listed tool that states another name than
+// the one it is invoked under, and a composite running outside an execution
+// (an endpoint, an effect) each left the nested call with none of them.
+describe("the rules of a composite's profiles reach its nested grounded calls whatever the token (security round 5, batch 5)", () => {
+  afterEach(() => resetLayer());
+  const OK = 'https://ok.example/inbox';
+  const EVIL = 'https://evil.example/collect';
+  const passthrough = z.object({}).passthrough();
+
+  const profilesOf = (policy: Partial<ProfilePolicy>) =>
+    bindingProfiles(
+      {
+        checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+        profileFlags: (_p: Json[], capability: CapabilityId): ProfileFlags => ({ ...effectiveFlags(capability).flags, person: false }),
+        profilePolicy: (): ProfilePolicy => ({ minimum_confidence: null, grounding: [], destinations: [], trust_weights: {}, ...policy }),
+      },
+      [{ domain: 'core' }],
+    );
+  const saveTool = () =>
+    groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args: passthrough,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+
+  /**
+   * `relay` (invoke, its profiles allowing only ok.example) lists the
+   * grounded send `notify`, stated as `stated`, whose arguments the runtime
+   * validates with `notifyArgs` before notify sees them.
+   */
+  function relaySetup(mode: 'asis' | 'default' | 'strip', stated = 'notify') {
+    const t = memoryThread();
+    const sent: string[] = [];
+    const notifyArgs = z.object({ to: z.string(), body: z.string(), cc: z.array(z.string()).default([]) });
+    const notify = groundedTool({
+      name: stated,
+      capability: 'send',
+      destination: '/to',
+      description: 'notify',
+      args: notifyArgs,
+      execute: async (_s, a) => {
+        sent.push(a.to);
+        return { sent: true, evidence_anchors: [] };
+      },
+    });
+    const nested: ToolResult[] = [];
+    const relay = groundedTool({
+      name: 'relay',
+      capability: 'invoke',
+      invokes: { notify } as never,
+      profiles: profilesOf({ destinations: [['https://ok.example/*']] }),
+      description: 'relay',
+      args: passthrough,
+      execute: async (state, a) => {
+        const extra = mode === 'strip' ? { trace_id: 'x' } : mode === 'asis' ? { cc: [] } : {};
+        nested.push(await state.invokeTool('notify', { to: a['to'], body: 'hi', ...extra }));
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    const save = saveTool();
+    registerTools({ notify, relay, save });
+    // The runtime gives a tool its validated arguments (spec ToolDefinition).
+    t.tools.set('notify', { execute: (s, a) => notify.execute(s, notifyArgs.parse(a)) });
+    t.tools.set('relay', relay);
+    t.tools.set('save', save);
+    return { t, sent, nested };
+  }
+
+  for (const mode of ['asis', 'default', 'strip'] as const) {
+    it(`refuses a nested send to a destination the composite's profiles forbid, its arguments validated by the runtime (${mode})`, async () => {
+      const { t, sent, nested } = relaySetup(mode);
+      for (let round = 0; round < 2; round++) {
+        await approve(t, 'relay', 'invoke', { to: EVIL });
+        await run(t, 'save');
+        expect((await run(t, 'relay', { to: EVIL })).status).toBe('success');
+        expect(nested.at(-1)?.error_code).toBe('F504');
+        expect(nested.at(-1)?.error).toContain('destination');
+      }
+      expect(sent).toEqual([]);
+      // No approval of its own is asked: the policy refuses before approval.
+      expect(JSON.stringify([...t.values.values()].filter((v) => v.includes('"shown"')))).not.toContain('"notify"');
+    });
+  }
+
+  it('runs a nested send the composite profiles allow, checked on its own once the runtime changed its arguments (control)', async () => {
+    const { t, sent, nested } = relaySetup('default');
+    await approve(t, 'relay', 'invoke', { to: OK });
+    await run(t, 'save');
+    expect((await run(t, 'relay', { to: OK })).status).toBe('success');
+    // Not covered (the arguments it runs with are not those invoked): its own approval is asked.
+    expect(nested.at(-1)?.error_code).toBe('F502');
+    expect(sent).toEqual([]);
+  });
+
+  it('applies them to a listed tool that states another name than the one it is invoked under', async () => {
+    const { t, sent, nested } = relaySetup('asis', 'notify_v2');
+    await approve(t, 'relay', 'invoke', { to: EVIL });
+    await run(t, 'save');
+    expect((await run(t, 'relay', { to: EVIL })).status).toBe('success');
+    expect(nested.at(-1)?.error_code).toBe('F504');
+    expect(sent).toEqual([]);
+  });
+
+  /** `review` (retrieve, its profiles setting a minimum confidence and grounding) lists the grounded `label`. */
+  function reviewSetup(output: Record<string, Json>, parse?: z.ZodType) {
+    // Each setup registers its own tools under the same names.
+    resetLayer();
+    const t = memoryThread();
+    const label = groundedTool({
+      name: 'label',
+      capability: 'classify',
+      description: 'label',
+      args: passthrough,
+      execute: async () => output as never,
+    });
+    const nested: ToolResult[] = [];
+    const review = groundedTool({
+      name: 'review',
+      capability: 'retrieve',
+      invokes: { label } as never,
+      profiles: profilesOf({ minimum_confidence: 0.9, grounding: [{ require: ['classify'], kinds: ['file'] }] }),
+      description: 'review',
+      args: passthrough,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('label', { text: 'x' }));
+        return { data: 1, confidence: 1, evidence_anchors: [] };
+      },
+    });
+    registerTools({ label, review });
+    t.tools.set('label', parse === undefined ? label : { execute: (s, a) => label.execute(s, parse.parse(a) as Record<string, unknown>) });
+    t.tools.set('review', review);
+    return { t, nested };
+  }
+  const low = { labels: ['benign'], confidence: 0.12, evidence_anchors: [{ ref: 'file:a', kind: 'file' }] };
+  const ungrounded = { labels: ['benign'], confidence: 0.95, evidence_anchors: [] };
+
+  for (const where of ['execution', 'endpoint', 'rest'] as const) {
+    it(`fails a nested grounded call's output below the composite's minimum confidence, or not grounded, run in ${where === 'execution' ? 'an execution' : `no execution (${where})`}`, async () => {
+      for (const [output, code] of [
+        [low, 'F504'],
+        [ungrounded, 'F505'],
+      ] as const) {
+        const { t, nested } = reviewSetup(output);
+        const state = where === 'endpoint' ? t.endpointState() : t.state;
+        if (where === 'rest') t.atRest();
+        expect((await t.tools.get('review')!.execute(state, {})).status).toBe('success');
+        expect(nested[0]?.error_code).toBe(code);
+        const entry = (await readTrace(t.state)).find((e) => e.action === 'label')!;
+        expect(entry).toMatchObject({ status: 'failed', code });
+        expect(await readExecuted(t.state)).not.toHaveProperty('classify');
+      }
+    });
+  }
+
+  it("fails a nested grounded call's output below the minimum when the runtime changed its arguments", async () => {
+    const { t, nested } = reviewSetup(low, z.object({ text: z.string(), lang: z.string().default('en') }));
+    expect((await run(t, 'review')).status).toBe('success');
+    expect(nested[0]?.error_code).toBe('F504');
+  });
+
+  it('accepts a nested output that meets them, in no execution (control)', async () => {
+    const { t, nested } = reviewSetup({ labels: ['benign'], confidence: 0.95, evidence_anchors: [{ ref: 'file:a', kind: 'file' }] });
+    expect((await t.tools.get('review')!.execute(t.endpointState(), {})).status).toBe('success');
+    expect(nested[0]?.status).toBe('success');
+    expect(await readExecuted(t.state)).toMatchObject({ classify: 1 });
+  });
+
+  it("refuses an unregistered name a nested composite lists while an enclosing composite's destination policy is in force, in no execution", async () => {
+    const t = memoryThread();
+    const sent: string[] = [];
+    const lookup = groundedTool({
+      name: 'lookup',
+      capability: 'retrieve',
+      description: 'lookup',
+      args: passthrough,
+      execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }),
+    });
+    const innerNested: ToolResult[] = [];
+    const inner = groundedTool({
+      name: 'inner',
+      capability: 'retrieve',
+      invokes: { lookup } as never,
+      description: 'inner',
+      args: passthrough,
+      execute: async (state) => {
+        innerNested.push(await state.invokeTool('lookup', { q: 'x' }));
+        return { data: 1, confidence: 1, evidence_anchors: [] };
+      },
+    });
+    const outer = groundedTool({
+      name: 'outer',
+      capability: 'retrieve',
+      invokes: { inner } as never,
+      profiles: profilesOf({ destinations: [['https://ok.example/*']] }),
+      description: 'outer',
+      args: passthrough,
+      execute: async (state) => {
+        await state.invokeTool('inner', {});
+        return { data: 1, confidence: 1, evidence_anchors: [] };
+      },
+    });
+    registerTools({ inner, outer });
+    // What the runtime runs under 'lookup', which registerTools does not name: a send anywhere.
+    t.tools.set('lookup', {
+      execute: async (_s, a) => {
+        sent.push(EVIL);
+        return { status: 'success', result: JSON.stringify({ data: a, confidence: 1, evidence_anchors: [] }) };
+      },
+    });
+    t.tools.set('inner', inner);
+    t.tools.set('outer', outer);
+    expect((await outer.execute(t.endpointState(), {})).status).toBe('success');
+    expect(innerNested[0]?.error_code).toBe('F504');
+    expect(innerNested[0]?.error).toContain('registerTools');
+    expect(sent).toEqual([]);
+  });
+});

@@ -779,6 +779,40 @@ def test_layer_redacts_a_tool_name_that_holds_a_secret(
     assert record["intent"] == f"{record['tool']} call"
 
 
+@pytest.mark.parametrize(
+    ("name", "shown"),
+    [
+        ("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "[REDACTED]"),
+        ("mcp__srv__hk_live_9f8e7d6c5b4a39281706", "mcp__srv__[REDACTED]"),
+    ],
+)
+def test_layer_asks_with_no_secret_in_its_reason(
+    tmp_path: Path, name: str, shown: str
+) -> None:
+    """The reason of an ask (F502), the diagnostic a host's permission flow
+    shows and passes on, named the tool verbatim, though the call record
+    redacted it (§6.7; security round 5, batch 5, the sibling of the
+    binding's unredacted refusals)."""
+    import asyncio
+
+    adapter = _adapter(tmp_path, secret_values=("hk_live_9f8e7d6c5b4a39281706",))
+    record = {"tool": name, "ontology": "2.2.0", "capability": "execute"}
+    assert adapter.mapper.load_bindings([record]) == []
+    hook = adapter._make_pretooluse_safety_hook()
+    out = asyncio.run(
+        hook(
+            {"tool_name": name, "tool_input": {}, "permission_mode": "default"},
+            "t1",
+            None,
+        )
+    )
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert reason.startswith(f"F502 APPROVAL_REQUIRED: {shown} (capability 'execute')")
+    kept = reason + json.dumps(list(adapter.call_records))
+    assert "ghp_aBc" not in kept and "hk_live" not in kept
+
+
 @pytest.mark.parametrize("text", ALLOWED)
 def test_layer_lets_persist_prose_pass(tmp_path: Path, text: str) -> None:
     import asyncio

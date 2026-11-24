@@ -826,7 +826,10 @@ def check_offered(
         offered: Each name the host offers a tool under, mapped to the
             ``tool`` of the record it carries, or ``None`` for none.
         mappings: The loaded bindings by record ``tool``
-            (:func:`load_bindings`).
+            (:func:`load_bindings`), or as a layer maps them: the adapter's
+            mapper (``map_tool``) gives each with the flags the applied
+            domain profiles raise (section 5.21.3), which are effective
+            flags its record does not state; only those given are checked.
         host_actions: ``(action, tool)`` pairs: a host action that takes
             effect whenever ``tool`` is called, such as ending the turn.
         host_takes_checkpoints: The host takes checkpoints itself, so

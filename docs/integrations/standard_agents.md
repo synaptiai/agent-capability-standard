@@ -247,7 +247,15 @@ model family for a child. Two of them touch evidence:
   entry's tool name is redacted as well: the model chooses the name it
   calls, and a composite's code may invoke one its arguments chose, so the
   audit records exported from the trace name the redacted tool, and so do
-  the refusals a composite's state returns. An evidence anchor that held a
+  the refusals a composite's state returns. Every result a grounded call or
+  a composite's state returns that is not a success (a refusal, an R407
+  quoting a store's or a secrets function's error, an R402 naming an
+  output member, the tool's own error, a nested plain tool's error, a
+  control tool's own error result) is
+  redacted the same way before it reaches the runtime, the thread's
+  messages and the model; an F502's `shown` arguments have their secrets
+  replaced, and its `digest` stays that of the values the approver decides
+  on. An evidence anchor that held a
   secret keeps no `digest` of what it cites (its metadata says
   `digest_omitted: secret`): the redacted excerpt would show the text to
   check a guess against.
@@ -711,6 +719,18 @@ export default groundedTool({
   the store or reach the network directly, so the flags it takes from
   `invokes` are a lower bound. Declare `flags` or `additional_capabilities`
   for what it does itself.
+- **Rules that reach a nested call without a token.** The destination
+  policies and output rules of the profiles given to a composite (and to
+  the composites enclosing it) apply to every call of a tool the composite
+  has a pending invocation of, whether or not the call takes the token:
+  the runtime gives a tool its validated arguments (a zod `.default()` or
+  `.transform()`, a key stripped), which change the digest; a listed tool
+  may state another name than the one it is invoked under; and a composite
+  running outside an execution (an endpoint, an effect) issues tokens that
+  cover nothing. Such a call asks its own approval and checkpoint, and its
+  send and output are still checked against those rules. The binding
+  cannot tell it from another call of the tool made at that moment (a
+  parallel call, an endpoint's), so that call is checked against them too.
 
 ### Control tools
 
@@ -858,8 +878,12 @@ offers:
 |---|---|
 | W617 UNBOUND_TOOL (warning) | A tool has no `acs` annotation. Its calls are the strictest case |
 | V111 TOOL_NAME_MISMATCH (error) | A tool states another name than the one the prompt offers it under. An approver would be shown, and the trace would record, another tool's name |
-| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included, so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
-| F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval |
+| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
+| F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval, those the applied profiles require included |
+
+A tool defined with `groundedTool` is checked with the flags it computed,
+those its domain profiles and the layer's raise included (§5.21.3), which
+its record does not state; `checkBindings` takes them as `raised`.
 
 `lintAgentBindings` checks an agent definition. `stopTool`, `sessionStop`,
 `sessionFail` and `sessionStatus` act when the named tool is called
@@ -883,7 +907,7 @@ parent the model's text for an action that never ran. Bind a
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
-| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force (the layer's, nor one of the profiles given to the composite, to a composite enclosing it, or to the listed tool or a tool it invokes), a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm finds none and is checked as a call of its own, without the rules of the composite's profiles. One invoked in a new execution, or with arguments the runtime changed (a default, a key stripped), takes no token either and asks its own approval and checkpoint, which can refuse a call the composite needed; the destination policies and output rules of the composites with a pending invocation of the tool still apply to it. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force (the layer's, nor one of the profiles given to the composite, to a composite enclosing it, or to the listed tool or a tool it invokes), a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
 | Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
