@@ -312,9 +312,9 @@ def test_a_line_nested_too_deeply_is_one_that_does_not_parse(
         b'{"key": "r1:4", "state": "gone"}',
         b'{"key": "r1:4", "state": "started"}',
         b'{"key": "r1:4", "state": "started", "capability": "send", '
-        b'"inputs_sha256": "x", "at": true}',
+        + b'"inputs_sha256": "x", "at": true}',
         b'{"key": "r1:4", "state": "done", "capability": "send", '
-        b'"inputs_sha256": "x", "at": 1}',
+        + b'"inputs_sha256": "x", "at": 1}',
     ],
 )
 def test_a_line_that_is_no_entry_is_one_that_does_not_parse(
