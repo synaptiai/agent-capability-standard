@@ -622,6 +622,45 @@ class TestPostToolUseExitCodes:
             assert "depth" in result.stderr
             assert not (tmp_path / ".claude" / "audit.log").exists()
 
+    def test_a_digest_of_cut_text_is_unavailable(
+        self, log_env: dict[str, str], tmp_path: Path
+    ) -> None:
+        """A jq that parses deeper nesting than it prints writes the value
+        past its print limit as `<skipped: too deep>` (jq 1.7 prints so past
+        256 levels), text that is no JSON and stands for no one input: the
+        line is written with the digest `unavailable`, never a digest of the
+        cut text, and the hook says so (exit 1, as for any digest it cannot
+        compute). The jq here prints the tool input so cut."""
+        jq = shutil.which("jq")
+        assert jq is not None
+        bin_dir = outside_project(tmp_path, "bin")
+        bin_dir.mkdir()
+        fake = bin_dir / "jq"
+        fake.write_text(
+            f"#!{shutil.which('bash')}\n"
+            'if [ "$1" = -cS ] && [ "$2" = .tool_input ]; then\n'
+            "  printf '%s' '{\"value\":[<skipped: too deep>]}'\n"
+            "  exit 0\n"
+            "fi\n"
+            f'exec {jq} "$@"\n'
+        )
+        fake.chmod(0o755)
+        stdin = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__x__y",
+                "tool_use_id": "toolu_cut",
+                "tool_input": {"value": [[1]]},
+            }
+        )
+        env = {**log_env, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        result = run_hook(POSTTOOLUSE_HOOK, env_override=env, stdin=stdin)
+        assert result.returncode == 1
+        assert "the input digest could not be computed" in result.stderr
+        (entry,) = read_entries(tmp_path)
+        assert entry["call_id"] == "toolu_cut"
+        assert entry["details"]["input_sha256"] == "unavailable"
+
     def test_a_call_with_a_lone_surrogate_is_reported(
         self, log_env: dict[str, str], tmp_path: Path
     ) -> None:

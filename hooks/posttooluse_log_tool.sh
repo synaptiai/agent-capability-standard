@@ -429,9 +429,14 @@ sha256_hex() {
 # with no tool_input is digested as `null`. A digest that cannot be computed
 # (the input cannot be serialized, no SHA-256 tool, a tool that fails or prints
 # something other than 64 hex digits) is recorded as `unavailable`: the line is
-# still written, and the input is still left out.
+# still written, and the input is still left out. So is the digest of text that
+# is no JSON: jq prints a value nested past its print limit as `<skipped: too
+# deep>`, and a jq whose parser accepts deeper nesting than it prints (the
+# limits differ between jq versions) would otherwise digest that cut text,
+# which stands for no one input.
 input_sha256="unavailable"
-if input_canonical=$(printf '%s' "$input" | jq -cS '.tool_input' 2>/dev/null); then
+if input_canonical=$(printf '%s' "$input" | jq -cS '.tool_input' 2>/dev/null) &&
+  printf '%s' "$input_canonical" | jq empty > /dev/null 2>&1; then
   digest=$(printf '%s' "$input_canonical" | sha256_hex 2>/dev/null || true)
   if [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
     input_sha256="$digest"
