@@ -174,6 +174,14 @@ MIN_SECRET_LENGTH = 4
 """Registered values shorter than this are ignored: replacing every
 occurrence of a two-character value would destroy the text."""
 
+# A text of at most _CLEAN_LENGTH characters that a redactor read and found
+# clean (nothing to replace) is kept, up to _CLEAN_TEXTS of them, and not
+# read again until a value or a pattern is added: an evidence store redacts
+# the same member names and tool names in every anchor it keeps, and every
+# pattern reads every text. A text that held a secret is never kept.
+_CLEAN_LENGTH = 256
+_CLEAN_TEXTS = 4096
+
 # Credential names: alone, or at the end of a longer name after `_` or `-`.
 _NAMES = (
     r"password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key"
@@ -942,7 +950,8 @@ def _pointer_token(key: str) -> str:
 
 class Redactor:
     """Replaces secrets with :data:`MARKER`: registered values first
-    (longest first), then each pattern's ``secret`` group."""
+    (longest first), then each pattern's ``secret`` group. A short text it
+    found clean is not read again until a value or a pattern is added."""
 
     def __init__(
         self,
@@ -950,6 +959,10 @@ class Redactor:
         patterns: Sequence[re.Pattern[str]] = DEFAULT_PATTERNS,
     ) -> None:
         self._values: list[str] = []
+        # The short texts found clean with the current values and patterns.
+        # A change replaces the set rather than clearing it, so a reading
+        # that began before the change adds its text to the old set only.
+        self._clean: set[str] = set()
         self._patterns = tuple(patterns)
         for p in self._patterns:
             if "secret" not in p.groupindex:
@@ -969,6 +982,7 @@ class Redactor:
             if form not in self._values:
                 self._values.append(form)
         self._values.sort(key=len, reverse=True)
+        self._clean = set()
 
     def include(self, other: Redactor) -> None:
         """Recognise what ``other`` recognises too: its registered values,
@@ -985,14 +999,24 @@ class Redactor:
         for p in other._patterns:
             if p not in self._patterns:
                 self._patterns = (*self._patterns, p)
+        self._clean = set()
 
     def redact_text(self, text: str) -> tuple[str, bool]:
         """``text`` with each secret replaced, and whether anything was."""
+        # Taken before the values and patterns are read (see __init__).
+        clean = self._clean
+        short = len(text) <= _CLEAN_LENGTH
+        if short and text in clean:
+            return text, False
         out = text
         for v in self._values:
             out = out.replace(v, MARKER)
         for p in self._patterns:
             out = p.sub(_replace_secret, out)
+        if short and out == text:
+            if len(clean) >= _CLEAN_TEXTS:
+                clean.clear()
+            clean.add(text)
         return out, out != text
 
     def redact(self, value: Any) -> tuple[Any, list[str]]:

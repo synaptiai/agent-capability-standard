@@ -93,6 +93,23 @@ def test_registered_values() -> None:
     assert DEFAULT_REDACTOR.redact_text("hunter22") == ("hunter22", False)
 
 
+def test_a_text_found_clean_is_read_again_once_a_value_or_pattern_is_added() -> None:
+    """A short text a redactor found clean is not read again (an evidence
+    store redacts the same member names in every anchor it keeps), until a
+    registered value or an included pattern could find a secret in it."""
+    r = Redactor()
+    assert r.redact_text("deploy hunter22") == ("deploy hunter22", False)
+    assert r.redact({"hunter22": 1}) == ({"hunter22": 1}, [])
+    r.add_secret("hunter22")
+    assert r.redact_text("deploy hunter22") == ("deploy [REDACTED]", True)
+    assert r.redact({"hunter22": 1}) == ({"[REDACTED]": 1}, ["/[REDACTED]"])
+    assert r.redact_text("pin 1234") == ("pin 1234", False)
+    r.include(Redactor(patterns=[re.compile(r"pin (?P<secret>\d{4})")]))
+    assert r.redact_text("pin 1234") == ("pin [REDACTED]", True)
+    # A text that held a secret is read every time.
+    assert r.redact_text("pin 1234") == ("pin [REDACTED]", True)
+
+
 def test_patterns_name_their_secret() -> None:
     with pytest.raises(ValueError, match="secret"):
         Redactor(patterns=[re.compile("token")])
