@@ -272,6 +272,26 @@ def test_a_torn_last_line_is_skipped(tmp_path: Path) -> None:
     assert effect.calls == 0
 
 
+def test_a_line_nested_too_deeply_is_one_that_does_not_parse(tmp_path: Path) -> None:
+    """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
+    RecursionError, no ValueError, on such a line; last, it is skipped as a
+    torn line, and anywhere else it is a ValueError, as any line that does
+    not parse."""
+    deep = b"[" * 100_000 + b"]" * 100_000
+    path = tmp_path / "keys.jsonl"
+    IdempotencyLog(path).perform(action(), Effect())
+    entry = path.read_bytes()
+    with path.open("ab") as f:
+        f.write(deep)
+    effect = Effect()
+    assert IdempotencyLog(path).perform(action(), effect)["kind"] == "Output"
+    assert effect.calls == 0
+    assert path.read_bytes() == entry
+    path.write_bytes(entry + deep + b"\n" + entry)
+    with pytest.raises(ValueError, match="nests too deeply"):
+        IdempotencyLog(path)
+
+
 def test_an_entry_after_a_torn_line_survives_a_restart(tmp_path: Path) -> None:
     # The torn line is cut off on load, so the next entry is a line of its
     # own: a send whose outcome is unknown stays unknown after a restart,

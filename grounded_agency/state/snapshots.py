@@ -704,7 +704,14 @@ class FileSnapshotStore:
             try:
                 value = json.loads(m.read_bytes())
                 live.update(str(e["sha256"]) for e in value["files"].values())
-            except OSError, ValueError, KeyError, TypeError, AttributeError:
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                AttributeError,
+                RecursionError,
+            ):
                 # An unreadable manifest keeps every object.
                 return
         for obj in (self._store / "objects").iterdir():

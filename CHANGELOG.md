@@ -103,7 +103,13 @@ here and marked so.
     with separate adapters. A tracker does not load a state file
     (`tracker_state.json`) that git tracks: a repository can ship one, and
     its checkpoints were taken by no call here; the tracker starts fresh and
-    logs a warning.
+    logs a warning. Security round 4: nor does it merge one into the file
+    it writes (unless it is the file it wrote last), and a state file nested
+    too deeply to parse (`[[[...`, RecursionError) is one that does not
+    parse, so the tracker starts fresh and replaces it; a write of the state
+    file no longer raises (it is logged, and the change stands in memory),
+    so a boundary always ends every checkpoint's validity and a PreToolUse
+    check that fails releases the hold it made.
   - One adapter, and one `CheckpointTracker`, is one scope: a checkpoint it
     reads back from its `checkpoint_dir`, taken by an earlier process or by
     another adapter on the same directory (the default `.checkpoints` is
@@ -354,12 +360,23 @@ here and marked so.
     interpreter is `execute`, `mutate` and `send` (it was `execute` and
     `send`, found anywhere in the command), and `curl -X POST`, `ssh`,
     `scp` and `rsync` are `send` and `mutate` (they were `send`), so a
-    profile's rule for `mutate` applies to them. A line with a backslash
-    right after a character outside ASCII gets the worst case (in a GBK,
-    GB18030, BIG5 or Shift JIS locale bash reads that backslash as the
-    character's second byte, so `ls ぁ\;touch f` is two commands), and so
-    does `pip` with a word the shell expands (`pip show *` became `pip
-    show --log=FILE`).
+    profile's rule for `mutate` applies to them. A line with a character
+    outside ASCII right before a backslash or another character bash treats
+    specially (`|`, `{`, `}`, `[`, `]`, `;`, `<`, `>`, `?`, `@`, `^`, `~`),
+    quoted or not, gets the worst case (in a GBK, GB18030, BIG5, Shift JIS
+    or JOHAB locale bash reads that character as the other's second byte,
+    so `ls ぁ\;touch f` is two commands and `find t1 -name ぁ|ls -o -delete`
+    one find, which deletes; security round 4 added every character but
+    the backslash, so `grep -E '日本|中国' f` now asks too), and so does
+    `pip` with a word the shell expands (`pip show *` became `pip show
+    --log=FILE`). Security round 4: so does a word with an unquoted `{`,
+    then a `,` or `..`, then a `}`, in any order of braces between (bash
+    closes a group only at a `}` after its first comma, so `sort {a},-o}x`
+    is `sort a}x -ox`; a space Unicode has and bash does not split at, such
+    as U+3000, no longer ends the word), a `{name}` word right before a
+    redirection (`echo x {PATH}>/dev/null; ls` set `PATH` and ran the
+    repository's `./10/ls`; `{name} >file`, with a blank, asks too), and
+    `>&` before anything but ASCII digits (`>&١` writes a file named `١`).
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -516,6 +533,14 @@ here and marked so.
   and the orchestration anchor's `task_goal` are kept whole, not cut at 100
   characters: a cut could keep part of a secret no redactor then
   recognises.
+- Python SDK, evidence and logs (security round 4): `EvidenceStore.get`
+  finds a record only by its id as written (`ev-1`), as
+  `JsonlEvidenceStore.get` does; `ev-01` and `ev-١` (which `int()` read as
+  1) find none. A line nested too deeply to parse (`[[[...`, which raised
+  RecursionError) is an unreadable line: `JsonlEvidenceStore` skips and
+  counts it, `IdempotencyLog` cuts it off as a torn last line and raises
+  `ValueError` for one anywhere else, and the snapshot store keeps every
+  object while a manifest is one.
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
   §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
   `create_grounded_mcp_server` serves or one of another server bound with
@@ -696,7 +721,11 @@ here and marked so.
     does not see nested calls, so it cannot tell where they go. In the
     Standard Agents binding,
     the `allowed_destinations` of profiles given to a composite reach the
-    sends its code invokes, at any depth.
+    sends its code invokes, at any depth. Security round 4: the adapter
+    reads a binding's `destination` pointer as RFC 6901 and the binding
+    reads it: an array index is ASCII digits with no leading zero, so
+    `/to/01` and `/to/١` locate nothing and, under a policy, the call is
+    refused (F504; the adapter took the element `int()` read).
   - A `persist` or `recall` step of a workflow that targets 1.2 and binds
     `scope` fails R402 (`unsupported_scope`) unless the output echoes the
     scope. Steps that do not bind it, and those of a 1.0 or 1.1 workflow
@@ -939,6 +968,14 @@ here and marked so.
     brace expansions that make more than 8192 words, or more than 262144
     bytes of paths to resolve; of a long cluster of short options it reads
     only the texts whose first component exists, or that are absolute.
+    Security round 4, batch 2: it finds a brace group as bash does (the
+    first `{` a `}` closes, at the first `}` after a comma at its own level:
+    `{a},.claude/check}point.ok` names the marker and is refused; it paired
+    each `}` with the nearest `{`), and refuses (F504) a call whose brace
+    expansions read more than 65536 braces, commas and characters. The
+    audit and send skills' hooks read brace groups the same way
+    (`env {-u},cu{r,r}l} ...` runs curl; `tee -a .cl{x},a}ude/...` appends
+    to the audit records).
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call
@@ -1390,7 +1427,7 @@ here and marked so.
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
 - Safety-layer conformance fixtures: 36 binding fixtures in
-  `tests/conformance/bindings/` and 32 call-sequence fixtures in
+  `tests/conformance/bindings/` and 33 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding

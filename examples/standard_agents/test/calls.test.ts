@@ -237,7 +237,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(32);
+    expect(CASES).toHaveLength(33);
   });
 
   afterEach(() => resetLayer());

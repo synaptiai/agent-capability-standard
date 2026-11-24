@@ -3132,3 +3132,141 @@ class TestPromptHooksAreModelJudgedAdditions:
             text = path.read_text(encoding="utf-8")
             assert "Create `.claude/checkpoint.ok`" not in text, path
             assert "Create checkpoint marker" not in text, path
+
+
+# ---------------------------------------------------------------------------
+# Brace groups bash closes late (security round 4, batch 2: a sibling of the
+# SDK classifier's brace defect)
+# ---------------------------------------------------------------------------
+
+# Words whose brace expansion bash makes in ways the old reading (the
+# innermost group first) got wrong, or that it must still get right.
+BRACE_WORDS = [
+    "a{b,c}d",
+    "{a},b}",
+    "x{a}y,z}",
+    "{a{b,c}",
+    "{a}{b,c}",
+    "{x{a},b}",
+    "{a,{b},c}",
+    "cu{z},r}l",
+    "{-u},cu{r,r}l}",
+    ".cl{x},a}ude/aud{y},i}t",
+    "{a..c}",
+    "{a,b}{c,d}",
+    "{{a,b},c}",
+    "a{,}b",
+    "{}",
+    "{},a}",
+    "x{},a}",
+    "{a}",
+    "a{b}c",
+    "{a,b",
+    "a,b}",
+    "{a.,.b}",
+    "{a..}",
+    "{..a}",
+    "{a..},b}",
+    "{a...},b}",
+    "{a}/../b}",
+    "{a},{b},c}",
+    "f{a,b}g{,x}",
+    "{ab..}x,y}",
+    "{a{b},c}d}",
+    "{a,b}}",
+    "}{a,b}",
+    "{{{a,b}",
+    "a{b,c,d{e,f}}g",
+    "{a..b{c,d}}",
+    '{"a":{"b":1},"c":2}',
+]
+
+
+def _brace_block(skill: str) -> str:
+    """The brace expansion functions of a skill's command hook."""
+    text = command_hook(skill, "PreToolUse", "Bash")
+    start = text.index("# Brace expansion, as bash makes it of a word")
+    end = text.index("def brace_words: brace_expand(0);") + len(
+        "def brace_words: brace_expand(0);"
+    )
+    return text[start:end]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
+def test_the_brace_reading_is_bashs() -> None:
+    """The skills' brace_words gives the words bash gives, of a word whose
+    quotes the hook removed first (as run_words does)."""
+    program = _brace_block("send") + '\n$w | brace_words | map(select(. != "")) | sort'
+    for word in BRACE_WORDS:
+        ours = subprocess.run(
+            ["jq", "-nc", "--arg", "w", word.replace('"', ""), program],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert ours.returncode == 0, (word, ours.stderr)
+        theirs = subprocess.run(
+            ["bash", "-c", "printf '%s\\n' " + word],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
+            timeout=30,
+        ).stdout
+        expected = sorted(w for w in theirs.split("\n") if w)
+        assert json.loads(ours.stdout) == expected, word
+
+
+def test_the_audit_and_send_skills_read_braces_alike() -> None:
+    assert _brace_block("audit") == _brace_block("send")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestLateBraceGroups:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # bash runs `env -u} curl curl -s ...`, and `cuz}l curl ...`
+            "env {-u},cu{r,r}l} -s 127.1:18777/x",
+            "/usr/bin/cu{z},r}l -s 127.1:18777/x",
+            "cu{z},r}l -s 127.1:18777/x",
+        ],
+    )
+    def test_send_blocks_a_tool_name_a_late_group_spells(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """The first was allowed: the group `{-u}` was kept as written, so
+        the word never read as curl."""
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "may expand to the name of curl, wget or http", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'curl -q -s -d \'{"a": {"b":1},"c":2}\' https://hooks.example.com/x',
+            'curl -q -s -d \'{"a":{"b":1},"c":[1,2]}\' https://hooks.example.com/x',
+        ],
+    )
+    def test_send_reads_a_nested_payload_as_before(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+    def test_audit_blocks_a_records_path_a_late_group_spells(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """It was allowed, and bash appends to .claude/audit/records.jsonl
+        (the last word of the expansion)."""
+        command = "echo x | tee -a .cl{x},a}ude/aud{y},i}t/rec{z},o}rds.json{w},l}"
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "an unquoted brace", F504)
+        out = subprocess.run(
+            ["bash", "-c", "printf '%s\\n' " + command.split("tee -a ")[1]],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.split()
+        assert ".claude/audit/records.jsonl" in out

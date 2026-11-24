@@ -852,6 +852,29 @@ calls(
     extra=[rec("post", "send"), rec("notify", "send", destination="/to")],
 )
 
+# A destination argument is located by its RFC 6901 pointer, whose array
+# index is ASCII digits with no leading zero: `/to/01` and `/to/\u0661`
+# (ARABIC-INDIC DIGIT ONE) locate nothing, so under a policy the layer
+# cannot tell where the call sends and refuses it (sections 4.4.2, 5.18.10),
+# whatever element a looser reading takes; `/to/1` locates the second.
+LISTED = {"to": ["https://elsewhere.example.net/a", "https://hooks.example.com/a"]}
+calls(
+    "send_destination_pointer_index",
+    "Under a destination policy, a layer locates a send's destination by its binding's RFC 6901 pointer, whose array index is ASCII digits with no leading zero: a pointer whose index is written otherwise (`01`, a digit outside ASCII) locates nothing, so the layer refuses the call with F504 before approval and the checkpoint.",
+    [
+        call("save", RUN),
+        call("lead_zero", refuse("F504"), LISTED, approve=ALICE),
+        call("arabic_one", refuse("F504"), LISTED, approve=ALICE),
+        call("second", RUN, LISTED, approve=ALICE),
+    ],
+    destination_policy=POLICY,
+    extra=[
+        rec("lead_zero", "send", destination="/to/01"),
+        rec("arabic_one", "send", destination="/to/\u0661"),
+        rec("second", "send", destination="/to/1"),
+    ],
+)
+
 # ---------------------------------------------------------------------------
 
 

@@ -364,8 +364,11 @@ Then:
   `.git/acs/checkpoints/key`, is blocked too. So are the paths the shell
   reads differently from their text: a `~` it expands (`~`, `~+`, `~user`;
   `~-` and `~N`, which name a directory the hook cannot know, are blocked
-  outright), a brace group it expands (`{fixtures/,.git/acs/check}points`,
-  `audit.he{ad,x}`, `.claud{e..e}`), a `$'...'` it decodes
+  outright), a brace group it expands, found as bash finds it (the first
+  `{` a `}` closes, at the first `}` after a comma at its own level, so
+  `{a},.claude/check}point.ok` names the marker:
+  `{fixtures/,.git/acs/check}points`, `audit.he{ad,x}`, `.claud{e..e}`), a
+  `$'...'` it decodes
   (`$'.git/acs/check\x70oints'`, and octal, `\u`, `\U` and `\c`
   escapes; `$"..."` as `"..."`), a path attached to a short option
   (`-tnotes/k`, `-onotes/todo.md`; of a long cluster only the texts whose
@@ -377,8 +380,9 @@ Then:
   head. So is a link that cannot be followed (a loop, more than 40 links),
   and, rather than hold the hook past its time limit, a call with more than
   4096 strings and member names or more than 65536 bytes of strings of at
-  most 4096 bytes, brace expansions that make more than 8192 words, or more
-  than 262144 bytes of paths to resolve (the slowest reading found within
+  most 4096 bytes, brace expansions that make more than 8192 words or read
+  more than 65536 braces, commas and characters, or more than 262144 bytes
+  of paths to resolve (the slowest reading found within
   these bounds takes about 4 seconds). Reading the records is not refused; a path a command builds when
   it runs, a pattern the shell expands and a link a command reaches without
   naming it (copying a directory that holds one) are not seen, nor is a

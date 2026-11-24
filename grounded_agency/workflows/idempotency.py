@@ -254,8 +254,16 @@ class IdempotencyLog:
             if chunk.strip():
                 try:
                     entry = json.loads(chunk)
-                except ValueError:
+                except (ValueError, RecursionError) as e:
+                    # RecursionError: nested deeper than the parser allows,
+                    # which no entry this log writes is; a line that does
+                    # not parse, as any other.
                     if any(c.strip() for c in chunks[i + 1 :]):
+                        if isinstance(e, RecursionError):
+                            raise ValueError(
+                                f"idempotency log {self._path}: a line nests "
+                                f"too deeply to parse"
+                            ) from None
                         raise
                     torn_at = offset
                     break

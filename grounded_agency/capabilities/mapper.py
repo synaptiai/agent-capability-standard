@@ -180,6 +180,8 @@ _SEPARATORS: frozenset[str] = frozenset({"&&", "||", ";", "|", "&", "|&"})
 # duplicates a descriptor; anything else writes a file.
 _OUTPUT_REDIRECTS: frozenset[str] = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
 _OPERATOR_CHARS = frozenset("();<>|&")
+# A descriptor number as bash reads one: ASCII digits only.
+_FD_NUMBER = re.compile(r"[0-9]+")
 
 # Commands that only read, unless given an option that writes (_writes).
 # Not here, because they run another command or can write a file whatever
@@ -400,9 +402,38 @@ _ARGUMENT_WRITERS: frozenset[str] = frozenset(
     {*_READ_ONLY_OPTIONS, "find", "git", "printf", "pip"}
 )
 
-# A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
-# are masked: bash replaces it with words this reading never sees.
-_BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# bash's blanks, which end a word: a space and a tab, never another
+# character Unicode calls a space (`{a\u3000,-o}` is one word to bash).
+_BLANKS = re.compile(r"[ \t]+")
+
+
+def _brace_expansion(masked: str) -> bool:
+    """Whether bash may expand a brace in ``masked``, a line whose quoted
+    characters are masked (:func:`_mask_quoted`): whether a word holds an
+    unquoted `{`, after it an unquoted `,` or `..`, and after that an
+    unquoted `}`. bash replaces such a group with words this reading never
+    sees, and closes a group only at a `}` after its first comma
+    (`{a},-o}x` is `a}x -ox`), so any such order counts, whatever lies
+    between. Linear in the line: each word is searched three times."""
+    for word in _BLANKS.split(masked):
+        start = word.find("{")
+        if start < 0:
+            continue
+        seps = [p for p in (word.find(",", start), word.find("..", start)) if p >= 0]
+        if seps and word.find("}", min(seps)) >= 0:
+            return True
+    return False
+
+
+def _names_a_variable(word: str) -> bool:
+    """Whether ``word`` (masked) is bash's `{varname}` form: right before a
+    redirection, bash opens a descriptor of 10 or more and assigns its
+    number to the variable (`echo x {PATH}>/dev/null` sets PATH to 10 for
+    the rest of the line: echo, printf and pwd are builtins, run in the
+    shell itself). Any word that opens with `{` and closes with `}` counts,
+    a name bash would refuse included."""
+    return len(word) >= 2 and word[0] == "{" and word[-1] == "}"
+
 
 # The options with which these subcommands read local state only. Any other
 # option (an index, a proxy, a configuration file) can make them ask another
@@ -474,9 +505,14 @@ def _mask_quoted(command: str) -> tuple[str, bool] | None:
     return "".join(out), expands
 
 
-# A backslash right after a character outside ASCII: in a double-byte locale
-# bash may read it as that character's second byte (_simple_commands).
-_BACKSLASH_AFTER_NON_ASCII = re.compile(r"[^\x00-\x7f]\\")
+# A character outside ASCII right before an ASCII character bash treats
+# specially that a double-byte encoding can take as a character's second
+# byte (0x30 to 0x7E): in such a locale bash may read the pair as one
+# character, so the special character is gone (_simple_commands). Looked for
+# in the line as written, quoted text included: a backslash quotes inside
+# double quotes too, and an escaped character outside ASCII (`\ぁ|`) is
+# masked whole, though its last byte may take the `|` there.
+_SPECIAL_AFTER_NON_ASCII = re.compile(r"[^\x00-\x7f][;<>?@\[\\\]^`{|}~]")
 
 
 def _tokens(command: str) -> list[str] | None:
@@ -498,24 +534,33 @@ def _simple_commands(command: str) -> list[_Command] | None:
     Returns None when the line holds something this reading cannot show to be
     harmless: an unbalanced quote, a parameter or brace expansion, a subshell
     or group, a here-document, an output redirection to anything but
-    /dev/null, or a backslash right after a character outside ASCII.
+    /dev/null or `>&N` (N in ASCII digits), a redirection after a
+    `{varname}` word, or a character outside ASCII right before a
+    backslash or another character bash treats specially.
     Redirections are dropped from the words. Comments are not recognised, so
     `ls # ; rm x` reads as two commands: a reading that errs splits a command
     into more commands to check, never fewer.
 
     The line is read as Unicode text; bash reads its bytes in the user's
-    locale. In a double-byte locale (GBK, GB18030, BIG5, Shift JIS) the
-    last byte of such a character's UTF-8 form can open a character whose
-    second byte is the backslash's, 0x5C, so bash sees no backslash: `ls
-    ぁ\\;touch f` and `ls "ぁ\\";touch f #"` are two commands there, one
-    here. Every other byte that can be a second byte only takes an operator
-    or quote from bash, never adds one (no quote, `$` or blank is a second
-    byte), so this reading sees at least the commands bash runs.
+    locale. In a double-byte locale (GBK, GB18030, BIG5, Shift JIS, JOHAB)
+    the last byte of such a character's UTF-8 form can open a character
+    whose second byte is the next ASCII byte, so bash sees no such ASCII
+    character. A backslash gone unquotes what it escaped (`ls ぁ\\;touch f`
+    and `ls "ぁ\\";touch f #"` are two commands there, one here); a `|`
+    gone joins two commands into one (`find t1 -name ぁ|ls -o -delete` is
+    one find there, which deletes); a `{` gone makes a brace group (`sort
+    {-o,ぁ{x}` is `sort -o ぁ{x` there, which writes that file). So such a
+    pair takes the worst case, quoted or not. A byte below 0x30 (a quote,
+    `$`, `&`, `(`, `)`, `*`, `!`, `#` or a blank) is no second byte in any
+    of them, and a letter, a digit, `_`, `:` or `=` taken changes nothing
+    bash does (it passes a word's bytes on as they are): with those pairs
+    refused, this reading sees at least the commands, expansions and
+    redirections bash makes.
     """
-    if _BACKSLASH_AFTER_NON_ASCII.search(command):
+    if _SPECIAL_AFTER_NON_ASCII.search(command):
         return None
     masked = _mask_quoted(command)
-    if masked is None or masked[1] or _BRACE_EXPANSION.search(masked[0]):
+    if masked is None or masked[1] or _brace_expansion(masked[0]):
         return None
     tokens = _tokens(command)
     if tokens is None:
@@ -547,11 +592,18 @@ def _simple_commands(command: str) -> list[_Command] | None:
         elif token == "<" or token in _OUTPUT_REDIRECTS:
             if i + 1 == len(tokens) or _is_operator(shadow[i + 1]):
                 return None  # no file named: not a line the shell runs
+            if i > 0 and not _is_operator(shadow[i - 1]):
+                if _names_a_variable(shadow[i - 1]):
+                    return None  # {varname}>...: sets a shell variable
             target = tokens[i + 1]
             if token == "<":
                 if target.startswith(_NETWORK_PATHS):
                     return None  # a connection to another host, not a file
-            elif target != "/dev/null" and not (token == ">&" and target.isdigit()):
+            elif target != "/dev/null" and not (
+                # bash reads only ASCII digits as a descriptor: `>&١` is
+                # `&>١`, a file (str.isdigit takes any Unicode digit).
+                token == ">&" and _FD_NUMBER.fullmatch(target)
+            ):
                 return None
             i += 1  # skip the file's name
         else:

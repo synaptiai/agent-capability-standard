@@ -187,6 +187,8 @@ letters, digits, ``_``, ``.`` or ``-``."""
 
 _VENDOR = re.compile(r"x-[a-z0-9][a-z0-9_.-]*", re.ASCII)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
+# A record id as this store writes one (``ev-<n>``).
+_RECORD_ID = re.compile(r"ev-(?:0|[1-9][0-9]*)")
 
 LEGACY_KINDS: dict[str, str] = {
     "tool_output": "tool",
@@ -994,7 +996,10 @@ class EvidenceStore:
 
     def get(self, record_id: str) -> EvidenceRecord | None:
         """The record with ``record_id``, or None (also once removed)."""
-        if not record_id.startswith("ev-") or not record_id[3:].isdigit():
+        # Only the id as written (`ev-<n>`, ASCII digits, no leading zero),
+        # as the JSON Lines store matches it: int() reads `ev-01` and `ev-١`
+        # as 1 too.
+        if not _RECORD_ID.fullmatch(record_id):
             return None
         with self._lock:
             return self._records.get(int(record_id[3:]))

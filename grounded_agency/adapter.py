@@ -481,16 +481,30 @@ class GroundedAgentConfig:
             self.allowed_destinations = tuple(self.allowed_destinations)
 
 
+# An array index as RFC 6901 writes one: ASCII digits, no leading zero
+# (str.isdigit takes any Unicode digit, and int() reads `١` as 1).
+_POINTER_INDEX = re.compile(r"0|[1-9][0-9]*")
+
+
 def _json_pointer(value: Any, pointer: str) -> tuple[bool, Any]:
-    """The member of ``value`` an RFC 6901 pointer names: ``(found, member)``."""
+    """The member of ``value`` an RFC 6901 pointer names: ``(found, member)``.
+    Not found for a pointer that does not start with `/` or an array index
+    RFC 6901 does not write (`01`, `١`), as the Standard Agents binding
+    reads one (``atPointer``)."""
     if pointer == "":
         return True, value
+    if not pointer.startswith("/"):
+        return False, None
     node = value
     for token in pointer[1:].split("/"):
         token = token.replace("~1", "/").replace("~0", "~")
         if isinstance(node, dict) and token in node:
             node = node[token]
-        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+        elif (
+            isinstance(node, list)
+            and _POINTER_INDEX.fullmatch(token)
+            and int(token) < len(node)
+        ):
             node = node[int(token)]
         else:
             return False, None
@@ -2132,13 +2146,24 @@ class GroundedAgentAdapter:
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
+            # Each step runs whatever the one before it did: a hold left
+            # unresolved must not keep every checkpoint valid past the
+            # boundary, nor a failed record keep what was allowed.
+            session = input_data.get("session_id")
+            holders: list[str] = []
+            ended: list[str] = []
             try:
-                session = input_data.get("session_id")
                 scope = (session, input_data.get("agent_id"))
                 holders = tracker.resolve_holds_in_scope(scope)
                 if holders:
                     logger.info("Turn ended: unresolved holds of %s used", holders)
+            except Exception as e:
+                logger.error("Boundary (%s): resolving holds failed: %s", what, e)
+            try:
                 ended = tracker.end_validity(f"{what} in session {session}")
+            except Exception as e:
+                logger.error("Boundary (%s): ending validity failed: %s", what, e)
+            try:
                 with self._state_lock:
                     self._allowed.clear()
                     self._asked_calls.clear()
@@ -2278,8 +2303,11 @@ class GroundedAgentAdapter:
             held = False
             tool_input: Any = {}
 
-            def release() -> None:
-                if held and call is not None:
+            def release(any_hold: bool = False) -> None:
+                # ``any_hold``: after an error, whatever this call holds
+                # (validate_and_reserve may have recorded its hold, then
+                # failed, before ``held`` was set).
+                if (held or any_hold) and call is not None:
                     try:
                         tracker.release_reservation(call)
                     except Exception as e:
@@ -2550,7 +2578,7 @@ class GroundedAgentAdapter:
                 except Exception:
                     logger.exception("Could not withdraw the decision on %s", call)
                 if strict:
-                    release()
+                    release(any_hold=True)
                     try:
                         return deny(
                             self._refuse(

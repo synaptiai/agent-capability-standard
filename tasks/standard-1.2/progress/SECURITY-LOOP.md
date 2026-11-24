@@ -4896,3 +4896,254 @@ already requires a layer that cannot complete its checks to refuse
   bash's own expansion, the shapes of the secret scan at 10 to 80 KB with
   grep's output to a pipe. No CLI or nested agent was started; nothing
   was left running; the scratch repositories and payloads were removed.
+
+### Batch 2: four reported defects
+
+Four defects, each reproduced by an independent verifier on 7d04aea and
+reproduced again here on 95638a8 before any change (under `timeout 120`
+and a 4 GB address-space limit): the classifier gave `observe` to every
+reported line of defects 1 to 3 (and to the verifier's ASCII brace lines),
+and the reporter's `p12.py` and `p7.py`, pointed at this worktree, printed
+the R407 that kept its hold, "valid checkpoint left = True" after the Stop,
+a turn-2 Write allowed, and `GroundedAgentAdapter() raised RecursionError`.
+None was fixed by an earlier batch: round 3 batch 2 #3 refused the
+backslash only, and the brace pattern dates from round 1. The plugin's
+shell hook already refused all of them (it refuses `{`, `}`, `>`, `&`, `;`
+and `|` anywhere) and keeps no state file of this kind. Each fix has tests
+that fail on the code before it (below).
+
+#### 1. A `{varname}` redirection on an allow-listed builtin set PATH or HOME for the next command of the line (high)
+
+bash's `{name}>file` (also `<`, `>>`, `>&N`) assigns the new descriptor's
+number (10 or more) to the variable; on a builtin (`echo`, `printf`,
+`pwd`) it does so in the shell itself, so `echo hi {PATH}>/dev/null; ls`
+ran the repository's `./10/ls` and `echo x {HOME}>/dev/null; git status`
+ran the `core.fsmonitor` of `./10/.gitconfig`, both `observe`.
+`_simple_commands` kept `{PATH}` as an argument.
+
+- Fix (`grounded_agency/capabilities/mapper.py`, `_names_a_variable`): a
+  word whose masked form opens with `{` and closes with `}` right before a
+  redirection operator gives the line the worst case, whatever the name
+  (bash takes an identifier or an array element; `{a[i=1]}` evaluates its
+  subscript) and whether a blank separates them (the reading cannot tell,
+  so `{PATH} >/dev/null` asks too).
+- Tests (`tests/test_bash_redirections_and_braces.py`,
+  `TestVariableRedirections`): the premise (bash runs `./10/ls`; an
+  external command changes nothing); 12 lines (`{PATH}`, `{HOME}`, `{IFS}`,
+  an array element, with `>`, `<`, `>>`, `>&2`, on `echo`, `printf` and
+  `pwd`, then `ls`, `cat`, `git status`, `git log`) take the worst case;
+  the adapter refuses the first F501, and F504 under a destination policy
+  with a checkpoint.
+
+#### 2. `>&` followed by digits outside ASCII wrote a file (medium)
+
+`str.isdigit` takes any Unicode digit (`١`, `²`, `１`, `①`); bash reads
+only ASCII 0-9 as a descriptor, so `>&١` is `&>١`: `cat /etc/hostname
+>&１` wrote a file, classified `observe`.
+
+- Fix: the target of `>&` must match `[0-9]+` (`_FD_NUMBER`).
+- Siblings found here: `_json_pointer` in the adapter read a binding's
+  `destination` pointer with `isdigit` and `int()`, so `/to/01` and
+  `/to/١` took element 1 where the Standard Agents binding's `atPointer`
+  (RFC 6901: `0|[1-9][0-9]*`) locates nothing and refuses the call under a
+  policy; it now reads the index as the binding does, and a pointer that
+  does not start with `/` locates nothing. `EvidenceStore.get` read
+  `ev-01` and `ev-١` as `ev-1` (the JSON Lines store matched only the id as
+  written); it now matches `ev-(0|[1-9][0-9]*)`. A Bash brace check that
+  used Python's Unicode `\s` (below) is the third.
+- Tests: `TestUnicodeDigits` (the premise: bash writes `١` and `１`; 8
+  lines take the worst case); call fixture
+  `send_destination_pointer_index` (`/to/01`, `/to/١` refused F504 under a
+  policy, `/to/1` runs; 33 call fixtures, played by the adapter served and
+  as another server's tools, and by the binding);
+  `test_get_reads_only_the_id_as_written` (both stores).
+
+#### 3. Double-byte locales: `|`, `{` and `}` taken as a second byte; brace groups bash closes late (high)
+
+The round 3 fix refused a backslash right after a character outside ASCII
+only, on the reasoning that every other second byte only takes an operator
+from bash. Taking `|` joins two commands into one (`find t1 -name
+ぁ|ls -o -delete` is one find in a GBK locale, which deletes t1), and
+taking `{` or `}` makes or moves a brace group. The verifier found that
+bash closes a group only at a `}` after its first top-level comma, in
+every locale: `sort {a},-o}x` is `sort a}x -ox` and `find t2
+{a},-delete}` deletes, which `_BRACE_EXPANSION` (`\{[^{}\s]*(,|..)...\}`)
+never matched. Found here: Python's `\s` holds spaces bash does not split
+at, so `find . {a　,-delete}` (U+3000) passed too.
+
+- Fix (`_SPECIAL_AFTER_NON_ASCII`): a character outside ASCII right before
+  any ASCII character bash treats specially that a double-byte encoding can
+  take as a second byte (0x30 to 0x7E: `;<>?@[\]^`{|}~`) gives the line the
+  worst case, read in the line as written, quoted text included (a quoted
+  `|` is harmless, but an escaped character outside ASCII, `\ぁ|`, is masked
+  whole while its last byte may take the `|`). JOHAB, whose second bytes
+  reach down to 0x31, is named beside GBK, GB18030, BIG5 and Shift JIS
+  (glibc builds a JOHAB locale with a warning). A byte below 0x30 is no
+  second byte in any of them, and a letter, digit, `_`, `:` or `=` taken
+  changes nothing bash does. `_simple_commands`' docstring now says so.
+- Fix (`_brace_expansion`): a word (split at a space or a tab only, as bash
+  splits) with an unquoted `{`, then an unquoted `,` or `..`, then an
+  unquoted `}` gives the worst case, whatever braces lie between: a
+  superset of what bash expands, closed under the characters a double-byte
+  locale takes. Linear: three searches a word (the old pattern backtracked;
+  a 4096-byte line of `{,` or `,..` classifies in milliseconds).
+- `git rev-parse @{u}` and `git stash show stash@{0}` still observe (no
+  comma); `grep -E '日本|中国' f` now asks (the quoted `|` follows a
+  character outside ASCII). The hook refuses all of these already.
+- Tests: `TestDoubleByteSpecials` (the premise in a GBK locale built with
+  `localedef`: find deletes there, nothing is deleted in C; 11 lines take
+  the worst case); `TestBraceGroups` (the premise in C and C.UTF-8,
+  `find t2 {a},-delete}` deletes, 9 lines take the worst case, the reading
+  stays linear); 13 controls still observe; the adapter (three lines,
+  F501, and F504 under a policy); the plugin hook refuses six of them
+  (F501, as before).
+- On 95638a8's `grounded_agency/`: 43 of the new tests fail (every line
+  above and the adapter's); the premises, the controls, the hook tests and
+  the JSON Lines store's id test pass.
+
+#### Sibling of 3: brace groups bash closes late, in the plugin's records guard and the audit and send skills' hooks (found here)
+
+The verifier's brace finding holds in every shell-side reading of braces:
+each paired a `}` with the nearest `{` (the records guard's `brace_words`,
+the skills' jq `brace_group`), so a group bash closes at a later `}` was
+kept as written. Reproduced here on 95638a8: the records guard asked (the
+ordinary approval) for `tee {a},.claude/check}point.ok`, which bash runs as
+`tee a}point.ok .claude/checkpoint.ok`; the send skill's hook let `env
+{-u},cu{r,r}l} -s 127.1:18777/x` through (bash runs `env -u} curl curl
+-s ...`); the audit skill's hook let `echo x | tee -a
+.cl{x},a}ude/aud{y},i}t/rec{z},o}rds.json{w},l}` through (the expansion's
+last word is `.claude/audit/records.jsonl`).
+
+- Fix (`hooks/pretooluse_require_checkpoint.sh`): `brace_group` finds a
+  group as bash's `brace_gobbler` does (the first `{`, but a `{}` that
+  opens the word, from which a `}` closes a group: the first `}` at the
+  group's level after a `,` or a `..` no `}` follows, at that level; else
+  the next `{`), and `brace_expand` expands as bash's `brace_expand` does
+  (the text before kept, a group with a comma split at its own commas and
+  each part expanded again, a sequence its elements, any other group as
+  written, the text after expanded again). A literal reading that refused
+  a group followed by a comma and a `}` was tried first and dropped: it
+  refused `jq '{"a":{"b":1},"c":2}' a.txt > b.txt` (the filter is read
+  again as a shell would). The marks are read 64 characters at a time (bash
+  measures the whole string at each `${w:i:1}`), and every character and
+  mark read is charged to a new budget, 65536 a call (`BRACE_SCAN_LEFT`;
+  past it, F504 with the over-budget reason): `{` repeated 4000 times, the
+  slowest shape found, is refused in 0.8 s.
+- Fix (`skills/audit/SKILL.md`, `skills/send/SKILL.md`, one jq block, a
+  test keeps the two equal): `brace_expand` the same way in jq, null (read
+  as may-name, so refused) past 256 words, groups 32 deep, 512 braces and
+  commas in a word, or 8 `{` tried for one group; a group bash leaves as
+  it is now stays as written (it was `\u0007`), which matches no name
+  either. 16 KB adversarial runs take at most 0.25 s.
+- Checked against bash on 44 words (late groups, `{}` at a word's start,
+  `..` before a `}`, nested, sequences with steps and padding, the
+  reported forms): the guard's words are bash's for all; the jq block's
+  are bash's but for `{a,,}`-style empty words, which name nothing.
+- Tests: `tests/test_records_guard.py` `TestLateClosingBraceGroups` (the
+  premise; 6 records paths refused; the reading equals bash's on 44
+  words; 7 controls asked, the nested jq filters among them);
+  `tests/test_skill_hooks.py` (`test_the_brace_reading_is_bashs` on 37
+  words, the two copies equal, `TestLateBraceGroups`: 3 tool names the
+  send hook refuses, nested JSON payloads it still lets through, the audit
+  records path it refuses). On 95638a8's hooks and skills: 17 fail; the
+  premises and the controls pass.
+
+#### 4. A crafted checkpoint state file made persists raise RecursionError: the boundary skipped, a hold leaked, construction crashed (low)
+
+`json.loads` on about 100 KB of nested `[` raises RecursionError, which is
+no ValueError: `_read_state_file`'s callers caught neither it nor anything
+past `(OSError, TypeError, ValueError, OverflowError)`. `_merged_state` read
+the state file at every persist, a file git tracks included (the load
+refuses one). So with a tracked deep file every persist raised after its
+change was made in memory: `validate_and_reserve` recorded a hold and
+raised before the hook set `held`, so the R407's `release()` did nothing;
+the Stop's `resolve_holds_in_scope` raised, so `end_validity` never ran,
+and once the file was gone (a branch switch) a turn-2 Write ran on a
+checkpoint from before the Stop (the verifier showed the UserPromptSubmit
+boundary ends it in the adapter's real setup, hence low). An untracked
+`{"history": [[[...]]]}` made `GroundedAgentAdapter()` raise.
+
+- Fix (`grounded_agency/state/checkpoint_tracker.py`): `_read_state_file`
+  turns the parser's RecursionError into a ValueError (a file that does not
+  parse: the load starts fresh, the merge replaces it); `_merged_state`
+  reads the file only when git does not track it (`_tracked_by_git`) or it
+  is still the file this tracker wrote last (device, inode, size, mtime
+  and ctime, taken after the rename, under the lock: no git run at each
+  persist); `_persist_state` never raises (logged; the change stands in
+  memory, which is what the tracker decides on); the load and the archive
+  reader catch RecursionError too.
+- Fix (`grounded_agency/adapter.py`): the boundary hook resolves holds,
+  ends validity, clears the per-call state and records, each whatever the
+  step before it did; the PreToolUse hook's failure path releases whatever
+  hold the call made (`release(any_hold=True)`), as the permission
+  callback's already did.
+- Siblings (the same parse, a RecursionError no handler caught):
+  `JsonlEvidenceStore` skips and counts such a line (it did not open);
+  `IdempotencyLog` cuts it off as a torn last line and raises `ValueError`
+  for one anywhere else; the snapshot store's collection keeps every object
+  while a manifest is one (discarding a checkpoint raised).
+- Tests (`tests/test_checkpoint_state_depth.py`): the premise; an untracked
+  deep file (both shapes) starts fresh and is replaced; the adapter starts;
+  a tracked deep file cuts no transition short; the merge skips a tracked
+  file's checkpoints and holds; a persist that raises RecursionError cuts
+  nothing short; a deep archive line is skipped; the reported route
+  end to end (turn 1 not R407, no valid checkpoint after the Stop, turn 2
+  F501); a failed check releases its hold; the boundary ends validity when
+  resolving fails; a control (two untracked trackers still merge). On
+  95638a8: 10 fail, the premise and the control pass. The siblings'
+  tests (`test_idempotency.py`, `test_evidence_store.py`,
+  `test_snapshots.py`) fail on 95638a8.
+
+#### Documentation
+
+SECURITY.md §5.5 (the adapter's classifier: the double-byte characters,
+braces, `{name}`, `>&`; the tracker's merge, parse and writes) and §5.1
+(the records guard's brace reading and its new bound), `hooks/README.md`
+(the same), the SDK guide (Bash Command Classification, Checkpoint
+Lifecycle, Destination policies), `_simple_commands`' docstring, the
+hooks' and skills' comments, CHANGELOG [Unreleased] Upgrading (the
+classifier, the pointer, the tracker, the evidence and log readers, the
+plugin's brace reading; 33 call fixtures). The Standard's text was not changed: §5.18.3, §5.18.8
+and §4.4.2 already require the refusals these fixes bring the layer to.
+
+#### Checks after batch 2
+
+- Python: `pytest tests/` (6980 passed, 18 skipped: 6861 plus the new
+  ones), after every change to the hooks and skills; before them, 6951.
+  The hook suites again after the last hook change (skill hooks,
+  pre-tool-use, records guard, hooks unit, project settings, the Bash
+  classifier files, the tracker's depth file: 2161 passed). ruff check and
+  format with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators' `--check`
+  (one call fixture added: `send_destination_pointer_index`);
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: the package's check and test (2015; no package source
+  changed, its build reused); the binding's check and test (248 passed, 2
+  skipped: the new call fixture, which its `atPointer` already refused,
+  and the fixture count 33).
+- Site: `npm run check`, `npm test` (1173, with the new files staged: the
+  fixture counts read tracked files), `npm run build`. The figure-gap
+  sweep (`check-runs.mjs`, headless shell 1248) fails on
+  `/guides/claude-agent-sdk/` before this batch already: at 95638a8's
+  guide, runs of 2307 px (Unbound Tools and Bash Command Classification)
+  and 1938 px (Evidence Stores, Secrets, Grounding Policies), grown since
+  the last measurement (1798 px) by batches that did not run the sweep.
+  This batch's text adds 113 px to the first (2420 px) and nothing to the
+  second; shortening or splitting those runs is left to a task of its own,
+  since it restructures the guide's prose.
+- Old code: the new Python tests against 95638a8's `grounded_agency/`
+  (classifier, adapter and the in-memory store's ids: 43 fail; tracker:
+  10 fail; the evidence, idempotency and snapshot siblings: 3 fail; the
+  call fixture: both plays fail); the hook and skill tests against 95638a8's `hooks/` and
+  `skills/` (17 fail); the premises and the controls pass on both.
+- Probes, each under `timeout 120` and a 4 GB address-space limit (Node
+  and Chromium under a larger address-space or data limit, as before): the
+  reported lines through the classifier and the adapter, `p12.py` and
+  `p7.py` pointed at this worktree (turn 1 asks, no valid checkpoint after
+  the Stop, turn 2 F501; the adapter constructs), bash's expansion of every
+  brace case, the GBK premise with a locale built by `localedef`, the
+  hooks' timings on 4 KB adversarial words. No CLI or nested agent was
+  started; nothing was left running; the scratch copies were removed.

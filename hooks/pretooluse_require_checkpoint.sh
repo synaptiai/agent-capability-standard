@@ -933,80 +933,173 @@ ansi_byte() {
   ANSI_CHAR+="$byte"
 }
 
-# A brace group that holds no other: unquoted braces and commas are marked
-# \001 ({), \003 (}) and \002 (,) in a word path_words reads.
-BRACE_GROUP=$'^(.*)\001([^\001\003]*)\003(.*)$'
-
-# The words bash makes of the word $1 by brace expansion, appended to
-# PATH_WORDS: the innermost group first, a group with a comma giving each of
-# its alternatives and a sequence ({a..e}, {1..10..3}, {01..10}) each of its
-# elements, any other group kept as written. Each word made is charged to the
-# call's budgets, BRACE_LEFT words and RESOLVE_LEFT bytes; fails (2) past
-# either, rather than hold the hook past its time limit.
-brace_words() {
-  local -a todo=("$1")
-  local at=0 w pre body post alt rest from to step width n e x
-  while [ "$at" -lt "${#todo[@]}" ]; do
-    w="${todo[at]}"
-    at=$((at + 1))
-    if [[ "$w" =~ $BRACE_GROUP ]]; then
-      pre="${BASH_REMATCH[1]}"
-      body="${BASH_REMATCH[2]}"
-      post="${BASH_REMATCH[3]}"
-      if [[ "$body" == *$'\002'* ]]; then
-        rest="$body"$'\002'
-        while [ -n "$rest" ]; do
-          alt="${rest%%$'\002'*}"
-          rest="${rest#*$'\002'}"
-          BRACE_LEFT=$((BRACE_LEFT - 1))
-          RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - ${#alt} - ${#post}))
-          [ "$BRACE_LEFT" -ge 0 ] && [ "$RESOLVE_LEFT" -ge 0 ] || return 2
-          todo+=("$pre$alt$post")
-        done
-      elif [[ "$body" =~ ^(-?[0-9]{1,9})\.\.(-?[0-9]{1,9})(\.\.-?([0-9]{1,9}))?$ ]] || [[ "$body" =~ ^([A-Za-z])\.\.([A-Za-z])(\.\.-?([0-9]{1,9}))?$ ]]; then
-        from="${BASH_REMATCH[1]}"
-        to="${BASH_REMATCH[2]}"
-        step="${BASH_REMATCH[4]:-1}"
-        step=$((10#$step))
-        [ "$step" -gt 0 ] || step=1
-        width=0
-        if [[ "$from" =~ ^-?0[0-9] || "$to" =~ ^-?0[0-9] ]]; then
-          width=${#from}
-          [ "${#to}" -le "$width" ] || width=${#to}
-        fi
-        if [[ "$from" == [A-Za-z] ]]; then
-          printf -v from '%d' "'$from"
-          printf -v to '%d' "'$to"
-          width=-1
-        else
-          case "$from" in -*) from=$((-10#${from#-})) ;; *) from=$((10#$from)) ;; esac
-          case "$to" in -*) to=$((-10#${to#-})) ;; *) to=$((10#$to)) ;; esac
-        fi
-        n=$(((from > to ? from - to : to - from) / step + 1))
-        BRACE_LEFT=$((BRACE_LEFT - n))
-        [ "$BRACE_LEFT" -ge 0 ] || return 2
-        for ((x = from; from <= to ? x <= to : x >= to; x += (from <= to ? step : -step))); do
-          if [ "$width" -lt 0 ]; then
-            ANSI_CHAR=""
-            ansi_byte "$x"
-            e="$ANSI_CHAR"
-          elif [ "$x" -lt 0 ]; then
-            printf -v e -- "-%0$((width > 0 ? width - 1 : 0))d" "$((-x))"
-          else
-            printf -v e "%0${width}d" "$x"
+# The marks of a word path_words reads (unquoted braces and commas are
+# marked \001 ({), \003 (}) and \002 (,)): BM_POS, their offsets, and
+# BM_TYPE, each one's kind ({, }, , or . for a .. that no } follows, which
+# bash counts as a comma when it looks for a group's end). Each character
+# read is charged to BRACE_SCAN_LEFT; fails past it. The word is read 64
+# characters at a time: bash measures the whole string at each ${w:i:1}, so
+# a character at a time costs the word's length squared.
+brace_marks() {
+  local w="$1" n="${#1}" base j chunk
+  BM_POS=()
+  BM_TYPE=()
+  BRACE_SCAN_LEFT=$((BRACE_SCAN_LEFT - n))
+  [ "$BRACE_SCAN_LEFT" -ge 0 ] || return 1
+  for ((base = 0; base < n; base += 64)); do
+    chunk="${w:base:66}"
+    case "${chunk:0:64}" in
+      *[$'\001\002\003.']*) ;;
+      *) continue ;;
+    esac
+    for ((j = 0; j < 64 && base + j < n; j++)); do
+      case "${chunk:j:1}" in
+        $'\001') BM_POS+=($((base + j))) && BM_TYPE+=("{") ;;
+        $'\003') BM_POS+=($((base + j))) && BM_TYPE+=("}") ;;
+        $'\002') BM_POS+=($((base + j))) && BM_TYPE+=(",") ;;
+        .)
+          if [ "${chunk:j+1:1}" = . ] && [ "${chunk:j+2:1}" != $'\003' ]; then
+            BM_POS+=($((base + j)))
+            BM_TYPE+=(".")
           fi
-          RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - ${#e} - ${#post}))
-          [ "$RESOLVE_LEFT" -ge 0 ] || return 2
-          todo+=("$pre$e$post")
-        done
-      else
-        todo+=("$pre{${body//$'\002'/,}}$post")
-      fi
-    else
-      w="${w//$'\001'/\{}"
-      w="${w//$'\002'/,}"
-      PATH_WORDS+=("${w//$'\003'/\}}")
+          ;;
+      esac
+    done
+  done
+}
+
+# The group bash expands first in the marked word $1, as bash finds it: the
+# first { (but a {} that opens the word) from which a } closes a group, that
+# is the first } at the group's own level after a , or .. at that level (no
+# group closes at a } before its first comma: {a},b} is a} and b). Sets
+# BG_OPEN and BG_CLOSE, the braces' offsets, and BG_CUTS, the offsets in the
+# group's text of its commas at its own level. Fails (1) when there is none,
+# and (2) past BRACE_SCAN_LEFT, to which each mark read is charged.
+brace_group() {
+  local w="$1" k j l c nm
+  brace_marks "$w" || return 2
+  nm="${#BM_POS[@]}"
+  for ((k = 0; k < nm; k++)); do
+    [ "${BM_TYPE[k]}" = "{" ] || continue
+    if [ "${BM_POS[k]}" -eq 0 ] && [ "${w:1:1}" = $'\003' ]; then continue; fi
+    l=0
+    c=0
+    BG_CUTS=()
+    for ((j = k + 1; j < nm; j++)); do
+      BRACE_SCAN_LEFT=$((BRACE_SCAN_LEFT - 1))
+      [ "$BRACE_SCAN_LEFT" -ge 0 ] || return 2
+      case "${BM_TYPE[j]}" in
+        "}")
+          if [ "$l" -eq 0 ] && [ "$c" -gt 0 ]; then
+            BG_OPEN="${BM_POS[k]}"
+            BG_CLOSE="${BM_POS[j]}"
+            return 0
+          fi
+          if [ "$l" -gt 0 ]; then l=$((l - 1)); fi
+          ;;
+        "{") l=$((l + 1)) ;;
+        *)
+          if [ "$l" -eq 0 ]; then
+            c=$((c + 1))
+            if [ "${BM_TYPE[j]}" = , ]; then BG_CUTS+=($((BM_POS[j] - BM_POS[k] - 1))); fi
+          fi
+          ;;
+      esac
+    done
+  done
+  return 1
+}
+
+# The words bash makes of the marked word $1 by brace expansion, into
+# BRACED (marks kept), as bash makes them: the first group (brace_group)
+# gives, if it holds a comma, the words of each of its parts (split at its
+# own commas, each expanded again), else, if it is a sequence ({a..e},
+# {1..10..3}, {01..10}), each of its elements, else itself as written; the
+# text before it is kept, and the text after it is expanded again. Each word
+# made is charged to the call's budgets, BRACE_LEFT words and RESOLVE_LEFT
+# bytes; fails (2) past either or past BRACE_SCAN_LEFT, rather than hold the
+# hook past its time limit.
+brace_expand() {
+  local w="$1" pre amble post part m t from to step width n e x start cut status=0
+  local -a mid=() tail=() cuts=()
+  brace_group "$w" || status=$?
+  case "$status" in
+    0) ;;
+    1) BRACED=("$w") && return 0 ;;
+    *) return 2 ;;
+  esac
+  pre="${w:0:BG_OPEN}"
+  amble="${w:BG_OPEN+1:BG_CLOSE-BG_OPEN-1}"
+  post="${w:BG_CLOSE+1}"
+  cuts=(${BG_CUTS[@]+"${BG_CUTS[@]}"})
+  if [[ "$amble" == *$'\002'* ]]; then
+    start=0
+    for cut in ${cuts[@]+"${cuts[@]}"} "${#amble}"; do
+      part="${amble:start:cut-start}"
+      start=$((cut + 1))
+      brace_expand "$part" || return 2
+      mid+=("${BRACED[@]}")
+    done
+  elif [[ "$amble" =~ ^(-?[0-9]{1,9})\.\.(-?[0-9]{1,9})(\.\.-?([0-9]{1,9}))?$ ]] || [[ "$amble" =~ ^([A-Za-z])\.\.([A-Za-z])(\.\.-?([0-9]{1,9}))?$ ]]; then
+    from="${BASH_REMATCH[1]}"
+    to="${BASH_REMATCH[2]}"
+    step="${BASH_REMATCH[4]:-1}"
+    step=$((10#$step))
+    [ "$step" -gt 0 ] || step=1
+    width=0
+    if [[ "$from" =~ ^-?0[0-9] || "$to" =~ ^-?0[0-9] ]]; then
+      width=${#from}
+      [ "${#to}" -le "$width" ] || width=${#to}
     fi
+    if [[ "$from" == [A-Za-z] ]]; then
+      printf -v from '%d' "'$from"
+      printf -v to '%d' "'$to"
+      width=-1
+    else
+      case "$from" in -*) from=$((-10#${from#-})) ;; *) from=$((10#$from)) ;; esac
+      case "$to" in -*) to=$((-10#${to#-})) ;; *) to=$((10#$to)) ;; esac
+    fi
+    n=$(((from > to ? from - to : to - from) / step + 1))
+    BRACE_LEFT=$((BRACE_LEFT - n))
+    [ "$BRACE_LEFT" -ge 0 ] || return 2
+    for ((x = from; from <= to ? x <= to : x >= to; x += (from <= to ? step : -step))); do
+      if [ "$width" -lt 0 ]; then
+        ANSI_CHAR=""
+        ansi_byte "$x"
+        e="$ANSI_CHAR"
+      elif [ "$x" -lt 0 ]; then
+        printf -v e -- "-%0$((width > 0 ? width - 1 : 0))d" "$((-x))"
+      else
+        printf -v e "%0${width}d" "$x"
+      fi
+      mid+=("$e")
+    done
+  else
+    # A group bash leaves as it is: its braces as written.
+    mid=("{${amble}}")
+  fi
+  brace_expand "$post" || return 2
+  tail=("${BRACED[@]}")
+  BRACED=()
+  for m in "${mid[@]}"; do
+    for t in "${tail[@]}"; do
+      BRACE_LEFT=$((BRACE_LEFT - 1))
+      RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - ${#m} - ${#t}))
+      [ "$BRACE_LEFT" -ge 0 ] && [ "$RESOLVE_LEFT" -ge 0 ] || return 2
+      BRACED+=("$pre$m$t")
+    done
+  done
+}
+
+# The words bash makes of the word $1 by brace expansion (brace_expand),
+# appended to PATH_WORDS with their marks read back as the characters.
+brace_words() {
+  local w
+  brace_expand "$1" || return 2
+  for w in "${BRACED[@]}"; do
+    w="${w//$'\001'/\{}"
+    w="${w//$'\002'/,}"
+    PATH_WORDS+=("${w//$'\003'/\}}")
   done
 }
 
@@ -1256,6 +1349,7 @@ word_candidates() {
 LINKS_LEFT=200
 RESOLVE_LEFT=262144
 BRACE_LEFT=8192
+BRACE_SCAN_LEFT=65536
 READ_WORDS=()
 if base=$(call_dir) && resolve_path / "$base"; then
   base="$RESOLVED"
@@ -1263,7 +1357,7 @@ else
   block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
 fi
 texts_read=0
-over_budget="${records_refusal}, or names more paths than this hook resolves in its time limit (brace expansions that make more than 8192 words, more than 262144 bytes of paths, or a cluster of short options whose values cannot be read in time), so it cannot tell where they lead."
+over_budget="${records_refusal}, or names more paths than this hook resolves in its time limit (brace expansions that make more than 8192 words or read more than 65536 braces, commas and characters, more than 262144 bytes of paths, or a cluster of short options whose values cannot be read in time), so it cannot tell where they lead."
 while IFS= read -r -d '' text; do
   case "$text" in
     E) texts_read=1 ;;

@@ -63,6 +63,18 @@ def anchor(ref: str = "file:a.txt", kind: str = "file") -> EvidenceAnchor:
     return EvidenceAnchor(ref=ref, kind=kind, timestamp="2026-11-16T00:00:00+00:00")
 
 
+def test_get_reads_only_the_id_as_written(make: Factory) -> None:
+    """Security round 4, batch 2 (a sibling of the `>&١` defect): the
+    in-memory store read `ev-01` and `ev-١` as `ev-1` (str.isdigit takes
+    any Unicode digit and int() reads them); the JSON Lines store did not."""
+    store = make()
+    store.append(anchor())
+    b = store.append(anchor("log:x", "log"))
+    assert store.get("ev-1") == b
+    for other in ("ev-01", "ev-١", "ev-１", "ev-¹", "ev-+1", "ev-1 "):
+        assert store.get(other) is None, other
+
+
 def test_both_stores_implement_the_protocol(make: Factory) -> None:
     assert isinstance(make(), EvidenceStoreProtocol)
 
@@ -257,6 +269,20 @@ def test_jsonl_skips_and_counts_an_unreadable_line(tmp_path: Path) -> None:
         assert store.info().to_dict()["x-unreadable_lines"] == 1
         assert len(store.records()) == 1
         assert store.append(anchor("file:b")).record_id == "ev-1"
+
+
+def test_jsonl_skips_a_line_nested_too_deeply(tmp_path: Path) -> None:
+    """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
+    RecursionError on it, which the load did not catch, so the store did
+    not open."""
+    path = tmp_path / "e.jsonl"
+    with JsonlEvidenceStore(path) as store:
+        store.append(anchor())
+    with open(path, "ab") as f:
+        f.write(b"[" * 100_000 + b"]" * 100_000 + b"\n")
+    with JsonlEvidenceStore(path) as store:
+        assert store.info().to_dict()["x-unreadable_lines"] == 1
+        assert len(store.records()) == 1
 
 
 def test_jsonl_continues_a_short_write(

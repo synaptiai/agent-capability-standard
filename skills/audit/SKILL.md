@@ -227,24 +227,48 @@ hooks:
                 | if any(.[]; . == "..") then null else "/" + join("/") | ascii_downcase end
                 end;
             def parent_of: sub("/[^/]*$"; "");
-            # Brace expansion, as bash makes it of a word: a group holding a comma, or a
-            # sequence x..y, gives its words (.cl{a,}ude is .claude and .clude), the
-            # innermost group first. A sequence of numbers gives digits (\u0006); a
-            # group bash leaves as it is stays, as a character no name holds (\u0007).
-            # At most 256 words, from at most 32 groups: null for more.
-            def brace_group: "\\{[^{}]*(,|\\.\\.)[^{}]*\\}";
-            def expand_first: match(brace_group) as $g
-              | .[:$g.offset] as $pre | .[$g.offset + $g.length:] as $post | $g.string[1:-1] as $body
-              | if $body | test(",") then $body | split(",")[]
-                elif $body | test("^-?[0-9]+\\.\\.-?[0-9]+(\\.\\.-?[0-9]+)?$") then "\u0006"
-                elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.-?[0-9]+)?$") then
-                  ($body | explode) as $c | range([$c[0], $c[3]] | min; ([$c[0], $c[3]] | max) + 1) | [.] | implode
-                else "\u0007" end
-              | $pre + . + $post;
-            def brace_words: {n: 0, ws: [.]}
-              | until(all(.ws[]; test(brace_group) | not) or (.ws | length) > 256 or .n > 32;
-                      {n: (.n + 1), ws: [.ws[] | if test(brace_group) then expand_first else . end]})
-              | if (.ws | length) > 256 or .n > 32 then null else .ws end;
+            # Brace expansion, as bash makes it of a word: a group opens at the first
+            # { that a } closes, and runs to the first } after a , or .. at its own
+            # level (bash closes no group at a } before its first comma: {a},b} gives
+            # a} and b); a group holding a comma gives its parts, each expanded again,
+            # a sequence x..y its elements, and the text after the group is expanded
+            # again; a group bash leaves as it is stays as written. A sequence of
+            # numbers gives digits (\u0006). null for more than 256 words, groups 32
+            # deep, more than 512 braces and commas in a word, or more than 8 { tried
+            # for one group.
+            def brace_marks: [match("[{},]|\\.\\.(?!\\})"; "g") | {o: .offset, t: .string}];
+            def brace_close($m; $k): first(foreach range($k + 1; $m | length) as $j ({l: 0, c: 0, at: null};
+                $m[$j].t as $t
+                | if $t == "}" and .l == 0 and .c > 0 then .at = $j
+                  elif $t == "{" then .l += 1 | .at = null
+                  elif $t == "}" then (if .l > 0 then .l -= 1 else . end) | .at = null
+                  elif .l == 0 then .c += 1 | .at = null
+                  else .at = null end;
+                select(.at != null) | .at)) // null;
+            def brace_parts: . as $a
+              | (reduce ([match("[{},]"; "g") | {o: .offset, t: .string}][]) as $x ({l: 0, cuts: []};
+                  if $x.t == "{" then .l += 1
+                  elif $x.t == "}" then (if .l > 0 then .l -= 1 else . end)
+                  elif .l == 0 then .cuts += [$x.o]
+                  else . end) | [-1] + .cuts + [$a | length]) as $b
+              | [range(0; ($b | length) - 1) as $i | $a[$b[$i] + 1:$b[$i + 1]]];
+            def brace_expand($depth): . as $w | brace_marks as $m
+              | [range(0; $m | length) | select($m[.].t == "{" and (($m[.].o == 0 and $w[1:2] == "}") | not))] as $opens
+              | if ($m | length) > 512 or $depth > 32 then null
+                else (first($opens[:8][] as $k | brace_close($m; $k) as $c | select($c != null) | [$m[$k].o, $m[$c].o]) // null) as $g
+                | if $g == null then (if ($opens | length) > 8 then null else [$w] end)
+                  else $w[:$g[0]] as $pre | $w[$g[0] + 1:$g[1]] as $body | $w[$g[1] + 1:] as $post
+                  | (if $body | test(",") then [$body | brace_parts[] | brace_expand($depth + 1)] | if any(.[]; . == null) then null else add end
+                     elif $body | test("^-?[0-9]+\\.\\.-?[0-9]+(\\.\\.-?[0-9]+)?$") then ["\u0006"]
+                     elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.-?[0-9]+)?$") then
+                       [($body | explode) as $c | range([$c[0], $c[3]] | min; ([$c[0], $c[3]] | max) + 1) | [.] | implode]
+                     else ["{" + $body + "}"] end) as $mid
+                  | ($post | brace_expand($depth + 1)) as $tail
+                  | if $mid == null or $tail == null or ($mid | length) * ($tail | length) > 256 then null
+                    else [$mid[] as $a | $tail[] as $b | $pre + $a + $b] end
+                  end
+                end;
+            def brace_words: brace_expand(0);
             def names_records($cwd): may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd));
             def may_name($cwd):
               if .braces then (.m | brace_words) as $ws | $ws == null or any($ws[]; names_records($cwd))

@@ -195,6 +195,12 @@ class Checkpoint:
         return False
 
 
+def _file_identity(st: os.stat_result) -> tuple[int, ...]:
+    """A file as fstat gives it: device, inode, size, modification and
+    change times. A file replaced since has another."""
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
 def _tracked_by_git(path: Path) -> bool:
     """Whether git tracks ``path``, an existing file: one a repository ships,
     not one this layer wrote. git is asked from the file's own directory, so
@@ -417,6 +423,10 @@ class CheckpointTracker:
         # a record in the state file with another id was written by another
         # tracker since the load, and each write keeps it.
         self._known: set[str] = set()
+        # The state file this tracker wrote last, as fstat gives it (device,
+        # inode, size, modification and change times): a file that is still
+        # that one is merged without asking git whether it tracks it.
+        self._written_state: tuple[int, ...] | None = None
         self._snapshots = snapshots
         self._redactor = redactor
         if snapshots is not None:
@@ -528,28 +538,50 @@ class CheckpointTracker:
             os.close(fd)
             raise
 
-    def _read_state_file(self, where: LayerDir) -> dict[str, Any] | None:
+    def _read_state_file(
+        self, where: LayerDir, *, untracked: bool = False
+    ) -> dict[str, Any] | None:
         """The state file's object, or None when there is none, it is a
-        link, or it is larger than the limit.
+        link, or it is larger than the limit. With ``untracked``, also None
+        when git tracks it (:func:`_tracked_by_git`), unless it is still the
+        file this tracker wrote last: a repository can ship one, and the
+        load refuses it, so the merge of each write must not read it either.
 
         Raises:
             OSError, ValueError: The file cannot be read, or holds no JSON
-                object.
+                object. JSON nested deeper than the parser's stack allows
+                (`[[[...`, which raises RecursionError, no ValueError) is a
+                ValueError here, so every caller handles it as a file that
+                does not parse.
         """
         f = self._open_state_file(where)
         if f is None:
             return None
         with f:
-            file_size = os.fstat(f.fileno()).st_size
-            if file_size > self._MAX_STATE_FILE_BYTES:
+            st = os.fstat(f.fileno())
+            if st.st_size > self._MAX_STATE_FILE_BYTES:
                 logger.warning(
                     "State file too large (%d bytes, limit %d) — starting fresh",
-                    file_size,
+                    st.st_size,
                     self._MAX_STATE_FILE_BYTES,
                 )
                 return None
+            if (
+                untracked
+                and _file_identity(st) != self._written_state
+                and _tracked_by_git(self._state_file_path())
+            ):
+                logger.warning(
+                    "Not merging %s: git tracks it, so a repository shipped it; "
+                    "it is replaced",
+                    self._state_file_path(),
+                )
+                return None
             raw = f.read()
-        state = json.loads(raw)
+        try:
+            state = json.loads(raw)
+        except RecursionError:
+            raise ValueError("the state file nests too deeply to parse") from None
         if not isinstance(state, dict):
             raise ValueError("the state file holds no JSON object")
         return state
@@ -578,7 +610,7 @@ class CheckpointTracker:
         this one loaded, unchanged. A checkpoint this tracker removed
         (pruned or cleared) stays removed. Caller holds the file lock."""
         try:
-            current = self._read_state_file(where) or {}
+            current = self._read_state_file(where, untracked=True) or {}
         except (OSError, ValueError) as e:
             logger.warning("Replacing a state file that cannot be read: %s", e)
             current = {}
@@ -636,7 +668,8 @@ class CheckpointTracker:
         Uses write-to-tmp + rename for crash safety. Every file is opened in
         ``checkpoint_dir`` without following a link (:meth:`_open_dir`): a
         directory that is, or goes through, one is not written to, and the
-        tracker keeps its records in memory.
+        tracker keeps its records in memory. Never raises: a write that
+        fails is logged, and the change stands in memory.
         """
         try:
             where = self._open_dir(create=True)
@@ -661,10 +694,22 @@ class CheckpointTracker:
                     except OSError:
                         pass
                     raise
+                # What was written, as the next merge will find it (the
+                # rename may change its change time): still under the lock.
+                fd = where.open_regular(_STATE_FILE, os.O_RDONLY)
+                try:
+                    self._written_state = _file_identity(os.fstat(fd))
+                finally:
+                    os.close(fd)
             # A removed checkpoint is gone from the file now: only the ids
             # this tracker still holds need to stay known.
             self._known = {c.id for c in self._all()}
-        except (OSError, TypeError, ValueError, OverflowError) as e:
+        except Exception as e:
+            # Whatever the reason (RecursionError included), the change
+            # stands in memory, which is what this tracker's calls are
+            # decided on: a caller in the middle of a transition (a hold
+            # resolved at a boundary, then every checkpoint ended) must not
+            # be cut short by a write that failed.
             logger.warning("Failed to persist checkpoint state: %s", e)
 
     def _load_persisted_state(self) -> None:
@@ -753,6 +798,7 @@ class CheckpointTracker:
             TypeError,
             AttributeError,
             OSError,
+            RecursionError,
         ) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
             # Start fresh — don't propagate corrupt state
@@ -1155,7 +1201,13 @@ class CheckpointTracker:
                         continue
                     try:
                         results.append(Checkpoint.from_dict(json.loads(line)))
-                    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                    except (
+                        json.JSONDecodeError,
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                        RecursionError,
+                    ) as e:
                         logger.warning(
                             "Skipping corrupt archive line %d: %s", line_num, e
                         )

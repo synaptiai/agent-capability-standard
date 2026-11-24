@@ -530,6 +530,174 @@ class TestBracesAndAnsiCQuoting:
         assert key.read_text() == "0" * 64
 
 
+# Words whose brace expansion bash makes in ways a simpler reading gets
+# wrong: groups bash closes late, opens later, or leaves as written.
+BRACE_CASES = [
+    "a{b,c}d",
+    "{a},b}",
+    "x{a}y,z}",
+    "{a{b,c}",
+    "{a}{b,c}",
+    "{x{a},b}",
+    "{a,{b},c}",
+    "cu{z},r}l",
+    "{-u},cu{r,r}l}",
+    ".cl{x},a}ude/aud{y},i}t",
+    "{a..c}",
+    "{a,b}{c,d}",
+    "{{a,b},c}",
+    "a{,}b",
+    "{}",
+    "{},a}",
+    "x{},a}",
+    "{a}",
+    "a{b}c",
+    "{a,b",
+    "a,b}",
+    "{a.,.b}",
+    "{a..}",
+    "{..a}",
+    "{a..},b}",
+    "{a...},b}",
+    "{a}/../b}",
+    "{a},{b},c}",
+    "f{a,b}g{,x}",
+    "{ab..}x,y}",
+    "{a{b},c}d}",
+    "{a,b}}",
+    "}{a,b}",
+    "{{{a,b}",
+    "a{b,c,d{e,f}}g",
+    "{a..b{c,d}}",
+    "{1..3}",
+    "{01..10..3}",
+    "{z..a..5}",
+    "x{1..3},y}",
+    "{a},.claude/check}point.ok",
+    "{fixtures/,.git/acs/check}points",
+    ".{claude,x}/{a,check{points,x}}/",
+    "x" * 62 + "{a..},b}",
+]
+
+
+def _bash_words(word: str) -> list[str]:
+    """The non-empty words bash makes of ``word`` (no quotes in it)."""
+    out = subprocess.run(
+        ["bash", "-c", f"printf '%s\\n' {word}"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "LC_ALL": "C"},
+        timeout=30,
+    ).stdout
+    return sorted(w for w in out.split("\n") if w)
+
+
+class TestLateClosingBraceGroups:
+    """Security round 4, batch 2 (a sibling of #3, the verifier's brace
+    finding): bash closes no group at a `}` before its first comma, so
+    `{a},.claude/check}point.ok` gives `a}point.ok` and
+    `.claude/checkpoint.ok`. The guard paired each `}` with the nearest `{`,
+    kept `{a}` as written and read neither, so the call went to the
+    ordinary approval. It now finds each group as bash does (brace_group)
+    and expands it as bash does (brace_expand)."""
+
+    def test_bash_builds_those_paths(self, project: Path) -> None:
+        """The premise, from bash itself."""
+        out = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "printf '%s\\n' {a},.claude/check}point.ok "
+                "{a},.git/acs/check}points {a}y,.claude/audit.he}ad {x},.cl}aude",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.split()
+        for path in (
+            ".claude/checkpoint.ok",
+            ".git/acs/checkpoints",
+            ".claude/audit.head",
+            ".claude",
+        ):
+            assert path in out, (path, out)
+
+    def test_the_reading_is_bashs(self, tmp_path: Path) -> None:
+        """The hook's brace_words gives the words bash gives, for each
+        case (the functions run on their own, a word with its unquoted
+        braces and commas marked as path_words marks them)."""
+        text = PRE.read_text(encoding="utf-8")
+        functions = []
+        for name in (
+            "ansi_byte",
+            "brace_marks",
+            "brace_group",
+            "brace_expand",
+            "brace_words",
+        ):
+            start = text.index(f"\n{name}() {{\n") + 1
+            functions.append(text[start : text.index("\n}\n", start) + 3])
+        driver = tmp_path / "braces.sh"
+        driver.write_text(
+            "export LC_ALL=C\nset -euo pipefail\n"
+            + "".join(functions)
+            + "RESOLVE_LEFT=262144 BRACE_LEFT=8192 BRACE_SCAN_LEFT=65536\n"
+            + "PATH_WORDS=()\n"
+            + "m=\"${1//\\{/$'\\001'}\"; m=\"${m//,/$'\\002'}\"; "
+            + "m=\"${m//\\}/$'\\003'}\"\n"
+            + 'brace_words "$m"\nprintf \'%s\\n\' "${PATH_WORDS[@]}"\n',
+            encoding="utf-8",
+        )
+        for word in BRACE_CASES:
+            ours = subprocess.run(
+                ["bash", str(driver), word],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert ours.returncode == 0, (word, ours.stderr)
+            got = sorted(w for w in ours.stdout.split("\n") if w)
+            assert got == _bash_words(word), word
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "tee {a},.claude/check}point.ok",
+            "cp -rT fixtures {a},.git/acs/check}points",
+            "touch {a}y,.claude/audit.he}ad",
+            "rm -rf {x},.cl}aude",
+            "cp -rT fixtures {a}..,.git/acs/check}points",
+            "sh -c 'tee {a},.claude/check}point.ok'",
+        ],
+    )
+    def test_a_records_path_a_late_group_builds_is_refused(
+        self, project: Path, command: str
+    ) -> None:
+        """They were asked (the ordinary approval)."""
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert marker.exists()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch {x} a{b}c",
+            "touch {x},y",
+            "jq '{a},b}' a.txt > b.txt",
+            "touch {a,b},c}",
+            "touch {x{a},b}",
+            'jq \'{"a":{"b":1},"c":2}\' a.txt > b.txt',
+            "jq '{name: .a, meta: {x: .b}, y: 1}' a.txt > b.txt",
+        ],
+    )
+    def test_other_braces_are_asked(self, project: Path, command: str) -> None:
+        """Bash builds no records path from these (the jq filters are read
+        again, as a shell would read them)."""
+        fresh_marker(project)
+        assert asked(run_pre(project, "Bash", {"command": command})), command
+
+
 class TestTheReadingsTime:
     """Security round 4, batch 1, #2: within the 65536-byte budget, a word
     that opens with `-` gave one candidate per position of its option
