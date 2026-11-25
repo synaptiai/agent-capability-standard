@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "61cdcfaf1532",
+  "session_id": "71aa5540-28b1-45bc-8972-b8343612c3c3",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-25T13:51:57.958878Z",
+  "branch": "fix/134-macos-bash32",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "CHANGELOG.md",
+    "hooks/pretooluse_require_checkpoint.sh"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "bd0db968-7c76-4491-8898-5971368bc153",
+  "checkpoint_transcript_start": 2527,
+  "transcript_lines_at_start": 2527,
+  "token_usage": {
+    "input_tokens": 48,
+    "cache_creation_tokens": 27901,
+    "cache_read_tokens": 21737992,
+    "output_tokens": 12267,
+    "api_call_count": 23
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-11-25T13:51:54.702214Z",
+    "agent_lines": 10,
+    "human_added": 338209,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 338219,
+    "agent_percentage": 0.002956664173213214
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/71aa5540-28b1-45bc-8972-b8343612c3c3.jsonl"
+}
