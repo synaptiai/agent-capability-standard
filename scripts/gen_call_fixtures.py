@@ -330,10 +330,10 @@ binding(
 )
 binding(
     "offered_classified_tool_counts",
-    "An offered tool with a classifier counts as able to perform any capability, a checkpoint included.",
-    [rec("write", "mutate"), rec("shell", "mutate", classifier="shell")],
-    offered={"write": "write", "shell": "shell"},
-    effective={"write": GATED, "shell": GATED},
+    "An offered tool with a classifier, not a shell-like tool, counts as able to perform any capability, a checkpoint included.",
+    [rec("write", "mutate"), rec("batch", "mutate", classifier="batch")],
+    offered={"write": "write", "batch": "batch"},
+    effective={"write": GATED, "batch": GATED},
 )
 binding(
     "offered_host_takes_checkpoints",

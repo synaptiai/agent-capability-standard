@@ -7,6 +7,14 @@
   "does_not_cover": "a tool's own nested calls (an MCP tool calling another service); calls of a session whose options were not wrapped",
   "scope": "this adapter instance: every session and subagent it serves, ordered by its lock; a checkpoint it reads back from its checkpoint_dir, taken by an earlier process or by another adapter on that directory, authorises none of its calls; serve sessions that must not share records with separate adapters",
   "boundaries": ["Stop of any session this adapter serves (its main agent's turn ends)", "UserPromptSubmit of any session this adapter serves (a turn starts, which also ends what a turn left when its Stop never came)"],
+  "shell_tools": {
+    "Bash": "none",
+    "Monitor": "none",
+    "PowerShell": "none",
+    "Skill": "none",
+    "Agent": "none",
+    "Task": "none"
+  },
   "checkpoint_max_age": "PT30M",
   "approval": {
     "how": "prompt",

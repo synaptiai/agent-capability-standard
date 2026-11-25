@@ -7,7 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 Standard 1.2.0 (Candidate Standard) and capability ontology 2.2.0, accepted
-by RFC-0005 to RFC-0010, with their implementation: the reference validator
+by RFC-0005 to RFC-0010 and carrying the rule for shell-like tools that
+RFC-0011, a Draft, proposes, with their implementation: the reference validator
 and executor, the Python SDK, the plugin's hooks and skills, the new
 TypeScript package `@synaptiai/acs-core` and the Standard Agents binding.
 They resolve the findings of the Standard Agents mapping, which this release
@@ -2118,6 +2119,29 @@ here and marked so.
   ids), §8.1–§8.3 (trust), §11.5–§11.7 (versions and artifacts) and
   Appendix D.7. The entries on domain profiles, trust, entity ids, cited
   versions and WebAssembly below implement it.
+- Standard 1.2.0, shell-like tools and the operating-system boundary
+  ([RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft):
+  the text it proposes for §2, §5.18.2, §5.18.3, §5.18.8, §10.4 and D.8,
+  which binds a claim of class SL once RFC-0011 is Accepted. A safety
+  layer gives every call of a shell-like tool (a shell, an interpreter, a
+  REPL, or a tool that runs code its arguments supply) the tool's worst
+  case unless its conformance statement declares an operating-system
+  boundary for the tool and the layer has verified by code, for that call,
+  that the boundary holds in the effective host configuration: the values
+  the host applies, from every source it reads, each counting only where
+  the host honours it. The boundary is defined by four properties: no
+  route outside it, writes kept from the layer's records, its code and any
+  file that code outside the boundary runs, credentials (the user's, the
+  host's and the layer's) out of reach, and a network allowlist that
+  refuses other hosts. The conformance statement schema has a required
+  member `shell_tools`; the Python adapter's statement declares `"none"`
+  for Bash, Monitor, PowerShell, Skill, Agent and Task, and the Standard
+  Agents binding's declares no shell-like tool. The adapter's Bash
+  classifier still relaxes Bash calls, so once RFC-0011 is Accepted it does
+  not conform to class SL until it gates every Bash call or runs Bash under
+  a boundary it declares and verifies. The plugin's text readers (the
+  records guard, the Bash classification, the send and audit skills'
+  command hooks) are documented as advisory, not as the boundary.
 - Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
   checks them (`profile::Policy`), the validator and the executor apply
   them (raised flags, a person for `require_human` and `block_autonomous`

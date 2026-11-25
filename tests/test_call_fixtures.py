@@ -38,7 +38,11 @@ from claude_agent_sdk import (
     ToolPermissionContext,
 )
 
-from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+from grounded_agency import (
+    GroundedAgentAdapter,
+    GroundedAgentConfig,
+    ToolCapabilityMapper,
+)
 from grounded_agency.errors import Severity
 from grounded_agency.mcp import _guarded, create_grounded_mcp_server
 from tests.conftest import FakeClock
@@ -61,6 +65,32 @@ def test_the_statement_validates() -> None:
         jsonschema.Draft202012Validator(schema).validate(json.loads(other.read_text()))
 
 
+def test_the_statement_schema_checks_an_os_boundary() -> None:
+    schema = json.loads((FIXTURES / "schema" / "statement.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    boundary = {
+        "mechanism": "a sandbox",
+        "routes_outside": "none honoured",
+        "writes": "the project only",
+        "credentials": "denied",
+        "network": "an allowlist",
+        "verification": "every source merged",
+        "outside": ["the layer's hooks"],
+    }
+    statement = _statement()
+    statement["shell_tools"] = {"Bash": boundary}
+    validator.validate(statement)
+    # The layer's own decision code always runs outside the boundary.
+    statement["shell_tools"] = {"Bash": {**boundary, "outside": []}}
+    assert not validator.is_valid(statement)
+    # The boundary object is closed: a member it does not define is refused.
+    statement["shell_tools"] = {"Bash": {**boundary, "x_other": "x"}}
+    assert not validator.is_valid(statement)
+    # The member is required.
+    del statement["shell_tools"]
+    assert not validator.is_valid(statement)
+
+
 def test_the_statement_matches_the_adapter() -> None:
     from grounded_agency import __version__
     from grounded_agency.adapter import PROMPTING_PERMISSION_MODES
@@ -79,7 +109,10 @@ def test_the_statement_matches_the_adapter() -> None:
     assert statement["approval"]["roles"] is False
     assert statement["approval"]["expires"] is None
     # Every check of section 5.18.10 is applied (class SL): the output
-    # contract by default, and turning it off is outside the class.
+    # contract by default, and turning it off is outside the class. The rule
+    # for shell-like tools (section 5.18.3) binds a claim of class SL only
+    # once RFC-0011, a Draft, is Accepted, so the Bash classifier's gap is
+    # not listed here yet (RFC-0011 decision 8).
     assert "not_applied" not in statement
     assert GroundedAgentConfig().check_outputs is True
     # Each setting that turns a check off is named outside the class: with
@@ -107,6 +140,34 @@ def test_the_statement_matches_the_adapter() -> None:
     assert "other MCP servers" not in without
     assert "PostToolUse hook checks the result of any other" in without
     assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
+    # Section 5.18.3 (RFC-0011, Draft): the adapter declares no
+    # operating-system boundary for Claude Code's shell-like tools.
+    assert statement["shell_tools"] == dict.fromkeys(
+        ("Bash", "Monitor", "PowerShell", "Skill", "Agent", "Task"), "none"
+    )
+    mapper = ToolCapabilityMapper()
+    unbound = mapper.map_tool("an_unknown_tool", {})
+    # Monitor and PowerShell get an unbound tool's worst case for any input.
+    for name in ("Monitor", "PowerShell"):
+        for command in ("ls", "git stash create"):
+            assert mapper.map_tool(name, {"command": command}) == unbound
+    # Skill, Agent and Task get one gated mapping whatever their arguments.
+    for name, first, second in (
+        ("Skill", {"skill": "a"}, {"skill": "b", "args": "ls"}),
+        ("Agent", {"prompt": "a"}, {"prompt": "b", "subagent_type": "c"}),
+        ("Task", {"prompt": "a"}, {"prompt": "b", "subagent_type": "c"}),
+    ):
+        mapping = mapper.map_tool(name, first)
+        assert mapping == mapper.map_tool(name, second)
+        assert mapping.requires_checkpoint and mapping.requires_approval
+    # The Bash classifier still relaxes calls with no boundary declared,
+    # which RFC-0011's rule, once Accepted, does not allow (issue #184).
+    # When it stops, this fails and the statement and docs change with it.
+    assert mapper.map_tool("Bash", {"command": "ls"}).capability_id == "observe"
+    assert (
+        mapper.map_tool("Bash", {"command": "git stash create"}).capability_id
+        == "checkpoint"
+    )
 
 
 def test_there_are_fixtures() -> None:

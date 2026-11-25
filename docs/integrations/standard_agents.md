@@ -923,7 +923,8 @@ Its statement,
 says what it covers (calls of tools defined with `groundedTool` or
 `controlTool`) and what it cannot see (tools defined with plain `defineTool`,
 provider-executed tools, writes made by effects, hooks, handlers or
-endpoints), its scope (one thread) and boundaries (a new execution), a
+endpoints), its scope (one thread) and boundaries (a new execution), that
+it covers no shell-like tool (`shell_tools` is `{}`, §5.18.3), a
 checkpoint's maximum age (ten minutes), how it obtains approval (recorded
 through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the

@@ -133,6 +133,12 @@ as before. It adds:
   layers, SL ([§10.4](spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)),
   which the [Python SDK adapter](docs/integrations/claude_agent_sdk.md) and
   the [Standard Agents binding](docs/integrations/standard_agents.md) claim.
+  The Standard also carries the rule that
+  [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft,
+  proposes: a layer gives every call of a shell-like tool (a shell, an
+  interpreter) the tool's worst case unless the call runs under an
+  operating-system boundary the layer declares and verifies. The adapter's
+  Bash classifier does not meet that rule yet.
 - **The host protocol** ([§5.19](spec/STANDARD-v1.2.0.md#519-host-protocol)):
   the actions, responses and run operations between an executor and its
   host as a published schema, with cancellation, run records and a

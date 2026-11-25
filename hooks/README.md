@@ -20,6 +20,16 @@ where Claude Code lets them, and do not claim the safety-layer class SL
 says why). The Python SDK adapter and the Standard Agents binding claim it
 (their conformance statements are in `tests/conformance/calls/statements/`).
 
+The hooks' text readers (the records guard, the Bash classification, the
+send and audit skills' command hooks) are advisory: they refuse early what
+they recognise and let a command they read as read-only skip the
+checkpoint, but they read text that the shell interprets and are not a
+boundary. The Standard's rule for shell-like tools
+([§5.18.3](../spec/STANDARD-v1.2.0.md#5183-classification), proposed by
+[RFC-0011](../spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft)
+allows a layer to relax a Bash call only under an operating-system boundary
+it declares and has verified for that call; the hooks do not yet check one.
+
 ## Platforms
 
 The hooks need `bash`, `jq` and `openssl`. CI runs them, and every test, on Linux (GNU tools,

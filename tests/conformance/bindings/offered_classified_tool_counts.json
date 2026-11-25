@@ -1,5 +1,5 @@
 {
-  "description": "An offered tool with a classifier counts as able to perform any capability, a checkpoint included.",
+  "description": "An offered tool with a classifier, not a shell-like tool, counts as able to perform any capability, a checkpoint included.",
   "ontology": "2.2.0",
   "needs": [
     "offered_tools"
@@ -11,15 +11,15 @@
       "capability": "mutate"
     },
     {
-      "tool": "shell",
+      "tool": "batch",
       "ontology": "2.2.0",
       "capability": "mutate",
-      "classifier": "shell"
+      "classifier": "batch"
     }
   ],
   "offered": {
     "write": "write",
-    "shell": "shell"
+    "batch": "batch"
   },
   "expect": {
     "errors": [],
@@ -31,7 +31,7 @@
         "requires_checkpoint": true,
         "requires_approval": true
       },
-      "shell": {
+      "batch": {
         "risk": "high",
         "mutation": true,
         "requires_checkpoint": true,

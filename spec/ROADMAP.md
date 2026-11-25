@@ -54,6 +54,12 @@ Standard 1.2.0 is accepted by
   trust arithmetic, ontology versions and the schema dialect of capability
   contracts.
 
+Its text also carries the rule that
+[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md), a Draft, proposes
+for shell-like tools: a safety layer gives every call of a shell, an
+interpreter or a REPL the tool's worst case unless the call runs under an
+operating-system boundary the layer declares and verifies.
+
 [Appendix D](STANDARD-v1.2.0.md#appendix-d-changes-from-110) of the 1.2.0 text
 lists every change from 1.1.0.
 

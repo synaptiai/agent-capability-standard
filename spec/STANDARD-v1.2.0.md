@@ -7,10 +7,16 @@
 [RFC-0007](RFC-0007-delegation-catalogs-and-diagnostics.md),
 [RFC-0008](RFC-0008-evidence-grounding-and-secrets.md),
 [RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
-[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
-validator and executor implement §4, §5 and §9–§11 and claim class EX
-(§10.5); the Python SDK adapter and the Standard Agents binding implement
-§5.18 and claim class SL (§10.4); the executor and both layers check
+[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); this text
+also carries the rule for shell-like tools that
+[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md), a Draft, proposes
+(§2, §5.18.2, §5.18.3, §5.18.8, §10.4), which binds a claim of class SL once
+RFC-0011 is Accepted; the reference validator and executor implement §4, §5
+and §9–§11 and claim class EX (§10.5); the Python SDK adapter and the
+Standard Agents binding implement §5.18 and claim class SL (§10.4), and the
+adapter's Bash classifier relaxes calls with no operating-system boundary
+declared, which RFC-0011's rule, once Accepted, does not allow; the
+executor and both layers check
 grounding (§5.20) and apply domain profiles (§5.21); `grounded_agency`
 implements §7.1's entity ids and §8's arithmetic; §7.2 and §7.3 are not
 implemented
@@ -125,6 +131,8 @@ Terms of tool-calling hosts, catalogs and delegation:
 | **Safety layer** | Code that decides, before a call's effect, whether the call may run under §5.18: a pre-call hook, a permission callback, or a wrapper around the tool's own code |
 | **Layer scope** | The sequence of calls a safety layer orders and keeps records for, such as one session or thread (§5.18.5); in §5.18, *scope* means a layer scope |
 | **Execution boundary** | A point where work stops and later resumes, after which earlier checkpoints authorise nothing: for a workflow, the end of a wait or delay (§5.13) and the resumption of a deferred run (§5.14.1), but not the restoring of a saved run (§5.19.4); on a tool-calling host, a point its safety layer names, such as a turn that ends while a person decides (§5.18.6) |
+| **Shell-like tool** | A tool whose call runs a program that the call's arguments, or a definition or file the call names, supply in whole or in part, whoever runs it (the host, a tool server, a program the tool starts): a command line for a shell, a script for an interpreter, input to a REPL, a skill whose embedded commands take the call's arguments, a composite that invokes a shell-like tool. A tool that passes its arguments as values to one fixed program is not shell-like when no argument, and no definition or file the call names, can make that program run other code (§5.18.3) |
+| **Operating-system boundary** | Confinement the operating system applies to every process that runs a call of a shell-like tool, with the properties §5.18.3 lists |
 | **Agent manifest** | What an agent that a `delegate` step names may do: the capabilities it may exercise and the task it accepts (§5.15.1) |
 | **Catalog manifest** | A catalog's id, version and exported workflows, under its `catalog` key (§5.1.1) |
 | **Qualified workflow id** | A catalog id, `/` and a workflow name: a workflow of a given catalog (§5.1.1) |
@@ -2448,7 +2456,9 @@ model runs, and report each of these:
 | A host action tied to a tool that is not control-only and is unbound, has a prerequisite, or has an effective `requires_checkpoint` or `requires_approval` (§5.18.3) | F506 |
 
 An offered tool with a `classifier` counts as able to perform any
-capability, and a host that takes checkpoints itself (§5.18.6) counts as
+capability, except a shell-like tool for which the layer's statement
+declares no operating-system boundary (§5.18.3), which performs only its
+worst case; and a host that takes checkpoints itself (§5.18.6) counts as
 performing `checkpoint`.
 
 #### 5.18.3 Classification
@@ -2470,17 +2480,82 @@ A binding classifies a tool by its effect, not by its transport or its name:
 **Several capabilities.** A tool that performs several capabilities in one
 call names the others in `additional_capabilities`; its effective flags and
 prerequisites are those of all of them (§5.18.1). The same holds for one
-call a classifier reads as several actions (a shell line of several
-commands): its classification is the strictest flags and the union of the
+call a classifier reads as several actions (a batch request of several
+operations): its classification is the strictest flags and the union of the
 prerequisites of every action it recognises.
 
 **Classifiers.** A layer MAY classify each call of a tool from its
-arguments (`classifier` names how), as a shell command may only read. The
-record's `capability`, `additional_capabilities` and `flags` are then the
-tool's worst case, which applies to any argument the classifier does not
-recognise and whenever it fails. A classification it returns is a
-capability and declared flags, subject to §5.18.1: never weaker than that
-capability's ontology flags, though it may be weaker than the worst case.
+arguments (`classifier` names how), as a call whose `method` argument is
+`GET` may only read. The record's `capability`, `additional_capabilities`
+and `flags` are then the tool's worst case, which applies to any argument
+the classifier does not recognise and whenever it fails. A classification
+it returns is a capability and declared flags, subject to §5.18.1: never
+weaker than that capability's ontology flags, though it may be weaker than
+the worst case. For a shell-like tool this holds only as the next paragraph
+states.
+
+**Shell-like tools.** A call of a shell-like tool (§2) runs a program that
+its arguments, or a definition or file it names, supply, and a reading of
+that text cannot be shown to match what the shell or interpreter that runs
+it does. A layer MUST give every call of a shell-like tool the tool's
+worst case unless its conformance statement declares an operating-system
+boundary for the tool (§10.4) and, before the call runs, the layer has
+verified, by code (§5.18.10) from the effective host configuration and the
+call's arguments, that the boundary holds for that call. The effective host configuration is the values the host applies
+to the call, from every source it reads (such as a managed policy, the
+user's, the project's, local ones, and settings, flags and environment
+variables given when the host starts), merged in the host's order, a value
+counting only from a source the host honours it from and as the host
+interprets it (a relative path where the host ignores one counts as
+absent). The boundary is unverified for the call when:
+
+- a source is one the layer can neither read nor supply itself, or has
+  changed since the host last loaded it;
+- the layer does not know, for the host's version and permission mode,
+  which sources the host reads and which values it honours from each;
+- the configuration excludes any command from the boundary, or honours an
+  argument that runs a call outside it; a layer does not decide from a
+  call's text whether it matches an exclusion;
+- the configuration lets the host run the call without the boundary when
+  its mechanism is unavailable, unless the layer observes, for that call,
+  that the boundary is applied;
+- a verification fails or cannot be completed. This is not the failure of
+  a check under §5.18.8: the call gets the worst case, not R407.
+
+Any classification other than the worst case relaxes the call, whatever
+its flags: one that takes or restores a checkpoint, or leaves out a
+capability of the worst case, included. A layer leaves out `send` only
+where every host on the boundary's allowlist is one that every destination
+policy in force allows (§4.4.2). A layer that
+declares no boundary, or cannot verify it for a call, gives the call the
+worst case and conforms; it can take checkpoints by another route, such as
+a checkpoint tool or the host's own (§5.18.6).
+
+An **operating-system boundary** holds for a call when every process that
+runs the call's program, whether the call starts it or it was already
+running (an interpreter, a REPL, a kernel), runs, as the operating system
+enforces it, with each of these properties:
+
+| Property | What holds |
+|----------|------------|
+| No route outside the boundary | No part of the call runs outside the boundary: the call carries no argument the host honours to run it outside, the configuration excludes no command from the boundary, and no process inside the boundary can ask a process outside it to run a program or act for it (through a local socket, a loopback port, a scheduler, or messages to an application), except the boundary's own network proxy, which carries only the connections the Network property allows |
+| Writes | Writes reach only the places the statement names, and never, by any route (a symbolic or hard link, or a rename of the file or of a directory above it): the layer's own records; the layer's own code and configuration; any configuration source of the host; or any file that code outside the boundary runs or reads as configuration, such as a hook's script, a tool server's code or definition, and the configuration and hooks of a repository whose git commands run outside the boundary |
+| Credentials | Credentials are out of reach, neither readable nor usable through a service outside the boundary (an operating-system keychain, an SSH or GPG agent, a credential helper, a cloud metadata endpoint): the user's, in the files that hold them, SSH private keys and the environment variables that carry them; the host's own; and the layer's own secrets, such as an audit key |
+| Network | Connections, name lookups included, reach only hosts on an allowlist, and one to a host not on it is refused |
+
+The layer's own decision code (a hook, a callback) and a tool server the
+host starts outside the boundary are not confined by it; the statement
+names them, and no file such code runs or reads as configuration is
+writable from inside the boundary (Writes). Where a boundary holds, a call
+misread as read-only can still change what the boundary lets it write and
+reach the hosts on the allowlist, but not the layer's records, the
+credentials or a process outside the boundary; a change it makes within
+the write scope has no checkpoint.
+
+**Status of this rule.** Every passage of this Standard on shell-like
+tools or the operating-system boundary (§2, §5.18.2, this section, §5.18.8,
+§10.4 and D.8) is proposed by RFC-0011, a Draft, and binds a claim of class
+SL once RFC-0011 is Accepted.
 
 **Control-only tools.** A record with `control: true` has no member but
 `tool`, `ontology`, `standard`, `control` and `x-` members (else S303). Its
@@ -2712,9 +2787,10 @@ has failed, §5.18.10):
   bindings and settings it applied (`config_sha256`), with the settings
   themselves listed where they are few (`settings`), so a reader can tell
   which rules a call was held to.
-- **Fail closed.** A layer that cannot classify a call applies §5.18.2 or
-  §5.18.3. A layer that cannot read its records, complete a check, or write
-  the record of a call it is about to allow refuses the call with R407; for
+- **Fail closed.** A layer that cannot classify a call, or cannot verify
+  an operating-system boundary for it, applies §5.18.2 or §5.18.3. A
+  layer that cannot read its records, complete a check, or write the
+  record of a call it is about to allow refuses the call with R407; for
   a control-only call it reports the failure and lets the call run
   (§5.18.3). A host that claims a conforming layer MUST NOT run a call the
   layer covers without the layer's decision: if the layer is missing, fails to load,
@@ -4301,6 +4377,9 @@ A safety layer conforms to class SL when, for every call it covers, it:
 
 - loads bindings and reports their diagnostics as §5.18.1–§5.18.4 state,
   and passes every binding fixture whose `needs` it supports;
+- classifies each call as §5.18.2 and §5.18.3 state, giving every call of
+  a shell-like tool the tool's worst case unless it has verified, for that
+  call, an operating-system boundary its statement declares;
 - applies §5.18.5–§5.18.9 and passes every call-sequence fixture whose
   `needs` it supports;
 - applies the capability checks of §5.18.10;
@@ -4309,16 +4388,21 @@ A safety layer conforms to class SL when, for every call it covers, it:
 Its **conformance statement** names: the host, and the layer's name and
 version; the calls it covers and those it cannot see; its scope, and
 whether a delegate's calls share it; the execution boundaries it observes;
-its checkpoint maximum age; how it obtains approval (a prompt, recorded
-decisions, or both), the host configurations in which it relies on a
-prompt, its decision expiry, the most approvers it can obtain for one call,
-and whether it can verify an approver's role; how it makes a check and its
+for each shell-like tool whose calls it covers, the operating-system
+boundary its calls run under (its mechanism, how each property holds, how
+the layer verifies it in the effective configuration and in each call, and
+the code that runs outside it), or none (§5.18.3); its checkpoint maximum
+age; how it obtains approval (a prompt, recorded decisions, or both), the
+host configurations in which it relies on a prompt, its decision expiry,
+the most approvers it can obtain for one call, and whether it can verify an
+approver's role; how it makes a check and its
 use atomic (a lock or reservation, or its host's order); the fixture
 features it supports; its host gaps, the cases in which its host can run
 a covered call without the layer's decision; the covered calls whose
 results carry no capability output, to which no output check applies
-(§5.18.10, §5.21.4); and any check of §5.18.10 it does not apply, which a
-conforming layer has none of. The statements of the
+(§5.18.10, §5.21.4); and any check of §5.18.10, or the rule for
+shell-like tools of §5.18.3, it does not apply, which a conforming layer
+has none of. The statements of the
 reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
 
 **Binding fixtures.** Each fixture holds an `ontology` version, `records`,
@@ -4371,8 +4455,8 @@ A runner gives the layer a fixture's values as its JSON text writes them:
 an integer literal beyond 2^53 is not rounded on the way.
 
 Not testable by fixture, and stated instead: that a prompt shows what runs
-(§5.18.7), that the layer sees every call it claims to cover, and its host
-gaps.
+(§5.18.7), that the layer sees every call it claims to cover, its host
+gaps, and that an operating-system boundary it declares holds (§5.18.3).
 
 ### 10.5 Executor Conformance
 
@@ -4896,6 +4980,7 @@ same expression and whose action escalates to a handler (§5.12).
 - [RFC-0008: Evidence, Grounding and Secrets](RFC-0008-evidence-grounding-and-secrets.md)
 - [RFC-0009: Checkpoint, Rollback, Send and Memory](RFC-0009-checkpoint-rollback-send-memory.md)
 - [RFC-0010: Domain Profiles, Trust, Versioning and Schema Dialect](RFC-0010-profiles-trust-versioning-and-dialect.md)
+- [RFC-0011: Shell-like tools and the operating-system boundary](RFC-0011-shell-like-tools-and-os-boundary.md) (Draft)
 - [Agent Skills specification](https://agentskills.io/specification) (the skill format of the reference plugin)
 - [Common Expression Language](https://github.com/google/cel-spec)
 - [Whitepaper: Grounded Agency](WHITEPAPER.md)
@@ -5282,6 +5367,29 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 - The prefix `x-acs-` reserved for this Standard (Appendix B)
 - The terms domain profile, schema dialect and entity id, and the trust
   score defined by its formula (§2)
+
+### D.8 Shell-like tools and the operating-system boundary (RFC-0011, Draft)
+
+**Proposed for 1.2.0** (binds a claim of class SL once RFC-0011 is
+Accepted; binds safety layers, not workflows):
+
+- A call of a shell-like tool gets the tool's worst case unless the layer's
+  conformance statement declares an operating-system boundary for the tool
+  and the layer has verified by code, for the call, that it holds in the
+  effective host configuration; any other classification relaxes the call,
+  a checkpoint or a restore read from the command included; a verification
+  that fails gives the worst case, not R407 (§5.18.3, §5.18.8)
+- The boundary defined by four properties: no route outside the boundary,
+  writes limited and kept from the layer's records, its code and anything
+  that code outside the boundary runs, credentials (the user's, the
+  host's and the layer's) out of reach, and a network allowlist that
+  refuses other hosts (§5.18.3)
+- An offered shell-like tool with a classifier and no declared boundary
+  counts as performing only its worst case (§5.18.2)
+- The conformance statement names each shell-like tool's boundary or none,
+  and the code that runs outside it; its schema's required member
+  `shell_tools`; a class SL criterion for classifying calls (§10.4)
+- The terms shell-like tool and operating-system boundary (§2)
 
 ---
 
