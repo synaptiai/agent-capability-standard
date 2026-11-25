@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "947db60a3854",
+  "strategy": "manual-commit",
+  "branch": "feat/178-rfc-0011-os-boundary",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "spec/RFC-0011-shell-like-tools-and-os-boundary.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/94/7db60a3854/0/metadata.json",
+      "transcript": "/94/7db60a3854/0/full.jsonl",
+      "context": "/94/7db60a3854/0/context.md",
+      "content_hash": "/94/7db60a3854/0/content_hash.txt",
+      "prompt": "/94/7db60a3854/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 918,
+    "cache_creation_tokens": 1791598,
+    "cache_read_tokens": 231048332,
+    "output_tokens": 369666,
+    "api_call_count": 429
+  }
+}

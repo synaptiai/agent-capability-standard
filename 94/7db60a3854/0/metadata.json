@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "947db60a3854",
+  "session_id": "71aa5540-28b1-45bc-8972-b8343612c3c3",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-25T16:54:28.285192Z",
+  "branch": "feat/178-rfc-0011-os-boundary",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "spec/RFC-0011-shell-like-tools-and-os-boundary.md"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "34180e2b-dd61-49e8-9939-55496b1c4b80",
+  "token_usage": {
+    "input_tokens": 918,
+    "cache_creation_tokens": 1791598,
+    "cache_read_tokens": 231048332,
+    "output_tokens": 369666,
+    "api_call_count": 429
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-11-25T16:54:21.798103Z",
+    "agent_lines": 598,
+    "human_added": 338209,
+    "human_modified": 1,
+    "human_removed": 0,
+    "total_committed": 338808,
+    "agent_percentage": 0.17650114519137683
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/71aa5540-28b1-45bc-8972-b8343612c3c3.jsonl"
+}
