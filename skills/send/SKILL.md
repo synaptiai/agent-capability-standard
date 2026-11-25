@@ -155,7 +155,8 @@ hooks:
             # The words, as the shell passes them, of each simple command, and the
             # host each request names (jq reads a command of up to 16384 bytes in well
             # under a second)
-            READER="$(cat <<'JQ'
+            reader_program() {
+              cat <<'JQ'
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
@@ -718,7 +719,8 @@ hooks:
                 end
               end
             JQ
-            )"
+            }
+            READER="$(reader_program)"
             # Whether the command may turn on dotglob, so that a glob matches a
             # leading dot: shopt, GLOBIGNORE, BASHOPTS, or a file it sources or text
             # it evaluates (quotes and backslashes removed)
@@ -776,7 +778,18 @@ hooks:
             if [ -L "$TARGET" ]; then
               REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || { echo "$REFUSE" >&2; exit 2; }
             elif [ -e "$TARGET" ] || [ -d "$(dirname -- "$TARGET")" ]; then
-              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || REACHED="$TARGET"
+              # BSD readlink -f (macOS) fails when the last part does not exist yet:
+              # the directory is resolved then, and the name kept
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || {
+                case "$TARGET" in */*) R_DIR="${TARGET%/*}" ;; *) R_DIR=. ;; esac
+                if R_DIR="$(cd -P -- "${R_DIR:-/}" 2>/dev/null && pwd -P && printf x)"; then
+                  R_DIR="${R_DIR%x}"
+                  REACHED="${R_DIR%?}"
+                  REACHED="${REACHED%/}/${TARGET##*/}"
+                else
+                  REACHED="$TARGET"
+                fi
+              }
             fi
             for P in "$TARGET" "$REACHED"; do
               # In lower case (a file system may ignore case), repeated slashes and ./

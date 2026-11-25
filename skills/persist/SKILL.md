@@ -93,9 +93,17 @@ hooks:
                 [ -L "$R_PATH" ] || break
                 R_LINKS=$((R_LINKS + 1))
                 [ "$R_LINKS" -le 8 ] || return 1
-                R_TO="$(readlink "$R_PATH" 2>/dev/null && printf x)" || return 1
-                R_TO="${R_TO%x}"
-                case "$R_TO" in *"$NL") R_TO="${R_TO%?}" ;; *) return 1 ;; esac
+                # The target exactly: BSD readlink (macOS) prints a target that
+                # ends in a line break without one more, so perl reads it where
+                # it is installed, and GNU readlink's output otherwise
+                if command -v perl >/dev/null 2>&1; then
+                  R_TO="$(perl -e 'defined(my $t = readlink $ARGV[0]) or exit 1; print $t, "x"' -- "$R_PATH" 2>/dev/null)" || return 1
+                  R_TO="${R_TO%x}"
+                else
+                  R_TO="$(readlink "$R_PATH" 2>/dev/null && printf x)" || return 1
+                  R_TO="${R_TO%x}"
+                  case "$R_TO" in *"$NL") R_TO="${R_TO%?}" ;; *) return 1 ;; esac
+                fi
                 case "$R_TO" in /*) R_PATH="$R_TO" ;; *) R_PATH="${R_PATH%/*}/$R_TO" ;; esac
               done
               printf '%sx' "$R_PATH"
@@ -299,10 +307,10 @@ hooks:
             SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
             # A quote, or an escaped one (\" in JSON text inside a JSON string)
             SECRET_Q="\\\\*[\"']"
-            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
+            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions; written {0,255} and one more, since BSD grep refuses a count over 255)
             SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
             SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
-            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,255}[^[:space:]:\"'\\\\]?:"
             # curl's cookie option (-b, --cookie), up to its value, and up to the quote its value opens with
             SECRET_COOKIE_OPT="(^|[^A-Za-z0-9_-])(-b$SECRET_SEP?|--cookie$SECRET_SEP)"
             SECRET_COOKIE_OPTQ="(^|[^A-Za-z0-9_-])(-b([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*)?|--cookie([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*))$SECRET_Q"

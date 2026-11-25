@@ -276,6 +276,22 @@ physical_dir() {
 # cannot be read. Not seen: the entries Claude Code's Bash tool adds to PATH
 # from the user's shell startup files (its shell snapshot), which reach no
 # hook. The SDK mapper asks the same (command_may_be_content).
+# The target of link $1 exactly, with an x after it: a target may end in a
+# line break, which GNU readlink prints with one more after it but BSD
+# readlink (macOS) prints without one, so a target and the same name
+# without its last line break read alike there. Perl's readlink returns it
+# as stored; without perl, GNU readlink's output is read.
+link_target() {
+  local t
+  if command -v perl > /dev/null 2>&1; then
+    perl -e 'defined(my $t = readlink $ARGV[0]) or exit 1; print $t, "x"' -- "$1"
+    return
+  fi
+  t=$(readlink -- "$1" && printf x) || return 1
+  t="${t%x}"
+  [[ "$t" == *$'\n' ]] || return 1
+  printf '%sx' "${t%$'\n'}"
+}
 command_may_be_content() {
   local name="$1" rest found="" entry dir target links=0 project="" home=""
   case "$name" in "" | */*) return 0 ;; esac
@@ -303,10 +319,8 @@ command_may_be_content() {
     [ -L "$found" ] || break
     links=$((links + 1))
     [ "$links" -le 40 ] || return 0
-    target=$(readlink -- "$found" 2> /dev/null && printf x) || return 0
+    target=$(link_target "$found" 2> /dev/null) || return 0
     target="${target%x}"
-    [[ "$target" == *$'\n' ]] || return 0
-    target="${target%$'\n'}"
     case "$target" in /*) found="$target" ;; *) found="${PHYSICAL%/}/$target" ;; esac
   done
   physical_dir "$project_dir" || return 0

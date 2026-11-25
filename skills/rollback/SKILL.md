@@ -102,7 +102,8 @@ hooks:
             CWD="${CWD%x}"
             # The restores of the command: "restore <id>" for each `git stash
             # pop|apply <id>`, "refuse <words>" for any other spelling of one.
-            READER="$(cat <<'JQ'
+            reader_program() {
+              cat <<'JQ'
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
@@ -290,7 +291,8 @@ hooks:
                 end
               end
             JQ
-            )"
+            }
+            READER="$(reader_program)"
             LINES="$(printf '%s' "$INPUT" | jq -r "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the rollback skill's check could not read the command" >&2; exit 2; }
             [ -n "$LINES" ] || exit 0
             if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then P="$CLAUDE_PROJECT_DIR"
