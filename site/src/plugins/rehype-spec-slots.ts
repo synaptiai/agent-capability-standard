@@ -16,7 +16,9 @@ import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { diagnosticHref } from '../lib/generated';
 import { SPEC_SLOTS, type SlotBlock, type SlotItem, type SpecSlot } from '../lib/spec-slots';
 import { CODE_TABLE_FIGURES } from '../lib/spec-tail-figures';
-import { glyphElement } from '../pixel/hast';
+import { classificationRows } from '../lib/spec-tool-figures';
+import { readRepoFile } from '../lib/repo';
+import { glyphElement, miniTileElement } from '../pixel/hast';
 import { failWith, sourceOf } from './source';
 import { hastText, isEl } from './hast';
 
@@ -193,6 +195,52 @@ export function diagnosticTiles(table: Element, byCode: Map<string, Diagnostic>,
   return n;
 }
 
+/**
+ * §5.18.3's classification table: each capability its Capability cell names
+ * (classificationRows) gets a capability tile before its code span, linked
+ * to the capability's page. Returns the number of tiles.
+ */
+export function capabilityTiles(table: Element, rows: { caps: string[] }[], problems: string[], where: string): number {
+  const body = (table.children.find((c): c is Element => isEl(c, 'tbody'))?.children ?? []).filter((c): c is Element => isEl(c, 'tr'));
+  if (body.length !== rows.length) {
+    problems.push(`${where}: the classification table has ${body.length} rows, the Standard's text ${rows.length}`);
+    return 0;
+  }
+  let n = 0;
+  body.forEach((tr, r) => {
+    const cell = tr.children.filter((c): c is Element => isEl(c, 'td') || isEl(c, 'th'))[1];
+    if (!cell) return;
+    const want = rows[r]!.caps;
+    const done = new Set<string>();
+    const kids = cell.children;
+    const out: ElementContent[] = [];
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i]!;
+      const id = isEl(c, 'code') ? hastText(c).trim() : '';
+      if (!want.includes(id) || done.has(id)) {
+        out.push(c);
+        continue;
+      }
+      done.add(id);
+      n++;
+      // Tile, code and the punctuation right after it kept on one line, so a
+      // narrow cell never parts them or starts a line with ", " or "; ".
+      const group: ElementContent[] = [miniTileElement(id, { size: 24 }), c];
+      const next = kids[i + 1];
+      const punct = next?.type === 'text' ? /^[,;:.]/.exec(next.value) : null;
+      if (next?.type === 'text' && punct) {
+        group.push({ type: 'text', value: punct[0] });
+        kids[i + 1] = { type: 'text', value: next.value.slice(punct[0].length) };
+      }
+      out.push({ type: 'element', tagName: 'span', properties: { className: ['class-cell__cap'] }, children: group });
+    }
+    cell.children = out.filter((c) => c.type !== 'text' || c.value !== '');
+    if (done.size !== want.length) problems.push(`${where}: row ${r + 1} of the classification table has no code span for ${want.filter((x) => !done.has(x)).join(', ')}`);
+    if (want.length > 0) cell.properties = { ...cell.properties, className: ['class-cell'] };
+  });
+  return n;
+}
+
 /** The tables whose codes become tiles: the Code column of §5.8.3 and §9.2 to §9.7, the codes in §5.16's field descriptions and in §5.19.1's responses. */
 const TILE_SECTIONS: readonly { level: number; section: string; column?: string; index?: number }[] = [
   { level: 4, section: '5.8.3 ' },
@@ -223,6 +271,9 @@ export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {
       }
       if (diagnosticTiles(table.el, byCode, problems, `§${s.section.trim()}`, s.column) === 0) problems.push(`§${s.section.trim()}: no diagnostic code to draw as a tile`);
     }
+    const classes = section(tree.children, { key: '', level: 4, section: '5.18.3 ', at: 'heading' })?.els.find((x) => x.el.tagName === 'table');
+    if (!classes) problems.push('§5.18.3 has no table for capability tiles');
+    else if (capabilityTiles(classes.el, classificationRows(readRepoFile(repoPath), repoPath), problems, '§5.18.3') === 0) problems.push('§5.18.3: no capability to draw as a tile');
     problems.push(...placeSlots(tree, slots));
     failWith(PLUGIN, problems.map((p) => `${repoPath}: ${p}`));
   };
