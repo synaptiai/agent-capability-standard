@@ -298,7 +298,9 @@ shell grammar are not written.
 
 *Open after this pull request.* This list gathers the "Not done"
 paragraphs above, the progress records, the open questions in the
-findings file and the PVC review, checked against the tree.
+findings file and the PVC review, checked against the tree. Each item is
+now a GitHub issue: #133 tracks them, with #134 to #175 as its sub-issues,
+and `tasks/HANDOFF.md` lists them by group.
 1. **Upstream issues.**
    - Check that the passages they quote from SA 0.2.0 are unchanged since
      `78fa54c`: upstream edits 0.2.0 in place.
@@ -984,10 +986,11 @@ cited on #114 and here); CHANGELOG split by release; a release workflow.
   CLAUDE.md and the runbook document it.
 - [x] CI green; #116 merged as a merge commit (`c0bc9be`); #114 and #115
   closed by it.
-- [ ] Tag and release: this session's git proxy refuses tag pushes (403,
+- [x] Tag and release: this session's git proxy refuses tag pushes (403,
   only the working branch). User chose a manual trigger: release.yml gains
   `workflow_dispatch` (creates the annotated tag on main's head, then
-  publishes); follow-up PR, merge, run it, check the Release.
+  publishes); follow-up PR, merge, run it, check the Release. Done: the
+  tag v2.0.0 exists and its Release was published on 2026-10-29.
 
 
 # H8: dependencies to latest; Python 3.14/3.15 only (user, 2026-11-11)
