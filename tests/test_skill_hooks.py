@@ -404,7 +404,8 @@ class TestFrontmatterHooks:
         matcher whose time grows with the square of the text (2.5 s at
         200 KB for the scheme rule added in security round 4, batch 5). The
         scan reads bytes (LC_ALL=C) and decides 400 KB in well under a
-        second."""
+        second with GNU grep, and in linear time with any grep (BSD grep,
+        on macOS, reads about ten times slower)."""
         script = SECRET_SCAN.read_text(encoding="utf-8") + (
             '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
         )
