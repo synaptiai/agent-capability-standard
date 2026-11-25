@@ -20,6 +20,23 @@ where Claude Code lets them, and do not claim the safety-layer class SL
 says why). The Python SDK adapter and the Standard Agents binding claim it
 (their conformance statements are in `tests/conformance/calls/statements/`).
 
+## Platforms
+
+The hooks need `bash`, `jq` and `openssl`. CI runs them, and every test, on Linux (GNU tools,
+bash 5) and on macOS. On macOS:
+
+- **Bash.** The hooks start under `/bin/sh` and run the first `bash` on
+  `PATH`: the `/bin/bash` 3.2 that macOS ships, or a newer one such as
+  Homebrew's. Both work.
+- **BSD tools.** `grep` and `sed` read the same patterns as on Linux, but
+  about ten times more slowly. A Write of about 3.5 MB, or a command of a
+  few hundred kilobytes of line breaks, runs past the hooks' 30-second
+  limit there, and the call is blocked.
+- **The agent's shell.** Claude Code runs the agent's commands in your login
+  shell, zsh by default on macOS. The hooks read a command as bash 5 reads
+  it. A form zsh reads differently, and that the hooks cannot read, is gated
+  like any other command they cannot read (SECURITY.md §5.5).
+
 ## How Hooks Work
 
 ```mermaid
