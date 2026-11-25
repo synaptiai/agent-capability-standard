@@ -4,7 +4,10 @@
 sentence "A Standard document's status is A, B, C or D." under "Standard
 versions". The header of each `spec/STANDARD-v*.md` states one of them on its
 `**Status:**` line (the first clause, before a dash or a semicolon), and its
-`**Date:**` line gives the date GOVERNANCE defines for that status. The
+`**Date:**` line gives the date GOVERNANCE defines for that status: for a
+released version, its section's date in the specification changelog; for a
+Candidate Standard, the latest `**Date:**` of the RFCs its `**Status:**`
+text links, each of them Accepted. The
 Standard table in `spec/ROADMAP.md` lists every version with the same status
 and date, and the version whose status is Standard is the one its sentence
 "Plugin X implements Standard Y" names, released with that plugin.
@@ -55,6 +58,28 @@ def header(path: Path) -> tuple[str, str]:
     assert status, f"{path.name} has no **Status:** line"
     assert date, f"{path.name} has no **Date:** line"
     return re.split(r"\s+[—–-]\s+|;", status.group(1))[0].strip(), date.group(1)
+
+
+def status_rfcs(path: Path) -> list[Path]:
+    """The RFC files the `**Status:**` text links, up to the next `**Key:**` line."""
+    text = path.read_text("utf-8")
+    block = re.search(
+        r"^\*\*Status:\*\*(.*?)(?=^\*\*[A-Za-z ]+:\*\*|^\s*$)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert block, f"{path.name} has no **Status:** line"
+    return [
+        SPEC / name for name in re.findall(r"\((RFC-\d{4}-[^)]+\.md)\)", block.group(1))
+    ]
+
+
+def rfc_status_and_date(path: Path) -> tuple[str, str]:
+    text = path.read_text("utf-8")
+    status = re.search(r"^\*\*Status:\*\*\s*(\S+)", text, re.MULTILINE)
+    date = re.search(rf"^\*\*Date:\*\*\s*({DATE})\s*$", text, re.MULTILINE)
+    assert status and date, f"{path.name} lacks a **Status:** or **Date:** line"
+    return status.group(1), date.group(1)
 
 
 def roadmap_rows() -> dict[str, tuple[str, str]]:
@@ -120,8 +145,8 @@ def test_one_version_is_the_released_standard() -> None:
 @pytest.mark.parametrize("version", sorted(standard_files()))
 def test_date_is_the_one_governance_defines(version: str) -> None:
     """A released version's date is its release section's date in the
-    specification changelog; a Candidate's is a date, and it has no release
-    section with a date."""
+    specification changelog; a Candidate's is the date the last of the RFCs
+    its status names was Accepted, and it has no release section with a date."""
     status, date = header(standard_files()[version])
     assert re.fullmatch(DATE, date), f"STANDARD-v{version}.md: Date {date!r}"
     changelog = SPEC_CHANGELOG.read_text("utf-8")
@@ -132,9 +157,22 @@ def test_date_is_the_one_governance_defines(version: str) -> None:
             f"STANDARD-v{version}.md says {date}; "
             f"spec/CHANGELOG.md says {section.group(1).strip()}"
         )
-    elif section:
-        assert not re.search(DATE, section.group(1)), (
-            f"v{version} is a {status} but spec/CHANGELOG.md dates its section"
+    else:
+        if section:
+            assert not re.search(DATE, section.group(1)), (
+                f"v{version} is a {status} but spec/CHANGELOG.md dates its section"
+            )
+        rfcs = status_rfcs(standard_files()[version])
+        assert rfcs, f"STANDARD-v{version}.md: its Status names no RFC"
+        dates = []
+        for rfc in rfcs:
+            assert rfc.is_file(), f"STANDARD-v{version}.md links {rfc.name}"
+            rfc_status, rfc_date = rfc_status_and_date(rfc)
+            assert rfc_status == "Accepted", f"{rfc.name} is {rfc_status}"
+            dates.append(rfc_date)
+        assert date == max(dates), (
+            f"STANDARD-v{version}.md says {date}; "
+            f"the last of its RFCs was Accepted on {max(dates)}"
         )
 
 

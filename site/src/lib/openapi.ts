@@ -65,7 +65,7 @@ function schemas(): Record<string, Schema> {
     CapabilityId: str('A capability id from the ontology.', { enum: capabilityIds() }),
     Risk: str('A risk level.', { enum: [...RISKS] }),
     VersionBlock: obj('The versions this file was built from.', {
-      standard: str('The current version of the Standard.'),
+      standard: str('The newest version of the Standard (its status is standard_status).'),
       standard_status: str('The status of that version, e.g. "Candidate Standard".'),
       ontology: str('The version of the capability ontology.'),
       plugin: str('The version of the Claude Code plugin.'),
