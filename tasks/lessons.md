@@ -345,3 +345,22 @@ where the function promises a dict, and `Lint & type-check` failed.
 paths), and `mypy grounded_agency/`. A guard that checks a parsed value's
 shape returns `TypeIs[...]`, so the checked value has the type the caller
 promises without a cast.
+
+## Read back what a write tool stored, not what was sent
+
+**Pattern.** The 43 follow-up issues (#133 to #175) were created through
+the GitHub write tool with bodies prepared and checked in a file. The
+stored bodies differed from what was sent in two ways, every time:
+- the tool drops the closing footer;
+- it wraps in a code span any link whose URL contains `findings_` (the
+  Standard Agents findings files), which breaks the link.
+
+A resend reproduced both, so the cause was the tool, not the copying.
+
+**Rule.** After creating or editing issues, fetch each one back (the
+public `GET /repos/{owner}/{repo}/issues/{n}` needs no token for a public
+repository) and compare its body with the source. Where the tool rewrites
+a link, cite the file by its path and lines as text, not as a link; do not
+look for a URL form the filter misses. Create numbered cross-references
+in one pass by creating issues in a fixed order, checking each returned
+number against the plan.
