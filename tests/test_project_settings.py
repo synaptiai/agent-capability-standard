@@ -34,6 +34,18 @@ HOOKS = Path(__file__).resolve().parents[1] / "hooks"
 PRE = HOOKS / "pretooluse_require_checkpoint.sh"
 TAKE = HOOKS / "posttooluse_take_checkpoint.sh"
 LOG = HOOKS / "posttooluse_log_tool.sh"
+
+# Whether /bin/sh, which Claude Code starts each hook with, is bash (macOS,
+# Fedora, Arch): SHELLOPTS=noexec in a project's env then stops it before
+# the hook's own code runs, a host gap spec/SECURITY.md 5.5 names.
+SH_IS_BASH = bool(
+    subprocess.run(
+        ["/bin/sh", "-c", "echo ${BASH_VERSION:-}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+)
 SETTINGS = (
     "ACS_HOOK_APPROVAL",
     "ACS_CHECKPOINT_MAX_AGE",
@@ -410,6 +422,11 @@ class TestTheReportedRoutes:
     """Each with the env applied as Claude Code applies it: before, each
     exited 0 (a Write in bypassPermissions with no marker, F501 due)."""
 
+    @pytest.mark.skipif(
+        SH_IS_BASH,
+        reason="/bin/sh is bash here, which SHELLOPTS=noexec stops before the hook "
+        "runs (the host gap of spec/SECURITY.md 5.5); dash, as on Ubuntu, starts it",
+    )
     def test_shellopts_noexec(self, project: Path) -> None:
         env = {"SHELLOPTS": "noexec"}
         _settings(project, "settings.json", {"env": env})

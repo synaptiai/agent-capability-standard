@@ -15,13 +15,14 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from grounded_agency import GroundedAgentAdapter
 from grounded_agency.adapter import SAFETY_HOOK_TIMEOUT_S
-from tests.conftest import enter_checkpoint_commit
+from tests.conftest import GNU_GREP, assert_linear, enter_checkpoint_commit
 
 
 def _decision(result: dict) -> str | None:
@@ -1360,37 +1361,47 @@ class TestShellHookPersistSecrets:
     # placeholders under a secret member about 11 s. String functions read
     # the same input in under 2 s.
     @pytest.mark.parametrize(
-        ("data", "refused"),
+        ("make", "count", "refused"),
         [
             (
-                {
-                    **{f"m{i}": f"value {i}" for i in range(40_000)},
+                lambda n: {
+                    **{f"m{i}": f"value {i}" for i in range(n)},
                     "password": "hunter2",
                 },
+                40_000,
                 True,
             ),
-            ({"password": ["<ab>"] * 120_000}, False),
+            (lambda n: {"password": ["<ab>"] * n}, 120_000, False),
         ],
         ids=["members", "placeholders"],
     )
     def test_many_members_are_decided_in_time(
-        self, tmp_path: Path, data: dict, refused: bool
+        self, tmp_path: Path, make: Any, count: int, refused: bool
     ):
-        tool_input = {"todos": [{"content": "x", "status": "pending", "meta": data}]}
-        assert len(json.dumps(tool_input)) <= 1_000_000
-        started = time.perf_counter()
-        result = _gated_hook(
-            _bypass({"tool_name": "TodoWrite", "tool_input": tool_input}),
-            tmp_path,
-            timeout=60,
-        )
-        elapsed = time.perf_counter() - started
-        assert result.returncode == (2 if refused else 0), result.stderr[:200]
-        if refused:
-            assert result.stderr.startswith(
-                "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+        def seconds_at(n: int) -> float:
+            data = make(n)
+            tool_input = {
+                "todos": [{"content": "x", "status": "pending", "meta": data}]
+            }
+            assert len(json.dumps(tool_input)) <= 1_000_000
+            started = time.perf_counter()
+            result = _gated_hook(
+                _bypass({"tool_name": "TodoWrite", "tool_input": tool_input}),
+                tmp_path,
+                timeout=60,
             )
-        assert elapsed < 5
+            elapsed = time.perf_counter() - started
+            assert result.returncode == (2 if refused else 0), result.stderr[:200]
+            if refused:
+                assert result.stderr.startswith(
+                    "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+                )
+            return elapsed
+
+        if GNU_GREP:
+            assert seconds_at(count) < 5
+        else:
+            assert_linear(seconds_at, count // 2, count)
 
     # A credential after a long run that each stage reading matches out of
     # the text (grep -o) once read again from each of its positions: a URL

@@ -24,7 +24,7 @@ import pytest
 import yaml
 
 from tests.brace_readings import BY_VERSION, READINGS, assert_reading
-from tests.conftest import enter_checkpoint_commit
+from tests.conftest import BASH_4, GNU_GREP, assert_linear, enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = ROOT / "skills"
@@ -1890,28 +1890,41 @@ class TestPersistCommandHook:
         LF and a 4 MB one about a minute (past the hook's time limit, which
         blocks the call), and so did a Write of as many new lines."""
         hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
-        lines = "".join(f"line {i} of the knowledge file\r\n" for i in range(128_000))
-        path = self._store(tmp_path, "big.md", lines)
-        edit = {
-            "tool_name": "Edit",
-            "tool_input": {
-                "file_path": path,
-                "old_string": "line 127999 of",
-                "new_string": "the last line of",
-            },
-        }
-        write = {
-            "tool_name": "Write",
-            "tool_input": {
-                "file_path": str(tmp_path / "project" / "new.md"),
-                "content": lines.replace("\r\n", "\n"),
-            },
-        }
-        for call in (edit, write):
+
+        def calls(count: int) -> tuple[dict[str, Any], dict[str, Any]]:
+            lines = "".join(f"line {i} of the knowledge file\r\n" for i in range(count))
+            path = self._store(tmp_path, f"big{count}.md", lines)
+            edit = {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path,
+                    "old_string": f"line {count - 1} of",
+                    "new_string": "the last line of",
+                },
+            }
+            write = {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(tmp_path / "project" / f"new{count}.md"),
+                    "content": lines.replace("\r\n", "\n"),
+                },
+            }
+            return edit, write
+
+        def seconds_of(call: dict[str, Any]) -> float:
             started = time.monotonic()
             result = run_command(hook, call, tmp_path, shell)
             assert result.returncode == 0, result.stderr
-            assert time.monotonic() - started < 15
+            return time.monotonic() - started
+
+        if GNU_GREP:
+            for call in calls(128_000):
+                assert seconds_of(call) < 15
+        else:
+            # 128 000 lines are past the hook's time limit with BSD grep
+            small, large = calls(32_000), calls(64_000)
+            for i in range(2):
+                assert_linear(seconds_of, small[i], large[i])
 
     @pytest.mark.parametrize(
         "content",
@@ -2879,15 +2892,27 @@ class TestAuditCommandHook:
         Claude Code does not block on failure: the form is read in time
         that grows with the line alone."""
         hook = command_hook("audit", "PreToolUse", "Bash")
-        command = (
-            "printf '%s\\n' '"
-            + record
-            + ("'" if closed else "")
-            + " >> .claude/audit/records.jsonl"
-        )
+
+        def command_of(line: str) -> str:
+            return (
+                "printf '%s\\n' '"
+                + line
+                + ("'" if closed else "")
+                + " >> .claude/audit/records.jsonl"
+            )
+
+        def seconds_at(line: str) -> float:
+            started = time.monotonic()
+            run_command(hook, bash_call(command_of(line)), tmp_path, shell)
+            return time.monotonic() - started
+
+        if not GNU_GREP:
+            run = "a" * max(len(r) for r in re.findall("a+", record))
+            assert_linear(seconds_at, record.replace(run, run[: len(run) // 2]), record)
         started = time.monotonic()
-        result = run_command(hook, bash_call(command), tmp_path, shell)
-        assert time.monotonic() - started < 10
+        result = run_command(hook, bash_call(command_of(record)), tmp_path, shell)
+        if GNU_GREP:
+            assert time.monotonic() - started < 10
         if expect is None:
             assert result.returncode == 0, result.stderr
             assert result.stderr == ""
@@ -3428,6 +3453,7 @@ def _jq_words(program: str, word: str) -> list[str]:
     return json.loads(ours.stdout)
 
 
+@BASH_4
 @pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
 def test_the_brace_reading_is_bashs() -> None:
     """The skills' brace_words gives the words the installed bash gives, of
@@ -3843,7 +3869,7 @@ class TestTheShellDoesWhatTheSendHookRefuses:
         [
             "alias g=echo\ng named",
             "hash -p /bin/echo g; g named",
-            "BASH_ALIASES[g]=echo\ng named",
+            pytest.param("BASH_ALIASES[g]=echo\ng named", marks=BASH_4),
             "shopt -s extglob\n./n@(a)med",
             "shopt -s nocaseglob\n./NA?ED",
         ],
@@ -4592,6 +4618,7 @@ class TestVariablesSetWithoutAssignment:
         assert result.returncode == 0, result.stderr
 
 
+@BASH_4
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 def test_printf_v_rebinds_a_reader(tmp_path: Path) -> None:
     """The premise: after printf -v 'BASH_CMDS[cat]', bash runs tee for cat,
@@ -4683,22 +4710,30 @@ class TestCredentialsAcrossLines:
     )
     def test_the_folded_reading_is_linear(self, shell: str, text: str) -> None:
         """About 400 KB of line breaks, read again as one line, in well
-        under a second (the bounds that keep each -o stage linear hold)."""
+        under a second with GNU grep (the bounds that keep each -o stage
+        linear hold), and in linear time with any grep."""
         script = SECRET_SCAN.read_text(encoding="utf-8") + (
             '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
         )
-        started = time.perf_counter()
-        result = subprocess.run(
-            [shell, "-c", script],
-            input=text,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-            env={**os.environ, "LC_ALL": "C.UTF-8"},
-        )
-        assert result.stdout.strip() == "no", result.stderr
-        assert time.perf_counter() - started < 5
+
+        def seconds_at(given: str) -> float:
+            started = time.perf_counter()
+            result = subprocess.run(
+                [shell, "-c", script],
+                input=given,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+                env={**os.environ, "LC_ALL": "C.UTF-8"},
+            )
+            assert result.stdout.strip() == "no", result.stderr
+            return time.perf_counter() - started
+
+        if GNU_GREP:
+            assert seconds_at(text) < 5
+        else:
+            assert_linear(seconds_at, text[: len(text) // 4], text[: len(text) // 2])
 
     @pytest.mark.parametrize("text", SPANNING)
     def test_persist_refuses_a_write_of_one(

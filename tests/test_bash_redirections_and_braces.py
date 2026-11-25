@@ -46,6 +46,7 @@ import pytest
 
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
 from grounded_agency.capabilities.registry import CapabilityRegistry
+from tests.conftest import BASH_4
 from tests.test_bash_program_words import (
     POLICY,
     _adapter,
@@ -182,6 +183,7 @@ class TestVariableRedirections:
     """Defect 1: `{varname}` before a redirection assigns the variable."""
 
     @needs_bash
+    @BASH_4
     def test_bash_runs_the_repository_program(self, tmp_path: Path) -> None:
         """The premise: after `echo hi {PATH}>/dev/null`, `ls` is the
         repository's `./10/ls` (descriptor 10, or the next free one)."""

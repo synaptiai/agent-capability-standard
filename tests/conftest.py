@@ -136,6 +136,58 @@ def fake_clock() -> FakeClock:
     return FakeClock()
 
 
+def _bash_major() -> int:
+    """The major version of the bash on PATH, or 0 without one."""
+    bash = shutil.which("bash")
+    if bash is None:
+        return 0
+    out = subprocess.run(
+        [bash, "-c", "echo ${BASH_VERSINFO[0]}"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    ).stdout.strip()
+    return int(out) if out.isdigit() else 0
+
+
+BASH_4 = pytest.mark.skipif(
+    _bash_major() < 4,
+    reason=(
+        "checks what the installed bash itself does, and bash before 4 (the "
+        "/bin/bash 3.2 macOS ships) has no BASH_ALIASES, {var}> redirections "
+        "or printf -v into an array element, and expands some braces as none "
+        "of the hooks' readings do; the hooks read a command as bash 5 does, "
+        "a gap where commands run in bash 3.2 or in zsh, macOS's login shell "
+        "(spec/SECURITY.md 5.5)"
+    ),
+)
+"""Skips a test of the installed bash's own behaviour where that bash is
+older than 4."""
+
+
+# The hooks' patterns run in time linear in their input with any grep, but
+# BSD grep (macOS) runs them about ten times slower than GNU grep: a Write
+# of 4 MB takes about 34 s there, past the hooks' 30 s limit, which blocks
+# the call. So the bounds in seconds hold where grep is GNU grep, and
+# elsewhere a timing test checks that the time grows linearly instead.
+GNU_GREP = (
+    "GNU grep"
+    in subprocess.run(
+        ["grep", "--version"], capture_output=True, text=True, check=False
+    ).stdout
+)
+
+
+def assert_linear(seconds_at: Any, small: Any, large: Any) -> None:
+    """``seconds_at(large)`` is at most three times ``seconds_at(small)``,
+    where ``large`` is twice ``small``: linear time doubles, a time that
+    grows with the square of the input quadruples."""
+    first = seconds_at(small)
+    second = seconds_at(large)
+    assert second < 3 * max(first, 0.5), (first, second)
+
+
 DEEP_JSON = "[" * 100_000 + "]" * 100_000
 """JSON text nested deeper than Python's json C decoder reads on some
 machines: whether ``json.loads`` raises RecursionError on it or returns the
