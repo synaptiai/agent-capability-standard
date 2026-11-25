@@ -7,7 +7,7 @@
  * and approval to what the target may do. In Standard Agents an agent
  * exercises what the tools its prompts offer perform, what the tools they
  * invoke perform (§5.18.4), and what its subagents may: the manifest is
- * derived from the tools' `acs` annotations (their binding records,
+ * derived from the tools' `ai.synapti/acs` annotations (their binding records,
  * §5.18.1). A manifest has no member for flags, so its maxima are those of
  * its capabilities. A manifest derived from part of what the agent can call,
  * from annotations the layer does not load (it treats such a tool as an
@@ -62,10 +62,10 @@ export class ManifestDerivationError extends Error {
     readonly malformed: { tool: string; problems: string[] }[] = [],
   ) {
     const parts: string[] = [];
-    if (unannotated.length > 0) parts.push(`tools without an acs annotation: ${unannotated.join(', ')}`);
+    if (unannotated.length > 0) parts.push(`tools without an ai.synapti/acs annotation: ${unannotated.join(', ')}`);
     if (malformed.length > 0) {
       parts.push(
-        `tools whose acs annotation does not load: ${malformed.map((m) => `${m.tool} (${m.problems.join('; ')})`).join(', ')}`,
+        `tools whose ai.synapti/acs annotation does not load: ${malformed.map((m) => `${m.tool} (${m.problems.join('; ')})`).join(', ')}`,
       );
     }
     if (missingChildren.length > 0) parts.push(`subagents without a manifest: ${missingChildren.join(', ')}`);
@@ -104,7 +104,7 @@ function raises(own: SafetyFlags, declared: unknown): boolean {
  * The manifest of `agent`: the capabilities of the tools it offers and of
  * the tools those invoke, transitively (`invokes`, resolved in `tools`, then
  * `invoked`), plus `delegate` and every subagent's capabilities when it has
- * subagents (`children` by name). Each tool's `acs` annotation is loaded as
+ * subagents (`children` by name). Each tool's `ai.synapti/acs` annotation is loaded as
  * a binding record (`checkBindings`, as the layer loads it), and the
  * capabilities and `invokes` are read from what loads; a control-only tool
  * (`control: true`) performs none. Throws `ManifestDerivationError` when a

@@ -575,7 +575,7 @@ rows:
     - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
     - spec/STANDARD-v1.1.0.md §2 Terms, Effective flag (line 67)
     - schemas/capability_ontology.yaml (flags on each capability node, for example lines 1095-1101)
-    - schemas/interop/standard_agents_annotation.schema.json (the `acs` annotation key; added with the
+    - schemas/interop/standard_agents_annotation.schema.json (the `ai.synapti/acs` annotation key; added with the
       reference binding after this mapping was drafted, cited only for the key name)
     quote: '| `risk` | enum | No | `low` (default), `medium`, `high` |'
   sa:
@@ -598,7 +598,7 @@ rows:
     same project could import the tool module (inference), but not a package''s internal tools. Searched:
     risk, destructive, read-only, side effect, mutat, idempoten, dangerous, irreversib, hint, loadTool,
     getToolNames: no such field or method found.'
-  combined: 'Declare the binding under the `acs` annotation key, for example `annotations: { acs: { capability:
+  combined: 'Declare the binding under the `ai.synapti/acs` annotation key, for example `annotations: { ''ai.synapti/acs'': { capability:
     ''mutate'', ... } }`, as a declaration only. The same wrapper that writes it closes over the capability''s
     flags and enforces them in `execute`. Flags come from the ontology by capability id; a tool-level
     value may only be stricter (ACS §5.2.1), so the wrapper computes the effective flags itself. Limits
@@ -708,7 +708,7 @@ rows:
     accepts that declaration only for a capability its ontology table marks `mutation_overridable`; on
     any other mutating capability it reports W602 and `groundedTool` throws. Whatever builds that table
     from an ontology applies the §4.4 load-time rule (inference: it is the loader). The value is published
-    in `annotations.acs`; an SA runtime MUST preserve annotations and never let them affect execution.
+    in the `ai.synapti/acs` annotation; an SA runtime MUST preserve annotations and never let them affect execution.
     In the binding `mutation` gates nothing: of the four flags its wrapper acts on `requires_checkpoint`
     and `requires_approval`, and §4.4 keeps the marker off capabilities that carry either. Append-only
     is the tool''s own discipline; other code on the thread can rewrite its entries (evidence-audit-observability#audit-02).'

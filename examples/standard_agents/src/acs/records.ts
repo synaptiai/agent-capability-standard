@@ -449,7 +449,7 @@ export interface ActionRecord {
  * grounded tool recorded. Every other entry carries its own `recorded_by`
  * (§5.18.8), which the record keeps.
  */
-export const RECORDED_BY = { name: '@acs/standard-agents-binding' } as const;
+export const RECORDED_BY = { name: '@synaptiai/standard-agents-binding' } as const;
 
 const STATUS: Record<TraceEntry['status'], ActionRecord['status']> = {
   executed: 'executed',

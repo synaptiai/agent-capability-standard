@@ -43,7 +43,7 @@ meta:
     standard: "1.2.0"
     ontology: "2.2.0"
   annotation:
-    key: "acs"
+    key: "ai.synapti/acs"
     schema: "schemas/interop/standard_agents_annotation.schema.json"
   document: "docs/integrations/standard_agents.md"
   rows: "docs/research/analysis/standard_agents_mapping"
