@@ -348,10 +348,10 @@ SECRET_ERE="$SECRET_ERE"'|[rs]k_(live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{3
 SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
 # A quote, or an escaped one (\" in JSON text inside a JSON string)
 SECRET_Q="\\\\*[\"']"
-# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
+# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions; written {0,255} and one more, since BSD grep refuses a count over 255)
 SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
 SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
-SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,255}[^[:space:]:\"'\\\\]?:"
 # curl's cookie option (-b, --cookie), up to its value, and up to the quote its value opens with
 SECRET_COOKIE_OPT="(^|[^A-Za-z0-9_-])(-b$SECRET_SEP?|--cookie$SECRET_SEP)"
 SECRET_COOKIE_OPTQ="(^|[^A-Za-z0-9_-])(-b([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*)?|--cookie([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*))$SECRET_Q"
@@ -609,6 +609,22 @@ physical_dir() {
 # cannot be read. Not seen: the entries Claude Code's Bash tool adds to PATH
 # from the user's shell startup files (its shell snapshot), which reach no
 # hook. The SDK mapper asks the same (command_may_be_content).
+# The target of link $1 exactly, with an x after it: a target may end in a
+# line break, which GNU readlink prints with one more after it but BSD
+# readlink (macOS) prints without one, so a target and the same name
+# without its last line break read alike there. Perl's readlink returns it
+# as stored; without perl, GNU readlink's output is read.
+link_target() {
+  local t
+  if command -v perl > /dev/null 2>&1; then
+    perl -e 'defined(my $t = readlink $ARGV[0]) or exit 1; print $t, "x"' -- "$1"
+    return
+  fi
+  t=$(readlink -- "$1" && printf x) || return 1
+  t="${t%x}"
+  [[ "$t" == *$'\n' ]] || return 1
+  printf '%sx' "${t%$'\n'}"
+}
 command_may_be_content() {
   local name="$1" rest found="" entry dir target links=0 project="" home=""
   case "$name" in "" | */*) return 0 ;; esac
@@ -636,10 +652,8 @@ command_may_be_content() {
     [ -L "$found" ] || break
     links=$((links + 1))
     [ "$links" -le 40 ] || return 0
-    target=$(readlink -- "$found" 2> /dev/null && printf x) || return 0
+    target=$(link_target "$found" 2> /dev/null) || return 0
     target="${target%x}"
-    [[ "$target" == *$'\n' ]] || return 0
-    target="${target%$'\n'}"
     case "$target" in /*) found="$target" ;; *) found="${PHYSICAL%/}/$target" ;; esac
   done
   physical_dir "$project_dir" || return 0
@@ -1638,7 +1652,7 @@ path_word() {
 # cannot read. No subshell.
 resolve_path() {
   local out="${1%/}" comp target links=0 i=0 IFS=/
-  local -a parts more
+  local -a parts more rest
   RESOLVE_LEFT=$((RESOLVE_LEFT - ${#2}))
   [ "$RESOLVE_LEFT" -ge 0 ] || return 1
   case "$2" in /*) out="" ;; esac
@@ -1656,21 +1670,24 @@ resolve_path() {
       links=$((links + 1))
       LINKS_LEFT=$((LINKS_LEFT - 1))
       [ "$links" -le 40 ] && [ "$LINKS_LEFT" -ge 0 ] || return 1
-      # readlink prints the target and a line break. A command
-      # substitution strips every line break that ends its output, and a
-      # target may end in one (a link to $'evil\n' does not lead to evil),
-      # so an x is printed after it; the x and readlink's line break are
-      # taken off, and an output without that line break is not read.
-      target=$(readlink -- "$out/$comp" 2>/dev/null && printf x) || return 1
+      # The target exactly: a target may end in a line break (a link to
+      # $'evil\n' does not lead to evil), which a command substitution
+      # would strip, so link_target prints an x after it.
+      target=$(link_target "$out/$comp" 2> /dev/null) || return 1
       target="${target%x}"
-      [[ "$target" == *$'\n' ]] || return 1
-      target="${target%$'\n'}"
       [ -n "$target" ] || return 1
       case "$target" in /*) out="" ;; esac
       set -f
       more=($target)
       set +f
-      parts=("${more[@]}" "${parts[@]:i}")
+      # The parts not yet read, copied one by one: bash 3.2 (macOS) joins
+      # "${parts[@]:i}" into one word while IFS is /
+      rest=()
+      while [ "$i" -lt "${#parts[@]}" ]; do
+        rest+=("${parts[i]}")
+        i=$((i + 1))
+      done
+      parts=("${more[@]}" ${rest[@]+"${rest[@]}"})
       i=0
     else
       out="$out/$comp"

@@ -138,7 +138,8 @@ hooks:
               DECODED=""
               # Any other command, read word by word (jq reads one of up to 16384
               # bytes in well under a second)
-              READER="$(cat <<'JQ'
+              reader_program() {
+                cat <<'JQ'
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
@@ -735,7 +736,8 @@ hooks:
                 end
               end
             JQ
-            )"
+              }
+              READER="$(reader_program)"
               # Whether the command may turn on dotglob, so that a glob matches a
               # leading dot (*laude matches .claude): shopt, GLOBIGNORE, BASHOPTS, or
               # a file it sources or text it evaluates (quotes and backslashes removed)
@@ -781,10 +783,10 @@ hooks:
             SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
             # A quote, or an escaped one (\" in JSON text inside a JSON string)
             SECRET_Q="\\\\*[\"']"
-            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
+            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions; written {0,255} and one more, since BSD grep refuses a count over 255)
             SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
             SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
-            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,255}[^[:space:]:\"'\\\\]?:"
             # curl's cookie option (-b, --cookie), up to its value, and up to the quote its value opens with
             SECRET_COOKIE_OPT="(^|[^A-Za-z0-9_-])(-b$SECRET_SEP?|--cookie$SECRET_SEP)"
             SECRET_COOKIE_OPTQ="(^|[^A-Za-z0-9_-])(-b([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*)?|--cookie([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*))$SECRET_Q"
@@ -971,7 +973,18 @@ hooks:
             if [ -L "$TARGET" ]; then
               REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || { echo "$REFUSE" >&2; exit 2; }
             elif [ -e "$TARGET" ] || [ -d "$(dirname -- "$TARGET")" ]; then
-              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || REACHED="$TARGET"
+              # BSD readlink -f (macOS) fails when the last part does not exist yet:
+              # the directory is resolved then, and the name kept
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || {
+                case "$TARGET" in */*) R_DIR="${TARGET%/*}" ;; *) R_DIR=. ;; esac
+                if R_DIR="$(cd -P -- "${R_DIR:-/}" 2>/dev/null && pwd -P && printf x)"; then
+                  R_DIR="${R_DIR%x}"
+                  REACHED="${R_DIR%?}"
+                  REACHED="${REACHED%/}/${TARGET##*/}"
+                else
+                  REACHED="$TARGET"
+                fi
+              }
             fi
             for P in "$TARGET" "$REACHED"; do
               # In lower case (a file system may ignore case), repeated slashes and ./

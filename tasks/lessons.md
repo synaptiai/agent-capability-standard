@@ -345,3 +345,18 @@ where the function promises a dict, and `Lint & type-check` failed.
 paths), and `mypy grounded_agency/`. A guard that checks a parsed value's
 shape returns `TypeIs[...]`, so the checked value has the type the caller
 promises without a cast.
+
+## Run the whole suite on each platform, not the files that look related
+
+**Pattern.** For the macOS fix (#134), the hook suites were run on bash 3.2
+and bash 5.3, and the whole suite only on bash 5.3. The macOS CI job ran
+the whole suite on both, and found a bash 3.2 bug in a file outside those
+suites: `resolve_path` in the pre-tool-use hook rebuilt its path list with
+`"${parts[@]:i}"`, which bash 3.2 joins into one word while IFS is `/`. A
+path into the records through a link was then asked for approval rather
+than refused.
+
+**Rule.** When a change is about a platform or a shell, run the whole
+suite on each platform or shell it names before pushing, not a chosen
+subset. Run it from a shell whose PATH holds no other plugin's shims (a
+Claude Code session can put a `git` shim first on PATH).

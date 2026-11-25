@@ -2307,6 +2307,12 @@ here and marked so.
 - CI tests Python 3.14 and 3.15.
 
 ### Fixed
+- **Plugin hooks on macOS (#134).** CI now also runs the tests on macOS, with `/bin/bash` 3.2 and with Homebrew's bash. Fixed:
+  - **Skill hooks blocked everything.** The audit, send and rollback skill hooks did not parse under bash 3.2. Its command-substitution parser reads a here-document's text as shell, so each hook exited 2 and blocked every Bash command. Each hook now reads its jq program from a function.
+  - **A credential went unseen.** BSD grep refuses a repetition count over 255, so the secret scan's `curl -u user:password` rule matched nothing on macOS. Its `{0,256}` is now written as `{0,255}` and one optional character, which matches the same text.
+  - **A new file in the records directory.** An Edit or a Write through a link to the audit records' directory, naming a file not yet there, was allowed on macOS: BSD `readlink -f` fails when the last part of the path does not exist. The audit and send skills now resolve the directory and keep the name.
+  - **A path into the records asked instead of refused.** Under bash 3.2, the records guard's path resolution joined the rest of a path into one word after following a link, so `touch ./deep/../notes/todo.md` (where `deep` links to `notes` and `notes/todo.md` to the records) was asked for approval rather than refused. The rest of the path is now copied part by part.
+  - **The wrong file followed.** A link whose target ends in a line break was read as its target without that line break, because BSD `readlink` prints no extra line break after such a target. The hooks and the persist skill now read a link's target with perl where perl is installed.
 - Python SDK: the I-JSON checks of a capability output and of a call's or a
   binding's arguments built each child's whole path when its parent was
   read, so a long member name above a wide array cost the name's length

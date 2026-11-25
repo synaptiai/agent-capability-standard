@@ -37,7 +37,7 @@ from tests.brace_readings import (
     assert_reading,
     installed_readings,
 )
-from tests.conftest import enter_checkpoint_commit
+from tests.conftest import BASH_4, enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
 PRE = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
@@ -534,6 +534,13 @@ class TestBracesAndAnsiCQuoting:
         fresh_marker(project)
         command = "cp -rT {fixtures/,.git/acs/check}points"
         assert refused_f504(run_pre(project, "Bash", {"command": command}))
+        # The route uses GNU cp's -T; BSD cp (macOS) has no such option, so
+        # there the refusal is the whole check
+        version = subprocess.run(
+            ["cp", "--version"], capture_output=True, text=True, check=False
+        )
+        if "GNU" not in version.stdout:
+            return
         subprocess.run(["bash", "-c", command], cwd=project, check=True, timeout=30)
         key = project / ".git" / "acs" / "checkpoints" / "key"
         assert key.read_text() == "0" * 64
@@ -688,6 +695,7 @@ class TestLateClosingBraceGroups:
         assert ours.returncode == 0, (args, ours.stderr)
         return sorted(w for w in ours.stdout.split("\n") if w)
 
+    @BASH_4
     def test_the_reading_is_bashs(self, tmp_path: Path) -> None:
         """The hook's brace_words gives the words the installed bash gives,
         for each case; for a word bash 5.2 and 5.3 read differently, the
@@ -698,6 +706,7 @@ class TestLateClosingBraceGroups:
         for word in [*BRACE_CASES, *BY_VERSION]:
             assert_reading(word, self._run(driver, word), _bash_words(word))
 
+    @BASH_4
     def test_each_pass_is_one_versions_reading(self, tmp_path: Path) -> None:
         """brace_expand read as bash 5.2 and as each reading of bash 5.3:
         each reading's words of a word the readings make differently, and

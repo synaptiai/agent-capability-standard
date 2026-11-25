@@ -29,6 +29,7 @@ import pytest
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities import mapper
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
+from tests.conftest import BASH_4
 
 HOOK = (
     Path(__file__).resolve().parents[1] / "hooks" / "pretooluse_require_checkpoint.sh"
@@ -97,8 +98,8 @@ def shipped(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     ("line", "sentinel"),
     [
-        (ARITHMETIC, "pwned_arith.txt"),
-        (PERCENT, "pwned_pct.txt"),
+        pytest.param(ARITHMETIC, "pwned_arith.txt", marks=BASH_4),
+        pytest.param(PERCENT, "pwned_pct.txt", marks=BASH_4),
         (PATH_LINE, "pwned_ls.txt"),
         (HOME_LINE, "pwned_fsmon.txt"),
     ],

@@ -234,6 +234,56 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+  hooks-macos:
+    # The plugin's hooks run on users' Macs: BSD tools, and either the
+    # /bin/bash 3.2 macOS ships or a newer one on PATH (#134).
+    name: Tests on macOS (${{ matrix.bash }} bash)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bash: ["system", "homebrew"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - name: Put the chosen bash first on PATH
+        env:
+          WHICH_BASH: ${{ matrix.bash }}
+        run: |
+          command -v jq > /dev/null || brew install jq
+          mkdir -p "$RUNNER_TEMP/bash-bin"
+          if [ "$WHICH_BASH" = homebrew ]; then
+            brew install bash
+            ln -sf "$(brew --prefix)/bin/bash" "$RUNNER_TEMP/bash-bin/bash"
+          else
+            ln -sf /bin/bash "$RUNNER_TEMP/bash-bin/bash"
+          fi
+          echo "$RUNNER_TEMP/bash-bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bash-bin/bash" --version | head -1
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" -c constraints.txt
+
+      - name: Run the tests
+        run: pytest tests/ --tb=short -rs
+
   benchmarks:
     name: Benchmark validation
     runs-on: ubuntu-latest

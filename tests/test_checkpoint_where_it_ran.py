@@ -78,7 +78,9 @@ def shipped_git_dir(project: Path, worktree: Path) -> Path:
     is ``worktree``, committed to the project as ordinary files."""
     other = repo(project.parent / "other")
     evil = project / "vendor" / "evil.git"
-    shutil.copytree(other / ".git", evil)
+    # A lock file git's background maintenance holds may come and go while
+    # the copy runs; it is no part of the repository
+    shutil.copytree(other / ".git", evil, ignore=shutil.ignore_patterns("*.lock"))
     config = str(evil / "config")
     git(project, "config", "-f", config, "core.bare", "false")
     git(project, "config", "-f", config, "core.worktree", str(worktree))
