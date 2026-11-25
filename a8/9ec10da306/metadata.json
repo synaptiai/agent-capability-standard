@@ -3,7 +3,7 @@
   "checkpoint_id": "a89ec10da306",
   "strategy": "manual-commit",
   "branch": "fix/134-macos-bash32",
-  "checkpoints_count": 13,
+  "checkpoints_count": 15,
   "files_touched": [
     ".claude/worktrees/i125-relnotes/site/src/lib/release-figures.ts",
     ".claude/worktrees/i125-relnotes/site/src/plugins/release-figures-hast.ts",
@@ -4586,10 +4586,18 @@
     ".decisions/issue-125.md.lock",
     ".decisions/issue-127.md",
     ".decisions/issue-127.md.lock",
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "hooks/README.md",
+    "hooks/pretooluse_require_checkpoint.sh",
     "site/src/lib/capability-figures.ts",
     "site/src/lib/strip.ts",
     "site/test/agent-skills.test.ts",
-    "site/test/strip.test.ts"
+    "site/test/strip.test.ts",
+    "skills/persist/SKILL.md",
+    "tests/conftest.py",
+    "tests/test_records_guard.py",
+    "tests/test_skill_hooks.py"
   ],
   "sessions": [
     {
@@ -4598,13 +4606,20 @@
       "context": "/a8/9ec10da306/0/context.md",
       "content_hash": "/a8/9ec10da306/0/content_hash.txt",
       "prompt": "/a8/9ec10da306/0/prompt.txt"
+    },
+    {
+      "metadata": "/a8/9ec10da306/1/metadata.json",
+      "transcript": "/a8/9ec10da306/1/full.jsonl",
+      "context": "/a8/9ec10da306/1/context.md",
+      "content_hash": "/a8/9ec10da306/1/content_hash.txt",
+      "prompt": "/a8/9ec10da306/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 1692,
-    "cache_creation_tokens": 4723781,
-    "cache_read_tokens": 204178842,
-    "output_tokens": 516492,
-    "api_call_count": 762
+    "input_tokens": 2376,
+    "cache_creation_tokens": 6205780,
+    "cache_read_tokens": 390259718,
+    "output_tokens": 778457,
+    "api_call_count": 1081
   }
 }

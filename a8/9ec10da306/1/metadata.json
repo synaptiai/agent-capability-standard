@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "a89ec10da306",
+  "session_id": "71aa5540-28b1-45bc-8972-b8343612c3c3",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-25T12:58:01.024803Z",
+  "branch": "fix/134-macos-bash32",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "hooks/README.md",
+    "hooks/pretooluse_require_checkpoint.sh",
+    "skills/persist/SKILL.md",
+    "tests/conftest.py",
+    "tests/test_records_guard.py",
+    "tests/test_skill_hooks.py"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "37fe2ab9-514a-498b-9b7b-476e583c70c3",
+  "token_usage": {
+    "input_tokens": 684,
+    "cache_creation_tokens": 1481999,
+    "cache_read_tokens": 186080876,
+    "output_tokens": 261965,
+    "api_call_count": 319
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-11-25T12:57:57.881418Z",
+    "agent_lines": 202,
+    "human_added": 671606,
+    "human_modified": 41,
+    "human_removed": 0,
+    "total_committed": 671849,
+    "agent_percentage": 0.030066279774175447
+  },
+  "transcript_path": ".claude/projects/-Users-danielbentes-agent-capability-standard/71aa5540-28b1-45bc-8972-b8343612c3c3.jsonl"
+}
