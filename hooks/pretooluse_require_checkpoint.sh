@@ -1652,7 +1652,7 @@ path_word() {
 # cannot read. No subshell.
 resolve_path() {
   local out="${1%/}" comp target links=0 i=0 IFS=/
-  local -a parts more
+  local -a parts more rest
   RESOLVE_LEFT=$((RESOLVE_LEFT - ${#2}))
   [ "$RESOLVE_LEFT" -ge 0 ] || return 1
   case "$2" in /*) out="" ;; esac
@@ -1680,7 +1680,14 @@ resolve_path() {
       set -f
       more=($target)
       set +f
-      parts=("${more[@]}" "${parts[@]:i}")
+      # The parts not yet read, copied one by one: bash 3.2 (macOS) joins
+      # "${parts[@]:i}" into one word while IFS is /
+      rest=()
+      while [ "$i" -lt "${#parts[@]}" ]; do
+        rest+=("${parts[i]}")
+        i=$((i + 1))
+      done
+      parts=("${more[@]}" ${rest[@]+"${rest[@]}"})
       i=0
     else
       out="$out/$comp"
