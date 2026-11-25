@@ -1000,6 +1000,13 @@ here and marked so.
   release that carries this is a MAJOR version (3.0.0). No workflow,
   ontology or schema changes. The `layer` frontmatter key is removed from
   the 13 skills that had it (the ontology gives a capability's layer).
+- Plugin hooks (released with plugin 3.0.0, Added): while a file under the
+  git directory's `acs/` has a hard link outside the records, the
+  PreToolUse hook blocks every call with F504, reads included; while a file
+  of the project's records has one, it blocks every call it does not let
+  pass outright. Remove the other link outside the session. The hook needs
+  perl, or `find`, `awk` and a GNU or BSD `stat`, to count the links (R407
+  without them, or when a directory of the records cannot be read).
 - Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
@@ -2247,6 +2254,29 @@ here and marked so.
   `tests/test_version_lines.py` keeps them in agreement.
 - `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
   and kinds, tested against the core.
+- `grounded_agency/layer_records.py` gives the Claude Code settings that keep
+  the agent from the layer's records (#181): `permissions.deny` `Edit(...)`
+  rules for every record and `Read(...)` rules for `acs/` (the checkpoint
+  key), and a `sandbox.filesystem.denyWrite` list, every path literal and
+  absolute. `acs/` is named in the git directory git names for the project
+  (a linked worktree's own) and in each other git directory of the
+  repository: the main checkout's, linked worktrees' and submodules'. It
+  uses the standard library alone;
+  `python3 -I grounded_agency/layer_records.py [PROJECT_DIR]` prints the
+  settings as JSON.
+- Plugin hooks: the pre-tool-use hook refuses every call (`F504`) while a
+  file under `acs/` has a name outside the records, and every call it does
+  not let pass outright while one of the project's records has (a hard link
+  made outside the sandbox, through which a command could read or write the
+  record past the deny rules). It counts links with perl, or with GNU or
+  BSD `stat` where perl is not installed. The deny rules are the boundary;
+  the hook's reading of a call's paths is an early refusal
+  (`hooks/README.md`, `spec/SECURITY.md` §5.5).
+- Plugin hooks: the log hook reads an empty `audit.head` (a mount point the
+  Linux sandbox runtime leaves) as none and writes the head anew; the
+  anchor still shows a cut log. The take hook writes a new marker, and the
+  log hook a new head, in `.claude/checkpoints/` before renaming it onto
+  the record.
 
 ### Changed
 - The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and
