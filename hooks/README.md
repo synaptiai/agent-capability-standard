@@ -282,7 +282,9 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `<git dir>/acs/checkpoints/key` where git names the project's git
   directory (a git that cannot say reads none). The audit key file
   (`~/.config/acs/audit.key`, below) is not read for this: it is kept out of
-  the agent's reach instead.
+  the agent's reach instead. The log hook, which reads that file to sign,
+  does count the key it read as a credential it holds: a tool name or skill
+  name that holds it is logged as `[REDACTED]`.
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
@@ -764,8 +766,11 @@ or the key with the short host name the machine had when the log was
 written.
 
 The audit skill signs its records, `.claude/audit/records.jsonl`, under
-`AUDIT_HMAC_KEY` only, never with the key file. Check them with that key,
-outside Claude Code:
+`AUDIT_HMAC_KEY` only, never with the key file. Unlike the hooks, the skill
+computes the HMAC with `openssl dgst -sha256 -hmac "$AUDIT_HMAC_KEY"`, so
+while that command runs the key is on its command line, where any process
+of the user can list it. Check the records with that key, outside Claude
+Code:
 
 ```bash
 python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl --no-head --hmac-key "$AUDIT_HMAC_KEY"
@@ -820,8 +825,9 @@ escapes other encoders write for the characters its rules read decoded
 first looks for a value the plugin holds itself (`secret_held`):
 `AUDIT_HMAC_KEY`'s value and `SECRET_HELD`, which the pre-tool-use hook sets
 to the project's checkpoint key (`<git dir>/acs/checkpoints/key`) for a
-persist tool's data (STANDARD 1.2.0 §6.7: a host recognises at least the
-credentials it holds itself). The `persist`
+persist tool's data, and the log hook to the audit key it read from
+`~/.config/acs/audit.key` for the names it logs (STANDARD 1.2.0 §6.7: a
+host recognises at least the credentials it holds itself). The `persist`
 hook scans the text a call carries and the lines the file will hold after it
 that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is

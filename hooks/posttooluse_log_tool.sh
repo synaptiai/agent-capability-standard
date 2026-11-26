@@ -412,6 +412,131 @@ plain_name() {
 }
 # END plain-name
 
+# key_file_refusal FILE: why FILE cannot hold the audit key (the rules in
+# the header), printed; nothing when it can. The owner, the permission bits
+# and the link count come from stat, GNU's form tried first and BSD's next
+# (PATH may hold either); an answer in neither form refuses the file.
+key_file_refusal() {
+  local file="$1" dir uid stats owner mode links kdir proj
+  dir="${file%/*}"
+  if [ -L "$file" ]; then
+    printf 'it is a symbolic link'
+    return 0
+  fi
+  if [ ! -f "$file" ]; then
+    printf 'it is not a regular file'
+    return 0
+  fi
+  uid=$(id -u 2>/dev/null) || uid=""
+  if [[ ! "$uid" =~ ^[0-9]+$ ]]; then
+    printf 'the user the hook runs as could not be read (id -u)'
+    return 0
+  fi
+  stats=$(stat -c '%u %a %h' -- "$file" 2>/dev/null) \
+    || stats=$(stat -f '%u %Lp %l' -- "$file" 2>/dev/null) || stats=""
+  if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})\ ([0-9]+)$ ]]; then
+    printf 'its owner, mode and link count could not be read (stat)'
+    return 0
+  fi
+  owner="${BASH_REMATCH[1]}"
+  mode="${BASH_REMATCH[2]}"
+  links="${BASH_REMATCH[3]}"
+  if [ "$owner" != "$uid" ]; then
+    printf 'it is owned by user %s, not by the user the hook runs as (%s)' "$owner" "$uid"
+  elif [ "${mode: -2}" != "00" ]; then
+    printf 'its mode is %s: group or others may read or write it (chmod 600)' "$mode"
+  elif [ "$links" != 1 ]; then
+    printf 'it has %s hard links: another name for it may be readable where the key is not denied' "$links"
+  elif [ -L "$dir" ]; then
+    # stat reports a link itself, not its directory, and a deny rule names
+    # the path, not where the link leads.
+    printf 'its directory is a symbolic link'
+  elif [ ! -d "$dir" ]; then
+    printf 'its directory is not a directory'
+  else
+    stats=$(stat -c '%u %a' -- "$dir" 2>/dev/null) \
+      || stats=$(stat -f '%u %Lp' -- "$dir" 2>/dev/null) || stats=""
+    if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})$ ]]; then
+      printf 'the owner and mode of its directory could not be read (stat)'
+    elif [ "${BASH_REMATCH[1]}" != "$uid" ]; then
+      printf 'its directory is owned by user %s, not by the user the hook runs as (%s)' "${BASH_REMATCH[1]}" "$uid"
+    elif (( 8#${BASH_REMATCH[2]} & 8#022 )); then
+      printf 'its directory'"'"'s mode is %s: group or others may replace the file (chmod 700)' "${BASH_REMATCH[2]}"
+    else
+      # The sandbox lets the agent's commands write the project directory:
+      # a key there is one they can replace. Both as the system resolves
+      # them, so a link on the way is seen.
+      kdir=$(cd -P -- "$dir" 2>/dev/null && pwd) || kdir=""
+      proj=$(cd -P -- "$project_dir" 2>/dev/null && pwd) || proj=""
+      if [ -z "$kdir" ]; then
+        printf 'its directory could not be resolved (cd -P)'
+      elif [ -n "$proj" ]; then
+        case "$kdir/" in
+          "${proj%/}"/*) printf 'its directory is inside the project directory (%s), which the agent'"'"'s commands may write' "$proj" ;;
+        esac
+      fi
+    fi
+  fi
+  return 0
+}
+
+# key_file_id FILE: FILE's device and inode, as stat prints them, GNU's
+# form first; nothing when stat cannot say.
+key_file_id() {
+  stat -c '%d %i' -- "$1" 2>/dev/null || stat -f '%d %i' -- "$1" 2>/dev/null || true
+}
+
+# The HMAC key, and why there is none (key_note) when hmac_key is empty.
+hmac_key=""
+key_note=""
+key_file=""
+case "${HOME:-}" in
+  /*) key_file="${HOME%/}/.config/acs/audit.key" ;;
+esac
+if ! command -v openssl &> /dev/null; then
+  key_note="openssl is not installed"
+elif [ -n "$key_file" ] && { [ -e "$key_file" ] || [ -L "$key_file" ]; }; then
+  refusal=$(key_file_refusal "$key_file")
+  if [ -z "$refusal" ]; then
+    # The file read must be the file checked: its identity, and the rules,
+    # are taken again after the read, and a file put in its place is
+    # refused. (bash cannot check the file it opened, as the verifier does
+    # with fstat, so a swap and a swap back within the read go unseen.)
+    key_id=$(key_file_id "$key_file")
+    file_key=""
+    IFS= read -r file_key < "$key_file" 2>/dev/null || true
+    if [ -z "$key_id" ] || [ "$(key_file_id "$key_file")" != "$key_id" ] \
+      || [ -n "$(key_file_refusal "$key_file")" ]; then
+      file_key=""
+      refusal="it was replaced while it was read"
+    fi
+  fi
+  if [ -z "$refusal" ]; then
+    # (A count in the pattern: BSD's regcomp, macOS bash 3.2's, refuses one
+    # over 255.)
+    if (LC_ALL=C; [[ "$file_key" =~ ^[!-~]+$ ]] && (( ${#file_key} >= 32 && ${#file_key} <= 4096 ))); then
+      hmac_key="$file_key"
+    else
+      refusal="its first line is not a key of 32 to 4096 visible ASCII characters"
+    fi
+    file_key=""
+  fi
+  if [ -n "$refusal" ]; then
+    key_note="the key file $key_file is refused: $refusal (AUDIT_HMAC_KEY is not used in its place)"
+  fi
+elif [ -n "${AUDIT_HMAC_KEY:-}" ]; then
+  hmac_key="$AUDIT_HMAC_KEY"
+else
+  key_note="no audit key: there is no ${key_file:-~/.config/acs/audit.key (HOME is not an absolute path)} and AUDIT_HMAC_KEY is not set (hooks/README.md says how to make the key file)"
+fi
+
+# The key read is a credential the hook holds (STANDARD 1.2.0 §6.7):
+# plain_name redacts a tool or skill name that holds it, as it does one
+# that holds AUDIT_HMAC_KEY, so the signed line never carries its own key.
+if [ -n "$hmac_key" ]; then
+  SECRET_HELD="$hmac_key"
+fi
+
 # The tool's name, and a Skill call's skill name (recorded for a Skill call
 # only), as plain_name shows them: the line is signed, so a secret written
 # into it could not be taken out without breaking the chain.
@@ -529,124 +654,6 @@ action_id="$call_id"
 if [[ -z "$action_id" ]]; then
   rand=$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)
   action_id="${ts}-$$-${rand:-00000000}"
-fi
-
-# key_file_refusal FILE: why FILE cannot hold the audit key (the rules in
-# the header), printed; nothing when it can. The owner, the permission bits
-# and the link count come from stat, GNU's form tried first and BSD's next
-# (PATH may hold either); an answer in neither form refuses the file.
-key_file_refusal() {
-  local file="$1" dir uid stats owner mode links kdir proj
-  dir="${file%/*}"
-  if [ -L "$file" ]; then
-    printf 'it is a symbolic link'
-    return 0
-  fi
-  if [ ! -f "$file" ]; then
-    printf 'it is not a regular file'
-    return 0
-  fi
-  uid=$(id -u 2>/dev/null) || uid=""
-  if [[ ! "$uid" =~ ^[0-9]+$ ]]; then
-    printf 'the user the hook runs as could not be read (id -u)'
-    return 0
-  fi
-  stats=$(stat -c '%u %a %h' -- "$file" 2>/dev/null) \
-    || stats=$(stat -f '%u %Lp %l' -- "$file" 2>/dev/null) || stats=""
-  if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})\ ([0-9]+)$ ]]; then
-    printf 'its owner, mode and link count could not be read (stat)'
-    return 0
-  fi
-  owner="${BASH_REMATCH[1]}"
-  mode="${BASH_REMATCH[2]}"
-  links="${BASH_REMATCH[3]}"
-  if [ "$owner" != "$uid" ]; then
-    printf 'it is owned by user %s, not by the user the hook runs as (%s)' "$owner" "$uid"
-  elif [ "${mode: -2}" != "00" ]; then
-    printf 'its mode is %s: group or others may read or write it (chmod 600)' "$mode"
-  elif [ "$links" != 1 ]; then
-    printf 'it has %s hard links: another name for it may be readable where the key is not denied' "$links"
-  elif [ -L "$dir" ]; then
-    # stat reports a link itself, not its directory, and a deny rule names
-    # the path, not where the link leads.
-    printf 'its directory is a symbolic link'
-  elif [ ! -d "$dir" ]; then
-    printf 'its directory is not a directory'
-  else
-    stats=$(stat -c '%u %a' -- "$dir" 2>/dev/null) \
-      || stats=$(stat -f '%u %Lp' -- "$dir" 2>/dev/null) || stats=""
-    if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})$ ]]; then
-      printf 'the owner and mode of its directory could not be read (stat)'
-    elif [ "${BASH_REMATCH[1]}" != "$uid" ]; then
-      printf 'its directory is owned by user %s, not by the user the hook runs as (%s)' "${BASH_REMATCH[1]}" "$uid"
-    elif (( 8#${BASH_REMATCH[2]} & 8#022 )); then
-      printf 'its directory'"'"'s mode is %s: group or others may replace the file (chmod 700)' "${BASH_REMATCH[2]}"
-    else
-      # The sandbox lets the agent's commands write the project directory:
-      # a key there is one they can replace. Both as the system resolves
-      # them, so a link on the way is seen.
-      kdir=$(cd -P -- "$dir" 2>/dev/null && pwd) || kdir=""
-      proj=$(cd -P -- "$project_dir" 2>/dev/null && pwd) || proj=""
-      if [ -z "$kdir" ]; then
-        printf 'its directory could not be resolved (cd -P)'
-      elif [ -n "$proj" ]; then
-        case "$kdir/" in
-          "${proj%/}"/*) printf 'its directory is inside the project directory (%s), which the agent'"'"'s commands may write' "$proj" ;;
-        esac
-      fi
-    fi
-  fi
-  return 0
-}
-
-# key_file_id FILE: FILE's device and inode, as stat prints them, GNU's
-# form first; nothing when stat cannot say.
-key_file_id() {
-  stat -c '%d %i' -- "$1" 2>/dev/null || stat -f '%d %i' -- "$1" 2>/dev/null || true
-}
-
-# The HMAC key, and why there is none (key_note) when hmac_key is empty.
-hmac_key=""
-key_note=""
-key_file=""
-case "${HOME:-}" in
-  /*) key_file="${HOME%/}/.config/acs/audit.key" ;;
-esac
-if ! command -v openssl &> /dev/null; then
-  key_note="openssl is not installed"
-elif [ -n "$key_file" ] && { [ -e "$key_file" ] || [ -L "$key_file" ]; }; then
-  refusal=$(key_file_refusal "$key_file")
-  if [ -z "$refusal" ]; then
-    # The file read must be the file checked: its identity, and the rules,
-    # are taken again after the read, and a file put in its place is
-    # refused. (bash cannot check the file it opened, as the verifier does
-    # with fstat, so a swap and a swap back within the read go unseen.)
-    key_id=$(key_file_id "$key_file")
-    file_key=""
-    IFS= read -r file_key < "$key_file" 2>/dev/null || true
-    if [ -z "$key_id" ] || [ "$(key_file_id "$key_file")" != "$key_id" ] \
-      || [ -n "$(key_file_refusal "$key_file")" ]; then
-      file_key=""
-      refusal="it was replaced while it was read"
-    fi
-  fi
-  if [ -z "$refusal" ]; then
-    # (A count in the pattern: BSD's regcomp, macOS bash 3.2's, refuses one
-    # over 255.)
-    if (LC_ALL=C; [[ "$file_key" =~ ^[!-~]+$ ]] && (( ${#file_key} >= 32 && ${#file_key} <= 4096 ))); then
-      hmac_key="$file_key"
-    else
-      refusal="its first line is not a key of 32 to 4096 visible ASCII characters"
-    fi
-    file_key=""
-  fi
-  if [ -n "$refusal" ]; then
-    key_note="the key file $key_file is refused: $refusal (AUDIT_HMAC_KEY is not used in its place)"
-  fi
-elif [ -n "${AUDIT_HMAC_KEY:-}" ]; then
-  hmac_key="$AUDIT_HMAC_KEY"
-else
-  key_note="no audit key: there is no ${key_file:-~/.config/acs/audit.key (HOME is not an absolute path)} and AUDIT_HMAC_KEY is not set (hooks/README.md says how to make the key file)"
 fi
 
 # BEGIN hmac-sha256 (source: hooks/hmac_sha256.sh; tests/test_hmac_sha256.py keeps every copy equal)

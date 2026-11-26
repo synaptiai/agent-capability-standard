@@ -83,6 +83,8 @@ def log_call(
     env_key: str | None = None,
     call_id: str = "toolu_1",
     path: str | None = None,
+    tool_name: str = "Read",
+    tool_input: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """One PostToolUse call through the log hook, run by ``bash`` with -p
     (so the hook does not start another bash), HOME ``home``."""
@@ -94,9 +96,9 @@ def log_call(
         env["AUDIT_HMAC_KEY"] = env_key
     payload = {
         "hook_event_name": "PostToolUse",
-        "tool_name": "Read",
+        "tool_name": tool_name,
         "tool_use_id": call_id,
-        "tool_input": {"file_path": "a"},
+        "tool_input": {"file_path": "a"} if tool_input is None else tool_input,
     }
     return subprocess.run(
         [bash, "-p", str(HOOK)],
@@ -191,6 +193,33 @@ class TestTheHook:
             [],
         )
         assert cli(home, project, env_key=ENV_KEY).returncode == 0
+
+    def test_a_name_that_holds_the_file_key_is_redacted(
+        self, bash: str, home: Path, project: Path
+    ) -> None:
+        """The key read from the file is a credential the hook holds
+        (STANDARD 1.2.0 §6.7): a tool name or a skill name that holds it is
+        logged as [REDACTED], as one that holds AUDIT_HMAC_KEY is, so the
+        signed log never carries the key that signs it."""
+        make_key(home)
+        result = log_call(bash, project, home, tool_name=f"mcp__srv__{KEY}")
+        assert result.returncode == 0, result.stderr
+        result = log_call(
+            bash,
+            project,
+            home,
+            call_id="toolu_2",
+            tool_name="Skill",
+            tool_input={"skill": f"x{KEY}"},
+        )
+        assert result.returncode == 0, result.stderr
+        log = project / ".claude" / "audit.log"
+        text = log.read_text(encoding="utf-8")
+        assert KEY not in text
+        first, second = lines(project)
+        assert first["tool"] == "[REDACTED]"
+        assert second["details"]["skill"] == "[REDACTED]"
+        assert verify_log(log, KEY, project / ".claude" / "audit.head") == (2, 2, [])
 
     def test_without_a_key_the_line_is_unsigned_and_said(
         self, bash: str, home: Path, project: Path
