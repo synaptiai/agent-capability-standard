@@ -60,7 +60,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from . import _core
+from . import _core, layer_records
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
@@ -1990,13 +1990,17 @@ class GroundedAgentAdapter:
         - enable_file_checkpointing=True for SDK-level rollback
         - the operating-system boundary Bash runs under (STANDARD 1.2.0
           section 5.18.3, RFC-0011): ``permissions.deny`` rules in
-          ``settings`` for the layer's records, the repository's git
-          configuration and hooks, the host's configuration and the
-          credential files (:func:`~.utils.sandbox.deny_rules`; a
-          ``settings`` file is read and passed inline), and, where the
-          options carry no sandbox of their own (``sandbox``, or a
-          ``sandbox`` member of ``settings``) and ``config.sandbox`` is on,
-          the strict sandbox (:func:`~.utils.sandbox.strict_sandbox`). The
+          ``settings`` for this adapter's records, the plugin hooks' records
+          (:func:`~.layer_records.deny_settings`: the project's and
+          ``acs/`` in each git directory of the repository), the
+          repository's git configuration and hooks, the host's
+          configuration and the credential files
+          (:func:`~.utils.sandbox.deny_rules`; a ``settings`` file is read
+          and passed inline), and, where the options carry no sandbox of
+          their own (``sandbox``, or a ``sandbox`` member of ``settings``)
+          and ``config.sandbox`` is on, the strict sandbox
+          (:func:`~.utils.sandbox.strict_sandbox`), whose
+          ``filesystem.denyWrite`` names the hooks' records. The
           Bash classifier relaxes a call only while every options this
           adapter wrapped hold the boundary
           (:func:`~.utils.sandbox.boundary_faults`) and no other settings
@@ -2255,10 +2259,13 @@ class GroundedAgentAdapter:
         """What the boundary keeps from a sandboxed command of a session in
         ``project_dir`` (:func:`~.utils.sandbox.boundary_paths`): this
         layer's records (its checkpoint directory, audit log, snapshot store
-        and evidence file), the repository's git directories, the code that
-        runs outside the sandbox (:meth:`_code_outside`), and the
-        credentials. Returns the paths and the faults of the code it could
-        not resolve."""
+        and evidence file), the plugin hooks' records with the deny rules
+        and ``denyWrite`` paths :func:`~.layer_records.deny_settings` gives
+        for them, the repository's git configuration and hooks, the code
+        that runs outside the sandbox (:meth:`_code_outside`), and the
+        credentials. Returns the paths and the faults: code it could not
+        resolve, or hooks' records it could not name (the boundary is then
+        unverified)."""
         records: list[str | os.PathLike[str]] = [
             self.config.checkpoint_dir,
             self.config.audit_log_path,
@@ -2279,6 +2286,15 @@ class GroundedAgentAdapter:
             else None
         )
         code, code_files, faults = self._code_outside(project_dir, env_map, base)
+        record_rules: list[str] = []
+        record_deny_write: list[str] = []
+        try:
+            fragment = layer_records.deny_settings(project_dir)
+        except layer_records.LayerRecordsError as e:
+            faults.append(f"the plugin hooks' records cannot be denied: {e}")
+        else:
+            record_rules = fragment["permissions"]["deny"]
+            record_deny_write = fragment["sandbox"]["filesystem"]["denyWrite"]
         paths = boundary_paths(
             project_dir,
             git_dirs(project_dir),
@@ -2290,6 +2306,8 @@ class GroundedAgentAdapter:
             credential_files=self.config.sandbox_deny_paths,
             credential_vars=self.config.sandbox_deny_env,
             link_skipped=skipped,
+            record_rules=record_rules,
+            record_deny_write=record_deny_write,
         )
         return paths, faults
 

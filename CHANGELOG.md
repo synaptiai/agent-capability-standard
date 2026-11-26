@@ -147,10 +147,16 @@ here and marked so.
   gh's and git's credential files, the audit key file, Claude Code's
   credentials, the paths in `GroundedAgentConfig.sandbox_deny_paths`, the
   token and agent variables and every variable whose name looks like a
-  credential's (with `sandbox_deny_env` for more) out of reach. It also
+  credential's (with `sandbox_deny_env` for more) out of reach, and
+  `filesystem.denyWrite` paths for the plugin hooks' records. It also
   adds `permissions.deny` rules to the options' `settings` (a settings
   file is read and passed inline): `Edit` and `Read` of the adapter's
-  records, `Edit` of the project's `.claude/` and `.mcp.json`, the
+  records; the rules `grounded_agency/layer_records.py` gives for the
+  hooks' records, `Edit` and `Read` of `acs/` in each git directory of
+  the repository (the project's, the main checkout's, each linked
+  worktree's and each submodule's, and, from a submodule checkout, its
+  superprojects', as they exist at the wrap) among them;
+  `Edit` of the project's `.claude/` and `.mcp.json`, the
   repository's git configuration and hooks, the user's Claude Code
   settings, and the code that runs outside the sandbox (the
   `grounded_agency` and `claude_agent_sdk` packages, the interpreter and
@@ -173,7 +179,9 @@ here and marked so.
   `extra_args` flag but `debug-to-stderr`, `mcp_servers` given as a file
   or text, a settings source the CLI reads that may weaken it or that
   changed since the wrap, a policy source the adapter does not read, a
-  non-empty allowlist while a destination policy is in force, options
+  non-empty allowlist while a destination policy is in force, a deny rule
+  or `denyWrite` path for the hooks' records missing, hooks' records that
+  cannot be named (no git, or a path a rule reads as a pattern), options
   changed after the wrap, or options not yet wrapped), every Bash call is a gated `mutate` and `send`: `ls`
   needs a checkpoint and approval, and `git stash create` takes no
   checkpoint (use `create_checkpoint`). The deny rules are added either
@@ -2353,7 +2361,8 @@ here and marked so.
   key), and a `sandbox.filesystem.denyWrite` list, every path literal and
   absolute. `acs/` is named in the git directory git names for the project
   (a linked worktree's own) and in each other git directory of the
-  repository: the main checkout's, linked worktrees' and submodules'. It
+  repository: the main checkout's, linked worktrees' and submodules', and,
+  for a submodule checkout, the same for each superproject above it. It
   uses the standard library alone and the syntax of Python 3.9;
   `python3 -I grounded_agency/layer_records.py [PROJECT_DIR]` prints the
   settings as JSON.

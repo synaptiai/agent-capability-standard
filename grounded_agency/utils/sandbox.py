@@ -7,7 +7,12 @@ passes those settings itself (``ClaudeAgentOptions.sandbox`` and
 ``settings``, the CLI's ``--settings`` scope), so it can turn on a strict
 sandbox (:func:`strict_sandbox`) and deny rules for the layer's records
 (:func:`deny_rules`), and check, before each Bash call, that the sandbox in
-force has each property of the boundary (:func:`boundary_faults`).
+force has each property of the boundary (:func:`boundary_faults`). The
+rules and ``denyWrite`` paths for the plugin hooks' records (the project's
+``.claude/`` records and ``acs/`` in each git directory of the repository)
+come from :mod:`grounded_agency.layer_records`, which the adapter calls and
+passes in (:func:`boundary_paths`, ``record_rules`` and
+``record_deny_write``).
 
 The Agent SDK's ``SandboxSettings`` type lists ``enabled``,
 ``autoAllowBashIfSandboxed``, ``excludedCommands``,
@@ -139,8 +144,9 @@ class BoundaryPaths:
     """The absolute paths the boundary keeps from a sandboxed command.
 
     Attributes:
-        records: The layer's records: neither writable nor readable from
-            the sandbox or the file tools (``Edit`` and ``Read`` deny rules).
+        records: The adapter's own records: neither writable nor readable
+            from the sandbox or the file tools (``Edit`` and ``Read`` deny
+            rules).
         protected: What code outside the sandbox runs or reads as
             configuration: the project's ``.claude/`` and ``.mcp.json``,
             the repository's git configuration and hooks and a linked
@@ -164,6 +170,16 @@ class BoundaryPaths:
         link_skipped: Directories under the records that are not walked
             for hard links: a snapshot store's content objects, which the
             layer writes and checks by their digest.
+        record_rules: The ``permissions.deny`` rules for the plugin hooks'
+            records, as :func:`grounded_agency.layer_records.deny_settings`
+            gives them: ``Edit`` of the project's records and of ``acs/`` in
+            each git directory of the repository (the project's, the common
+            one, each linked worktree's and each submodule's, and a
+            submodule checkout's superprojects'), ``Read`` of
+            the ``acs/`` directories.
+        record_deny_write: The ``sandbox.filesystem.denyWrite`` paths for
+            those records, from the same function. They are walked for hard
+            links too.
     """
 
     records: tuple[str, ...]
@@ -172,6 +188,8 @@ class BoundaryPaths:
     credential_env: tuple[str, ...] = CREDENTIAL_ENV_VARS
     link_checked: tuple[str, ...] = ()
     link_skipped: tuple[str, ...] = ()
+    record_rules: tuple[str, ...] = ()
+    record_deny_write: tuple[str, ...] = ()
 
 
 def environment(env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -257,6 +275,8 @@ def boundary_paths(
     credential_files: Sequence[str] = (),
     credential_vars: Sequence[str] = (),
     link_skipped: Sequence[str] = (),
+    record_rules: Sequence[str] = (),
+    record_deny_write: Sequence[str] = (),
 ) -> BoundaryPaths:
     """The paths the boundary protects for a session in ``project_dir``.
 
@@ -264,8 +284,9 @@ def boundary_paths(
         project_dir: The CLI's working directory (the options' ``cwd``).
         git_dirs: The repository's git directory and common git directory,
             absolute, as git reports them (they differ in a linked
-            worktree); empty outside a repository.
-        records: The layer's own records (its checkpoint directory, audit
+            worktree); empty outside a repository. Their configuration and
+            hooks are protected; their records come in ``record_rules``.
+        records: The adapter's own records (its checkpoint directory, audit
             log, snapshot store, evidence file), each relative to this
             process's working directory or absolute.
         env: The options' ``env``: with this process's environment, the
@@ -281,6 +302,10 @@ def boundary_paths(
         credential_vars: More variables to unset.
         link_skipped: Directories under the records not walked for hard
             links.
+        record_rules: The deny rules for the plugin hooks' records
+            (:attr:`BoundaryPaths.record_rules`).
+        record_deny_write: Their ``denyWrite`` paths
+            (:attr:`BoundaryPaths.record_deny_write`).
     """
     here = os.getcwd()
     project = os.path.realpath(project_dir)
@@ -295,12 +320,9 @@ def boundary_paths(
     gh = os.path.realpath(
         _expand(merged.get("GH_CONFIG_DIR") or os.path.join(xdg, "gh"), home)
     )
-    git_records: list[str] = []
     git_config: list[str] = []
     for git_dir in git_dirs:
         real = os.path.realpath(git_dir)
-        # The plugin's checkpoint commits (`<git dir>/acs/`).
-        git_records.append(os.path.join(real, "acs"))
         # What the layer's own git commands, run outside the sandbox, read
         # as configuration and run.
         git_config.extend(
@@ -358,9 +380,7 @@ def boundary_paths(
         *(_absolute(p, home, home) for p in credential_files),
     ]
     return BoundaryPaths(
-        records=_unique(
-            [*(_absolute(r, here, home) for r in records), *git_records],
-        ),
+        records=_unique(_absolute(r, here, home) for r in records),
         protected=_unique(p for path in protected for p in _both(path)),
         credential_files=_unique(p for path in credentials for p in _both(path)),
         credential_env=credential_env(env, credential_vars),
@@ -368,6 +388,8 @@ def boundary_paths(
             p for path in (*settings, *code_files) for p in _both(path)
         ),
         link_skipped=_unique(os.path.realpath(p) for p in link_skipped),
+        record_rules=_unique(record_rules),
+        record_deny_write=_unique(record_deny_write),
     )
 
 
@@ -501,15 +523,18 @@ def _rule(tool: str, path: str) -> str:
 
 def deny_rules(paths: BoundaryPaths) -> list[str]:
     """The ``permissions.deny`` rules for ``paths``: ``Edit`` and ``Read``
-    of each record, ``Edit`` of each protected path, ``Read`` of each
-    credential file. Literal absolute paths, no globs. The CLI applies an
-    ``Edit`` deny rule to sandboxed commands as well as to the file tools,
-    and a ``Read`` one to both."""
+    of each of the adapter's records, the rules for the plugin hooks'
+    records (:attr:`BoundaryPaths.record_rules`, as given), ``Edit`` of each
+    protected path, ``Read`` of each credential file. Literal absolute
+    paths; the only glob is the ``/**`` of a directory among the hooks'
+    records. The CLI applies an ``Edit`` deny rule to sandboxed commands as
+    well as to the file tools, and a ``Read`` one to both."""
     return list(
         dict.fromkeys(
             [
                 *(_rule("Edit", p) for p in paths.records),
                 *(_rule("Read", p) for p in paths.records),
+                *paths.record_rules,
                 *(_rule("Edit", p) for p in paths.protected),
                 *(_rule("Read", p) for p in paths.credential_files),
             ]
@@ -523,7 +548,8 @@ def strict_sandbox(
     """The sandbox settings of the boundary: on, refusing to run a command
     when the sandbox cannot start, with no route outside it, a network
     limited to ``allowed_domains`` (none by default) that refuses any other
-    host, and the credentials of ``paths`` out of reach."""
+    host, the credentials of ``paths`` out of reach, and the plugin hooks'
+    records of ``paths`` not writable (``filesystem.denyWrite``)."""
     return {
         "enabled": True,
         "failIfUnavailable": True,
@@ -547,6 +573,7 @@ def strict_sandbox(
         "filesystem": {
             "disabled": False,
             "denyRead": list(paths.credential_files),
+            "denyWrite": list(paths.record_deny_write),
         },
         "credentials": {
             "files": [{"path": p, "mode": "deny"} for p in paths.credential_files],
@@ -692,9 +719,10 @@ def boundary_faults(
     Events or proxy of its own, reads and writes no path beyond its defaults
     (no ``allowRead``, no ``allowWrite``), refuses every host not on its
     allowlist, which names no loopback, link-local, IP or wildcard-only
-    host, keeps every credential file of ``paths`` unreadable and every
-    variable of ``paths`` unset, and the ``permissions.deny`` rules name each
-    record and protected path. With ``destination_policies`` (a destination
+    host, keeps every credential file of ``paths`` unreadable, every variable of
+    ``paths`` unset and every ``denyWrite`` path of ``paths`` in its
+    ``filesystem.denyWrite``, and the ``permissions.deny`` rules hold every
+    rule :func:`deny_rules` gives for ``paths``. With ``destination_policies`` (a destination
     policy is in force, STANDARD 1.2.0 section 4.4.2), the allowlist must be
     empty: a call the classifier reads as local leaves ``send`` out, and
     this layer cannot tell that every allowlisted host is one each policy
@@ -733,6 +761,11 @@ def boundary_faults(
     for path in paths.credential_files:
         if path not in denied_files:
             faults.append(f"the sandbox does not deny reading {path}")
+    deny_write = _get(sandbox, "filesystem", "denyWrite")[1]
+    denied_writes = set(deny_write if isinstance(deny_write, list) else [])
+    for path in paths.record_deny_write:
+        if path not in denied_writes:
+            faults.append(f"the sandbox does not deny writing {path}")
     variables = _get(sandbox, "credentials", "envVars")[1]
     denied_vars = {
         entry.get("name")
@@ -919,8 +952,9 @@ def source_faults(
 
 
 def linked_files(paths: BoundaryPaths, limit: int = 50000) -> list[str]:
-    """The files among the records, the credential files and the
-    link-checked paths of ``paths`` (:attr:`BoundaryPaths.link_checked`),
+    """The files among the records (the adapter's and the plugin hooks'),
+    the credential files and the link-checked paths of ``paths``
+    (:attr:`BoundaryPaths.link_checked`),
     and in the directories among them, that have a hard link outside them:
     a link made outside the sandbox reaches the file under another name
     that no deny rule names (the Linux sandbox lets a command write a
@@ -935,7 +969,14 @@ def linked_files(paths: BoundaryPaths, limit: int = 50000) -> list[str]:
     seen = 0
     skipped = set(paths.link_skipped)
     walked: set[str] = set()
-    tops = _unique([*paths.records, *paths.credential_files, *paths.link_checked])
+    tops = _unique(
+        [
+            *paths.records,
+            *paths.record_deny_write,
+            *paths.credential_files,
+            *paths.link_checked,
+        ]
+    )
     for top in tops:
         stack = [(top, True)]
         while stack:

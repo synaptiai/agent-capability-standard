@@ -22,7 +22,7 @@ from claude_agent_sdk._internal.transport.subprocess_cli import (
     SubprocessCLITransport,
 )
 
-from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig, layer_records
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
 from grounded_agency.utils import sandbox as sandbox_module
 from grounded_agency.utils.sandbox import (
@@ -143,7 +143,19 @@ def test_default_options_get_the_strict_sandbox(tmp_path: Path, project: Path) -
         assert f"Read(/{records}/{name})" in deny
     assert f"Edit(/{os.path.realpath(project)}/.claude)" in deny
     assert f"Read(/{home}/.ssh)" in deny
-    assert not any("*" in rule for rule in deny)
+    # The plugin hooks' records: the rules and denyWrite paths
+    # layer_records gives, as it gives them. Their directory rules are the
+    # only ones with a glob.
+    fragment = layer_records.deny_settings(str(project))
+    hooks_rules = fragment["permissions"]["deny"]
+    assert f"Edit(/{os.path.realpath(project)}/.claude/checkpoints/**)" in hooks_rules
+    assert all(rule in deny for rule in hooks_rules)
+    assert [r for r in deny if "*" in r] == [r for r in hooks_rules if "*" in r]
+    assert all(r.endswith("/**)") for r in deny if "*" in r)
+    assert (
+        sandbox["filesystem"]["denyWrite"]
+        == fragment["sandbox"]["filesystem"]["denyWrite"]
+    )
     assert (
         boundary_faults(flag_settings(wrapped), adapter._wrapped_boundaries[0].paths)
         == []
@@ -175,8 +187,8 @@ def test_records_in_a_repository_name_its_real_git_directories(
     deny = _deny(adapter.wrap_options(_options(project)))
     git_dir = os.path.realpath(project / ".git")
     for rule in (
-        f"Edit(/{git_dir}/acs)",
-        f"Read(/{git_dir}/acs)",
+        f"Edit(/{git_dir}/acs/**)",
+        f"Read(/{git_dir}/acs/**)",
         f"Edit(/{git_dir}/config)",
         f"Edit(/{git_dir}/hooks)",
     ):
@@ -234,6 +246,27 @@ def test_a_callers_own_sandbox_is_kept(tmp_path: Path, project: Path) -> None:
     # The deny rules are added all the same.
     assert _deny(wrapped)
     # It lacks the boundary's properties: the classifier does not relax.
+    assert not _relaxed(adapter)
+
+
+def test_a_callers_sandbox_without_the_records_deny_write_is_not_verified(
+    tmp_path: Path, project: Path
+) -> None:
+    """The adapter adds nothing to a caller's sandbox: it is verified only
+    when its denyWrite holds every path layer_records gives."""
+    strict = _adapter(tmp_path).wrap_options(_options(project)).sandbox
+    deny_write = layer_records.deny_settings(str(project))["sandbox"]["filesystem"][
+        "denyWrite"
+    ]
+    assert strict["filesystem"]["denyWrite"] == deny_write
+    own = copy.deepcopy(strict)
+    own["filesystem"]["denyWrite"] = deny_write[:-1]
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project, sandbox=own))
+    assert wrapped.sandbox["filesystem"]["denyWrite"] == deny_write[:-1]
+    assert f"the sandbox does not deny writing {deny_write[-1]}" in (
+        adapter._wrapped_boundaries[0].faults
+    )
     assert not _relaxed(adapter)
 
 
@@ -347,6 +380,8 @@ WEAKENINGS: list[tuple[str, Any]] = [
     ("credentials.envVars", []),
     ("credentials.files", []),
     ("filesystem.denyRead", []),
+    ("filesystem.denyWrite", []),
+    ("filesystem.denyWrite", _DELETE),
 ]
 
 
@@ -378,6 +413,26 @@ def test_a_missing_deny_rule_is_not_verified(tmp_path: Path, project: Path) -> N
     for rule in list(deny):
         fewer = {**settings, "permissions": {"deny": [r for r in deny if r != rule]}}
         assert boundary_faults(fewer, paths) == [f"permissions.deny has no {rule}"]
+
+
+def test_a_missing_deny_write_path_is_not_verified(
+    tmp_path: Path, project: Path
+) -> None:
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project))
+    paths = adapter._wrapped_boundaries[0].paths
+    settings = flag_settings(wrapped)
+    assert settings is not None
+    deny_write = settings["sandbox"]["filesystem"]["denyWrite"]
+    assert deny_write
+    for path in list(deny_write):
+        fewer = copy.deepcopy(settings)
+        fewer["sandbox"]["filesystem"]["denyWrite"] = [
+            p for p in deny_write if p != path
+        ]
+        assert boundary_faults(fewer, paths) == [
+            f"the sandbox does not deny writing {path}"
+        ]
 
 
 @pytest.mark.parametrize(
@@ -893,6 +948,98 @@ def test_a_linked_worktrees_git_file(tmp_path: Path, project: Path) -> None:
     assert _relaxed(adapter)
 
 
+def test_the_records_of_every_git_directory_are_denied(
+    tmp_path: Path, project: Path
+) -> None:
+    """acs/ of each git directory of the repository is denied: the main
+    checkout's, a linked worktree's and a submodule's, whichever checkout
+    the session runs in, with the rules and denyWrite paths verified."""
+    import subprocess
+
+    def git(*args: str, cwd: Path) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "protocol.file.allow=always",
+                *args,
+            ],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    library = tmp_path / "library"
+    library.mkdir()
+    git("init", "-q", cwd=library)
+    (library / "l").write_text("l")
+    git("add", "l", cwd=library)
+    git("commit", "-qm", "l", cwd=library)
+    git("init", "-q", cwd=project)
+    (project / "a").write_text("a")
+    git("add", "a", cwd=project)
+    git("commit", "-qm", "a", cwd=project)
+    git("submodule", "add", "-q", str(library), "lib", cwd=project)
+    git("commit", "-qm", "lib", cwd=project)
+    worktree = tmp_path / "wt"
+    git("worktree", "add", "-q", str(worktree), cwd=project)
+    common = os.path.realpath(project / ".git")
+    expected = [
+        f"{common}/acs",
+        f"{common}/worktrees/wt/acs",
+        f"{common}/modules/lib/acs",
+    ]
+    # From the submodule's checkout too: its common git directory is its
+    # own modules/lib, so the superproject's acs/ is found through it.
+    for cwd in (project, worktree, project / "lib"):
+        adapter = _adapter(tmp_path)
+        wrapped = adapter.wrap_options(_options(cwd))
+        deny = _deny(wrapped)
+        deny_write = wrapped.sandbox["filesystem"]["denyWrite"]
+        for path in expected:
+            assert f"Edit(/{path}/**)" in deny
+            assert f"Read(/{path}/**)" in deny
+            assert path in deny_write
+        paths = adapter._wrapped_boundaries[0].paths
+        settings = flag_settings(wrapped)
+        assert settings is not None
+        assert boundary_faults(settings, paths) == []
+        assert _relaxed(adapter)
+        # A rule or denyWrite path for the worktree's or the submodule's
+        # acs/ missing is a fault.
+        for path in expected[1:]:
+            rule = f"Read(/{path}/**)"
+            fewer = copy.deepcopy(settings)
+            fewer["permissions"]["deny"].remove(rule)
+            assert boundary_faults(fewer, paths) == [f"permissions.deny has no {rule}"]
+            fewer = copy.deepcopy(settings)
+            fewer["sandbox"]["filesystem"]["denyWrite"].remove(path)
+            assert boundary_faults(fewer, paths) == [
+                f"the sandbox does not deny writing {path}"
+            ]
+
+
+def test_records_that_cannot_be_named_are_not_verified(
+    tmp_path: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When layer_records cannot give the hooks' records (no git, or a
+    path a rule reads as a pattern), every Bash call is the worst case."""
+
+    def fails(project_dir: Any) -> Any:
+        raise layer_records.LayerRecordsError("git is not installed")
+
+    monkeypatch.setattr(layer_records, "deny_settings", fails)
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project))
+    faults = adapter._wrapped_boundaries[0].faults
+    assert "the plugin hooks' records cannot be denied: git is not installed" in faults
+    assert not _relaxed(adapter)
+
+
 # --- credentials -------------------------------------------------------------
 
 
@@ -1057,6 +1204,28 @@ def test_a_large_snapshot_store_is_not_walked(tmp_path: Path, project: Path) -> 
     assert _relaxed(adapter)
     paths = adapter._wrapped_boundaries[0].paths
     assert sandbox_module.linked_files(paths, limit=200) == []
+
+
+def test_the_hooks_marker_history_is_walked_up_to_the_limit(
+    tmp_path: Path, project: Path
+) -> None:
+    """The hooks' records are walked whole, the marker history included
+    (the pre-tool-use hook counts its links too): a hard link there is
+    found, and past the limit the boundary is unverified."""
+    used = project / ".claude" / "checkpoints" / "used"
+    used.mkdir(parents=True)
+    for i in range(30):
+        (used / f"m{i}").write_text("x")
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project))
+    assert _relaxed(adapter)
+    paths = adapter._wrapped_boundaries[0].paths
+    assert str(used.parent) in paths.record_deny_write
+    over = sandbox_module.linked_files(paths, limit=10)
+    assert len(over) == 1 and over[0].endswith("(not checked: too many files)")
+    os.link(used / "m0", tmp_path / "outside")
+    assert sandbox_module.linked_files(paths) == [os.path.realpath(used / "m0")]
+    assert not _relaxed(adapter)
 
 
 def test_a_hard_link_inside_the_denied_paths(

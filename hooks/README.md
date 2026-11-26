@@ -670,7 +670,11 @@ sandbox runtime skips a glob such as `audit.log*`):
   same rules: the main checkout's, each linked worktree's
   (`.git/worktrees/<name>`) and each submodule's (`.git/modules/<path>`,
   nested ones included), since a session in one checkout can otherwise
-  write another's commit entries or read its key. A project in no
+  write another's commit entries or read its key. A submodule checkout's
+  common git directory is its own `.git/modules/<path>` in the
+  superproject, so the superproject's git directories get the same rules,
+  found with `git rev-parse --show-superproject-working-tree`, up to the
+  outermost one. A project in no
   repository has no `acs/` rule.
 - A rule names a path that exists when the settings are made, so make them
   again after `git worktree add` or a submodule's first checkout.
