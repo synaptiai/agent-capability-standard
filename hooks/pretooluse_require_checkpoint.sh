@@ -124,6 +124,16 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #     commit under a key the take hook drew at random and keeps there
 #     (<git dir>/acs/checkpoints/key), so a file a command creates there,
 #     through a link the repository ships for instance, is no entry.
+#   - Every call, of any tool: refused (F504 CONSTRAINT_VIOLATED) while a
+#     regular file under the git directory's records (GIT_DIR_RECORDS: acs/,
+#     which holds the checkpoint key) has more links than names among them:
+#     a hard link made outside the boundary, through which a command or a
+#     file tool can read the key past the deny rules. Every call not let
+#     pass outright (mutate, checkpoint-ask, a restore): refused the same way
+#     while a regular file of the project's records (LAYER_RECORDS) has one,
+#     through which a command can write the record past the deny rules
+#     (grounded_agency/layer_records.py gives them), which are the boundary.
+#     The reading of a call's paths below is an advisory early refusal.
 #   - mutate: a call whose arguments name the layer's own records
 #     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, audit.head, in
 #     any letter case and with //, ./ and x/../ read as a path reads them, or
@@ -1057,6 +1067,157 @@ for entry in "${PERSIST_TOOLS[@]}"; do
   fi
 done
 
+# BEGIN layer-records (grounded_agency/layer_records.py holds the same list: PROJECT_RECORDS and GIT_DIR_RECORDS; tests/test_layer_records.py keeps them so)
+# The layer's records: in the project directory, and in its git directory.
+LAYER_RECORDS=(.claude/checkpoint.ok .claude/checkpoints .claude/audit.log .claude/audit.head)
+GIT_DIR_RECORDS=(acs)
+# END layer-records
+
+# BEGIN link-count (tests/test_layer_records.py runs the hook without these blocks and expects the same verdicts)
+# A record with another name outside the records (a hard link made outside
+# the boundary: by a person, a hook, a tool server or a command run outside
+# the sandbox) can be read and written through that name past the deny
+# rules that keep the records from the agent's commands and file tools (on
+# Linux the sandbox runtime denies a path, not a file). This is an early
+# refusal, not the boundary: the deny rules are. Each regular file under the
+# records is counted (lstat: no link followed); a file's links beyond the
+# names it has among the records count. A file that goes while it is
+# counted (a marker a parallel call takes) is not an error; an empty file
+# the sandbox runtime leaves at a record's path while a command runs has one
+# link and passes. A count that finds one is taken once more, 0.2 seconds
+# later: the take hook enters the checkpoint key with ln, so for a moment it
+# has two names. perl counts where installed; elsewhere stat (GNU -c %h, BSD
+# -f %l) on each regular file find lists, and a walk find or stat reports
+# an error on twice (a directory it cannot read) cannot count. Only the
+# records that exist are counted. Prints the link count and the record's
+# path, one line each; status 0 for none, 1 for one, 2 when the records
+# cannot be counted.
+records_linked() {
+  local status=0 out="" failed fmt attempt root
+  local roots=()
+  for root in "$@"; do
+    if [ -e "$root" ] || [ -L "$root" ]; then
+      roots+=("$root")
+    fi
+  done
+  [ "${#roots[@]}" -gt 0 ] || return 0
+  if command -v perl > /dev/null 2>&1; then
+    perl -e '
+      my (%names, %first, @order);
+      sub visit {
+        my ($p) = @_;
+        my @st = lstat $p;
+        if (!@st) { return if $!{ENOENT} || $!{ENOTDIR}; exit 3; }
+        if (-d _) {
+          my $dh;
+          if (!opendir $dh, $p) { return if $!{ENOENT} || $!{ENOTDIR}; exit 3; }
+          my @entries = grep { $_ ne "." && $_ ne ".." } readdir $dh;
+          closedir $dh;
+          visit("$p/$_") for @entries;
+        } elsif (-f _) {
+          my $id = "$st[0]:$st[1]";
+          push @order, $id unless $names{$id}++;
+          $first{$id} = $p unless defined $first{$id};
+        }
+      }
+      sub linked {
+        %names = (); %first = (); @order = ();
+        visit($_) for @ARGV;
+        for my $id (@order) {
+          my @st = lstat $first{$id};
+          next unless @st && -f _ && "$st[0]:$st[1]" eq $id;
+          return ($st[3], $first{$id}) if $st[3] > $names{$id};
+        }
+        return;
+      }
+      my @found = linked();
+      if (@found) { select(undef, undef, undef, 0.2); @found = linked(); }
+      exit 0 unless @found;
+      print $found[0], "\n", $found[1];
+      exit 1;
+    ' -- "${roots[@]}" 2> /dev/null || status=$?
+    case "$status" in
+      0 | 1) return "$status" ;;
+      *) return 2 ;;
+    esac
+  fi
+  if stat -c %h / > /dev/null 2>&1; then
+    fmt=(-c '%d:%i %h %n')
+  elif stat -f %l / > /dev/null 2>&1; then
+    fmt=(-f '%d:%i %l %N')
+  else
+    return 2
+  fi
+  command -v find > /dev/null 2>&1 && command -v awk > /dev/null 2>&1 || return 2
+  # Attempt 1 finds nothing and has no error: none. A find or stat error (a
+  # directory it cannot read, a file that went), or a file found: counted
+  # once more. Attempt 2 finds nothing: none, or, with an error, cannot
+  # count (R407).
+  for attempt in 1 2; do
+    [ "$attempt" = 1 ] || sleep 0.2 2> /dev/null || sleep 1 2> /dev/null || true
+    failed=0
+    out=$(find "${roots[@]}" -type f -exec stat "${fmt[@]}" {} + 2> /dev/null | awk '
+      {
+        id = $1; n = $2; p = $0
+        sub(/^[^ ]* [^ ]* /, "", p)
+        if (!(id in count)) { order[++k] = id; first[id] = p }
+        count[id]++; links[id] = n
+      }
+      END {
+        for (i = 1; i <= k; i++) {
+          id = order[i]
+          if (links[id] + 0 > count[id]) { printf "%s\n%s", links[id], first[id]; exit }
+        }
+      }') || failed=1
+    if [ -z "$out" ]; then
+      [ "$failed" = 1 ] || return 0
+      [ "$attempt" = 1 ] || return 2
+    fi
+  done
+  printf '%s' "$out"
+  return 1
+}
+
+# Refuses the call for records_linked's status ($1) and output ($2), with
+# what the other name allows ($3) and which calls are refused ($4).
+refuse_linked() {
+  local count path
+  case "$1" in
+    0) return 0 ;;
+    1)
+      count="${2%%$'\n'*}"
+      path="${2#*$'\n'}"
+      # Shown in the reason: the first 300 characters, one line, plain.
+      path="${path:0:300}"
+      path="${path//[^A-Za-z0-9_.\/ -]/?}"
+      block "F504 CONSTRAINT_VIOLATED: the layer's record ${path} has ${count//[^0-9]/} links, and not all of its other names are among the layer's records: $3 through another name (a hard link made outside the boundary), past the deny rules that keep the records from the agent, so $4 is refused while it has one. Remove the other name yourself, outside this session (a command here that removes it is refused too): find <directory> -samefile <record>, in the directories the link may be in (the project, your home directory), lists the names; remove each one that is not a record."
+      ;;
+    *) block "R407 SAFETY_CHECK_FAILED: the checkpoint hook could not count the links of the layer's records (a directory among them could not be read, or neither perl nor a GNU or BSD stat is installed), so the call is blocked." ;;
+  esac
+}
+
+# The git directory's records (acs/: the checkpoint key), for every call:
+# another name for the key lets a read take it. Where git cannot say which
+# git directory is the project's, they are not counted here, and a call
+# this hook gates is blocked below (none: git is not installed).
+records_git_status=none
+records_git_dir=""
+if command -v git > /dev/null 2>&1; then
+  records_git_status=0
+  git_dir_at "$project_dir" || records_git_status=$?
+  records_git_dir="$GIT_DIR_FOUND"
+fi
+if [ "$records_git_status" = 0 ]; then
+  record_roots=()
+  for record in "${GIT_DIR_RECORDS[@]}"; do
+    record_roots+=("${records_git_dir%/}/${record}")
+  done
+  linked_status=0
+  linked=$(records_linked "${record_roots[@]}") || linked_status=$?
+  refuse_linked "$linked_status" "$linked" "a command or a file tool could read the checkpoint key, or write the record," "every call"
+fi
+# END link-count
+
 for entry in "${UNGATED_TOOLS[@]}"; do
   if [ "$tool_name" = "$entry" ]; then
     exit 0
@@ -1094,6 +1255,25 @@ esac
 if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
   exit 0
 fi
+
+# BEGIN link-count (tests/test_layer_records.py runs the hook without these blocks and expects the same verdicts)
+# The project's records, for every call this hook does not let pass
+# outright (a gated call, a checkpoint put to a person, a restore): another
+# name lets a command write them. Where git could not say which git directory is the
+# project's, its records were not counted above, and the call is blocked, as
+# it is below where the call's paths are compared with the records.
+case "$records_git_status" in
+  0 | 1 | none) ;;
+  *) block "R407 SAFETY_CHECK_FAILED: git did not say in time which git directory is the project's (one whose configuration includes a FIFO or a terminal holds git), so the links of the layer's records cannot be counted and the call is blocked." ;;
+esac
+record_roots=()
+for record in "${LAYER_RECORDS[@]}"; do
+  record_roots+=("${project_dir%/}/${record}")
+done
+linked_status=0
+linked=$(records_linked "${record_roots[@]}") || linked_status=$?
+refuse_linked "$linked_status" "$linked" "a command could write the record" "every call this hook does not let pass outright"
+# END link-count
 
 # Approval needs a person (§5.18.7): unless ACS_HOOK_APPROVAL is "off", a
 # call that requires it is blocked in a permission mode that puts no call to
