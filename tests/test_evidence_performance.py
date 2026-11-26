@@ -543,27 +543,35 @@ class TestPerformance:
         assert elapsed < 1.0, f"search_by_ref_prefix took {elapsed:.2f}s"
 
     def test_10k_insert_evict_under_1s(self) -> None:
-        """Benchmark: 10K insert+evict cycle under 1s with O(1) eviction."""
-        store = EvidenceStore(max_anchors=5000)
+        """Benchmark: 10K insert+evict cycles with O(1) eviction. Eviction
+        that scanned the store would make twice the inserts take about four
+        times as long; the time limit is loose, because a busy CI runner
+        (macOS in particular) can take more than a second for work that
+        takes a fraction of one on an idle machine."""
 
-        # Fill to capacity
-        for i in range(5000):
-            anchor = EvidenceAnchor.from_tool_output(
-                "Read", f"fill_{i}", {"path": f"/tmp/{i}"}
-            )
-            store.add_anchor(anchor)
+        def seconds_for(inserts: int) -> float:
+            store = EvidenceStore(max_anchors=5000)
+            # Fill to capacity
+            for i in range(5000):
+                anchor = EvidenceAnchor.from_tool_output(
+                    "Read", f"fill_{i}", {"path": f"/tmp/{i}"}
+                )
+                store.add_anchor(anchor)
+            # More inserts, each of which evicts one
+            start = time.monotonic()
+            for i in range(inserts):
+                anchor = EvidenceAnchor.from_tool_output(
+                    "Write", f"evict_{i}", {"path": f"/tmp/e_{i}"}
+                )
+                store.add_anchor(anchor)
+            elapsed = time.monotonic() - start
+            assert len(store) == 5000
+            return elapsed
 
-        # 10K more inserts (each triggers eviction)
-        start = time.monotonic()
-        for i in range(10000):
-            anchor = EvidenceAnchor.from_tool_output(
-                "Write", f"evict_{i}", {"path": f"/tmp/e_{i}"}
-            )
-            store.add_anchor(anchor)
-        elapsed = time.monotonic() - start
-
-        assert len(store) == 5000
-        assert elapsed < 1.0, f"10K insert+evict took {elapsed:.3f}s, expected < 1.0s"
+        half = seconds_for(5000)
+        full = seconds_for(10000)
+        assert full < 5.0, f"10K insert+evict took {full:.3f}s, expected < 5.0s"
+        assert full < 3 * max(half, 0.05), (half, full)
 
 
 # ─── Eviction edge cases ───
