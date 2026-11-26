@@ -267,7 +267,9 @@
     display: none;
   }
 
-  @media (max-width: 479px) {
+  /* The full wordmark, the chip and the four buttons need about 625px; below
+     640px the header shows "ACS", so the bar does not scroll sideways. */
+  @media (max-width: 639px) {
     .wordmark__full {
       display: none;
     }
@@ -329,7 +331,7 @@
       padding: 0 var(--space-3);
     }
 
-    /* The button keeps "Menu" as its name and the chip keeps "Standard"; only the words are hidden. */
+    /* The button keeps "Menu" as its name and the chip keeps its status word; only the words are hidden. */
     .menu-button__text,
     .version-chip__word {
       position: absolute;

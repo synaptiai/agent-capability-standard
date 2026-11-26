@@ -6,7 +6,7 @@ import type { Heading, PhrasingContent, RootContent } from 'mdast';
 import { loadCitation } from '../data/citation';
 import { loadCounts } from '../data/counts';
 import { capabilitiesOfLayer, loadOntology } from '../data/ontology';
-import { loadVersions, olderVersionNote } from '../data/versions';
+import { loadVersions, statusPhrase } from '../data/versions';
 import { loadWorkflows, type Step, type Workflow } from '../data/workflows';
 import { anchorsOf, headingText, parseMarkdown, stripFrontmatter } from './anchors';
 import { currentStandard, diagnosticHref, routeByUrl, type Inline } from './generated';
@@ -112,10 +112,9 @@ export function opening() {
     ]),
     { code: false, text: ` cannot run unless a checkpoint ran before them.` },
   ];
-  const previous = v.standard.previous.map((p) => ({ ...p, note: olderVersionNote(p.version, readRepoFile(std.source)) }));
   const versionLine = [
     `Standard ${v.standard.current.version}, ${v.standard.current.status}.`,
-    ...previous.filter((p) => p.note.stillSupported).map((p) => `Version ${p.version} is still supported.`),
+    ...v.standard.previous.map((p) => `Version ${p.version} is ${statusPhrase(p.status)}.`),
     `Licence: ${loadCitation().license}.`,
   ].join(' ');
   const install = readRepoFile('README.md')

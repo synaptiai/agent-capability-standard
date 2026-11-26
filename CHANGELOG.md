@@ -2262,6 +2262,15 @@ here and marked so.
   section 8 arithmetic.
 - `spec/ROADMAP.md` lists the five version lines and where each is declared;
   `tests/test_version_lines.py` keeps them in agreement.
+- `spec/GOVERNANCE.md` defines the statuses of a Standard document
+  (Candidate Standard, Standard, Supported, Unsupported), the criteria for
+  releasing a Candidate Standard, what the `**Date:**` line gives for each
+  status, and the support window. Standard 1.1.0 is the released Standard,
+  1.0.0 is Supported and 1.2.0 is a Candidate Standard. The site states each
+  version's status from its own header. `tests/test_standard_statuses.py`
+  checks each header against GOVERNANCE, the Standard table and the
+  "Plugin X implements Standard Y" sentence of the roadmap, and the
+  specification changelog.
 - `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
   and kinds, tested against the core.
 - `grounded_agency/layer_records.py` gives the Claude Code settings that keep

@@ -4,7 +4,7 @@
 //   on any side;
 // - every grid (layer glyphs, UI glyphs, the mark, the letters) parses and is
 //   rectangular, at the size its kind needs;
-// - every status value the sources use, and every RFC status
+// - every status value the sources use, and every RFC and Standard status
 //   spec/GOVERNANCE.md allows, has a badge style in src/lib/status.ts;
 // - every glyph key the figures look up from data has a grid (visual spec
 //   2.2, 2.3): each H2 of each Standard (appendices aside), each domain
@@ -28,7 +28,7 @@ import { CONCEPT_GLYPHS, GLYPH_ALIASES, LAYER_GLYPHS, LETTERS, MARK, UI_GLYPHS }
 import { ALL_GRIDS, chapterKey, principleKey, resolveGlyphKey } from '../src/pixel/keys.ts';
 import { parseGrid } from '../src/pixel/grid.ts';
 import { codeLines } from '../src/lib/anchors.ts';
-import { governanceStatuses } from '../src/lib/governance.ts';
+import { governanceStatuses, standardStatuses } from '../src/lib/governance.ts';
 import { PROPOSED_WORKFLOW_STATUS, STATUS_STYLES, statusClause } from '../src/lib/status.ts';
 import { isMain } from './is-main.mjs';
 
@@ -153,7 +153,7 @@ export function findHexColours(files) {
   return problems;
 }
 
-export { governanceStatuses };
+export { governanceStatuses, standardStatuses };
 
 /**
  * Status values the site shows a badge for, from the sources:
@@ -267,7 +267,8 @@ function main() {
     .split('\n')
     .filter((p) => p && !EXCLUDED.test(p));
   const statuses = sourceStatuses(tracked.map((p) => ({ path: p, text: read(p) })));
-  for (const s of governanceStatuses(read('spec/GOVERNANCE.md'))) if (!statuses.has(s)) statuses.set(s, 'spec/GOVERNANCE.md');
+  const governance = read('spec/GOVERNANCE.md');
+  for (const s of [...governanceStatuses(governance), ...standardStatuses(governance)]) if (!statuses.has(s)) statuses.set(s, 'spec/GOVERNANCE.md');
   problems.push(...checkStatuses(statuses, STATUS_STYLES));
   statuses.set(PROPOSED_WORKFLOW_STATUS, 'src/lib/status.ts');
   problems.push(...checkGlyphKeys(statusGlyphKeys(statuses, STATUS_STYLES), {}));
