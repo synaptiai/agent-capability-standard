@@ -2912,15 +2912,20 @@ class TestAuditCommandHook:
                 + " >> .claude/audit/records.jsonl"
             )
 
+        # BSD grep (macOS) reads about ten times slower than GNU grep, and a
+        # busy runner can take over 30 s for the full line there
+        limit = 30 if GNU_GREP else 300
+
         def seconds_at(line: str) -> float:
             started = time.monotonic()
-            run_command(hook, bash_call(command_of(line)), tmp_path, shell)
+            run_command(
+                hook, bash_call(command_of(line)), tmp_path, shell, timeout=limit
+            )
             return time.monotonic() - started
 
-        # BSD grep (macOS) reads about ten times slower than GNU grep, but
-        # linearly: there the test checks how the time grows over a quarter
-        # and a half of the run, and gives the full line more time, since a
-        # busy runner can take over 30 s for it
+        # BSD grep reads linearly: there the test checks how the time grows
+        # over a quarter and a half of the run, with the same time limit as
+        # the full line
         if not GNU_GREP:
             run = "a" * max(len(r) for r in re.findall("a+", record))
             assert_linear(
@@ -2934,7 +2939,7 @@ class TestAuditCommandHook:
             bash_call(command_of(record)),
             tmp_path,
             shell,
-            timeout=30 if GNU_GREP else 300,
+            timeout=limit,
         )
         if GNU_GREP:
             assert time.monotonic() - started < 10

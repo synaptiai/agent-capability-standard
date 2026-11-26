@@ -542,36 +542,38 @@ class TestPerformance:
         assert len(results) == 5000
         assert elapsed < 1.0, f"search_by_ref_prefix took {elapsed:.2f}s"
 
-    def test_10k_insert_evict_under_1s(self) -> None:
-        """Benchmark: 10K insert+evict cycles with O(1) eviction. Eviction
-        that scanned the store would make twice the inserts take about four
-        times as long; the time limit is loose, because a busy CI runner
-        (macOS in particular) can take more than a second for work that
-        takes a fraction of one on an idle machine."""
+    def test_insert_evict_time_does_not_grow_with_the_store(self) -> None:
+        """Benchmark: 10K insert+evict cycles with O(1) eviction take the
+        same time in a full store of 5000 anchors as in one of 20000.
+        Eviction that scanned the store would take about four times as
+        long in the store four times larger. The time limit is loose,
+        because a busy CI runner (macOS in particular) can take more than
+        a second for work that takes a fraction of one on an idle
+        machine."""
 
-        def seconds_for(inserts: int) -> float:
-            store = EvidenceStore(max_anchors=5000)
+        def seconds_for(capacity: int) -> float:
+            store = EvidenceStore(max_anchors=capacity)
             # Fill to capacity
-            for i in range(5000):
+            for i in range(capacity):
                 anchor = EvidenceAnchor.from_tool_output(
                     "Read", f"fill_{i}", {"path": f"/tmp/{i}"}
                 )
                 store.add_anchor(anchor)
-            # More inserts, each of which evicts one
+            # 10K more inserts, each of which evicts one
             start = time.monotonic()
-            for i in range(inserts):
+            for i in range(10000):
                 anchor = EvidenceAnchor.from_tool_output(
                     "Write", f"evict_{i}", {"path": f"/tmp/e_{i}"}
                 )
                 store.add_anchor(anchor)
             elapsed = time.monotonic() - start
-            assert len(store) == 5000
+            assert len(store) == capacity
             return elapsed
 
-        half = seconds_for(5000)
-        full = seconds_for(10000)
-        assert full < 5.0, f"10K insert+evict took {full:.3f}s, expected < 5.0s"
-        assert full < 3 * max(half, 0.05), (half, full)
+        small = seconds_for(5000)
+        large = seconds_for(20000)
+        assert small < 5.0, f"10K insert+evict took {small:.3f}s, expected < 5.0s"
+        assert large < 2 * max(small, 0.5), (small, large)
 
 
 # ─── Eviction edge cases ───
