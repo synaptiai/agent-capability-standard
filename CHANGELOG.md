@@ -2323,8 +2323,10 @@ here and marked so.
   other route out of the sandbox, an allowlist of DNS names only (no IP
   literal, loopback or metadata host), the token variables denied, and
   denials of writes to the layer's records, the settings files, the user
-  configuration directory, the hook scripts and the audit key, and of reads
-  of the audit key, `~/.ssh`, gh's and git's token files and the keychains;
+  configuration directory, the hook scripts, the audit key and the
+  project's `.mcp.json`, and of reads of the audit key, `~/.ssh`, gh's and
+  git's token files and the keychains; neither
+  `enableAllProjectMcpServers` nor `enabledMcpjsonServers` in any scope;
   no project or local file changing the sandbox other than to narrow it,
   allowing `Edit` or `Read`, or naming a command that runs outside it; and
   a call that does not set `dangerouslyDisableSandbox`. Every other Bash

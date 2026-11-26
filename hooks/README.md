@@ -785,7 +785,11 @@ can make a call more relaxed:
     `/Library/Keychains/`;
   - writes to the project directory, where it holds a `.mcp.json` (and to
     the repository's top level, where that holds one): the tool servers it
-    names run outside the sandbox from code in the repository.
+    names run outside the sandbox from code in the repository; where there
+    is none, writes to the `.mcp.json` path itself, so that no sandboxed
+    command can create one for the next session to start;
+- neither `enableAllProjectMcpServers: true` nor `enabledMcpjsonServers`:
+  either starts the tool servers a `.mcp.json` names with no prompt.
 
 A path is denied by a `permissions.deny` rule written `Tool(//<absolute
 path>)` for a file, or `Tool(//<directory>/**)` for a directory or for any
@@ -863,6 +867,7 @@ absolute, for each project and plugin copy):
                            "Edit(//Users/me/project/.claude/settings.json)",
                            "Edit(//Users/me/project/.claude/settings.local.json)",
                            "Edit(//Users/me/project/.claude/hooks/**)",
+                           "Edit(//Users/me/project/.mcp.json)",
                            "Edit(//<plugin hooks directory>/**)",
                            "Read(//Users/me/.config/acs/audit.key)",
                            "Edit(//Users/me/.config/acs/audit.key)"]}

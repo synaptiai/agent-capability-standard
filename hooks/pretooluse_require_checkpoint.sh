@@ -1040,7 +1040,10 @@ classify_bash() {
 #     file (~/.config/acs/audit.key); reads of ~/.ssh, gh's hosts.yml,
 #     ~/.git-credentials and, on macOS, the keychains; and writes to a
 #     directory that holds a .mcp.json (the project directory, the
-#     repository's top level). A denial is a permissions.deny rule
+#     repository's top level), or to the .mcp.json path there where there
+#     is none;
+#   - neither enableAllProjectMcpServers true nor enabledMcpjsonServers
+#     (tool servers a .mcp.json names would start with no prompt). A denial is a permissions.deny rule
 #     Tool(//<absolute path>) for a file, Tool(//<dir>/**) for a directory
 #     or for a directory that holds the path, or an entry of
 #     sandbox.filesystem.denyWrite (writes) or denyRead (reads) that is the
@@ -1360,12 +1363,19 @@ sandbox_verify() {
     fi
   done
   # A .mcp.json names tool servers whose code, in the repository, runs
-  # outside the sandbox: its directory must be denied to writes.
+  # outside the sandbox: its directory must be denied to writes. Where
+  # there is none, the path itself must be denied to writes, so that no
+  # sandboxed command can create one for the next session to start.
   for f in "$SANDBOX_WRITTEN" ${top:+"${top%/}"}; do
     if [ -e "$f/.mcp.json" ] || [ -L "$f/.mcp.json" ]; then
       sandbox_need_both Edit d "$f" "$f/.mcp.json names tool servers that run outside the sandbox" || ok=0
       if [ "$f" = "$SANDBOX_WRITTEN" ] && [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ]; then
         sandbox_need Edit d "$SANDBOX_PHYSICAL" "$f/.mcp.json names tool servers that run outside the sandbox" || ok=0
+      fi
+    else
+      sandbox_need_both Edit f "$f/.mcp.json" "a .mcp.json written there would name tool servers that run outside the sandbox" || ok=0
+      if [ "$f" = "$SANDBOX_WRITTEN" ] && [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ]; then
+        sandbox_need Edit f "${SANDBOX_PHYSICAL%/}/.mcp.json" "a .mcp.json written there would name tool servers that run outside the sandbox" || ok=0
       fi
     fi
   done
@@ -1588,6 +1598,8 @@ SANDBOX_JQ='
               | if env_denied($s.credentials; $v) then empty
                 else "no sandbox.credentials.envVars entry in user or managed settings denies \($v)\(if $v == "AUDIT_HMAC_KEY" then " (it is set)" else "" end)" end)
            end),
+          (if ($t.enableAllProjectMcpServers | unset_or(false)) and ($t.enabledMcpjsonServers | empty_list) then empty
+           else "enableAllProjectMcpServers or enabledMcpjsonServers is set in user or managed settings (a .mcp.json a sandboxed command writes would start tool servers outside the sandbox)" end),
           ($files[] | select(.scope == "p") | .name as $f | .data
            | (if (.sandbox | narrowing_sandbox) | not
               then "\($f) changes the sandbox (it may set only enabled true, failIfUnavailable true, allowUnsandboxedCommands false, autoAllowBashIfSandboxed, an empty excludedCommands, filesystem.denyWrite and denyRead, network.deniedDomains, network.strictAllowlist true, and credentials.envVars and files whose entries all deny)"

@@ -73,6 +73,25 @@ def _forms(path: Path | str) -> list[str]:
     return out
 
 
+def _toplevel(project: Path) -> str | None:
+    """The top level of the repository that holds ``project``, as git
+    gives it, or None outside one."""
+    if not project.is_dir():
+        return None
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=project,
+        env={**os.environ, **_GIT_ENV},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def required_rules(
     project: Path,
     config: Path,
@@ -85,7 +104,9 @@ def required_rules(
     settings files (project, local, and the local files given), the
     project's .claude/hooks, the user configuration directory (and
     ~/.claude.json when ``home`` is given: no CLAUDE_CONFIG_DIR) and the
-    hooks' directory, Read and Edit rules for the audit key file, and Read
+    hooks' directory, an Edit rule for the .mcp.json of the project and of its
+    repository's top level, Read and
+    Edit rules for the audit key file, and Read
     rules for the user's credentials."""
     deny = list(deny_settings(project)["permissions"]["deny"])
     for base in _forms(project):
@@ -93,7 +114,11 @@ def required_rules(
             f"Edit(/{base}/.claude/settings.json)",
             f"Edit(/{base}/.claude/settings.local.json)",
             f"Edit(/{base}/.claude/hooks/**)",
+            f"Edit(/{base}/.mcp.json)",
         ]
+    top = _toplevel(project)
+    if top is not None and top != os.path.realpath(project):
+        deny.append(f"Edit(/{top}/.mcp.json)")
     for local in local_files:
         deny += [f"Edit(/{form})" for form in _forms(local)]
     deny += [f"Edit(/{form}/**)" for form in _forms(config)]
@@ -814,6 +839,37 @@ class TestDenyRules:
         }
         _write(config / "settings.json", settings)
         assert_relaxed(run_hook(project, config))
+
+    def test_no_tool_server_definition_may_be_written(
+        self, setup: tuple[Path, Path]
+    ) -> None:
+        """Where the project holds no .mcp.json, its path must be denied to
+        writes: a sandboxed command could otherwise create one whose tool
+        servers the next session starts outside the sandbox."""
+        project, config = setup
+        settings = _user(config)
+        settings["permissions"]["deny"] = [
+            rule for rule in settings["permissions"]["deny"] if ".mcp.json" not in rule
+        ]
+        _write(config / "settings.json", settings)
+        assert_gated(run_hook(project, config), ".mcp.json written there")
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            {"enableAllProjectMcpServers": True},
+            {"enabledMcpjsonServers": ["server"]},
+        ],
+    )
+    def test_user_settings_that_start_project_tool_servers(
+        self, setup: tuple[Path, Path], setting: dict[str, Any]
+    ) -> None:
+        """Tool servers a .mcp.json names start with no prompt under these
+        user settings, so they are not strict, with or without a .mcp.json."""
+        project, config = setup
+        _write(config / "settings.json", {**_user(config), **setting})
+        assert not (project / ".mcp.json").exists()
+        assert_gated(run_hook(project, config), "enableAllProjectMcpServers")
 
     def test_allow_managed_permission_rules_only(
         self, setup: tuple[Path, Path], tmp_path: Path
