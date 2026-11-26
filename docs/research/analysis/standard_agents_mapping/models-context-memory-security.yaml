@@ -1053,7 +1053,7 @@ rows:
     and arguments; a hook in the same package can import the tool definition module (an inference from
     ordinary module imports). Searched: loadTool, getToolNames (content/0.2.0 and the published types):
     not found.'
-  combined: '`annotations: { acs: { standard, ontology, capability, layer, domain, risk, mutation, requires_checkpoint,
+  combined: '`annotations: { ''ai.synapti/acs'': { standard, ontology, capability, layer, domain, risk, mutation, requires_checkpoint,
     requires_approval } }` (the object `schemas/interop/standard_agents_annotation.schema.json` defines;
     `domain` is its one optional member) is declarative metadata only, read at build time by an ACS validator
     that imports the package''s tool definitions, and by interfaces. Enforcement comes from code: the

@@ -318,9 +318,7 @@ findings file and the PVC review, checked against the tree.
      step that fails, a version-1 restore), which are already in Upgrading.
    - Close issue #77, which the Candidate delivers; #83 stays open for Go
      and Java.
-3. **ACS-Q15** (is `acs` the final annotation key?) needs an answer before
-   anything annotated is published; ACS-Q10 (attendance of a thread no
-   trigger started) is also open.
+3. **ACS-Q10** (attendance of a thread no trigger started) is open.
 4. **npm:** a tag `acs-core-v0.1.0` on main, with `NPM_PUBLISH_ENABLED` and
    `NPM_TOKEN` set; otherwise the job is a dry run. The site's deploy has
    the same kind of gate (`SITE_DEPLOY_ENABLED` and the Cloudflare
