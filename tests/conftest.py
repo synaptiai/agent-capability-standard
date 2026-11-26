@@ -57,6 +57,23 @@ def _no_git_configuration_but_the_tests() -> Iterator[None]:
             patch.undo()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _a_home_with_no_audit_key() -> Iterator[None]:
+    """Every test, and every hook and verifier it runs, sees HOME as an empty
+    directory of its own, so no audit key file (``~/.config/acs/audit.key``,
+    which the log hook and ``tools/verify_audit_log.py`` prefer to
+    ``AUDIT_HMAC_KEY``) on the machine signs or verifies a test's log, and no
+    test reads the person's key. A test that needs a key file makes one in a
+    HOME of its own (``tests/test_audit_key_file.py``)."""
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-home-") as where:
+        patch.setenv("HOME", where)
+        try:
+            yield
+        finally:
+            patch.undo()
+
+
 @pytest.fixture
 def ontology_path() -> str:
     """Path to the capability ontology YAML file."""

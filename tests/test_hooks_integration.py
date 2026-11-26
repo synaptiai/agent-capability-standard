@@ -52,9 +52,11 @@ def run_pretooluse(
 def run_posttooluse(
     payload: dict, project_dir: str
 ) -> subprocess.CompletedProcess[str]:
-    """Run posttooluse hook with given payload on stdin."""
+    """Run posttooluse hook with given payload on stdin, with a key (the
+    hook writes unsigned lines without one, and exits 1)."""
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = project_dir
+    env["AUDIT_HMAC_KEY"] = "integration-test-key"
     return subprocess.run(
         [str(POSTTOOLUSE_HOOK)],
         input=json.dumps(payload),
