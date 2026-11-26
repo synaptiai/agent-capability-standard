@@ -392,8 +392,9 @@ class TestPreToolUseExitCodes:
 
 @pytest.fixture
 def log_env(tmp_path: Path) -> dict[str, str]:
-    """Environment with CLAUDE_PROJECT_DIR set for log output."""
-    return {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+    """Environment with CLAUDE_PROJECT_DIR set for log output, and a key
+    (the hook writes unsigned lines without one, and exits 1)."""
+    return {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}
 
 
 class TestPostToolUseExitCodes:
@@ -784,6 +785,9 @@ _AUDIT_HOOK_TOOLS = [
     "sleep",
     # The head (.claude/audit.head) is replaced whole, by renaming
     "mv",
+    # The HMAC is built from SHA-256, the key and the digests read as hex
+    "od",
+    "tr",
 ]
 
 
@@ -1136,7 +1140,7 @@ class TestAuditDigestUnavailable:
         stub = bin_dir / "openssl"
         stub.write_text(
             f"#!{shutil.which('bash')}\n"
-            'case " $* " in *" -hmac "*) ;; *) cat > /dev/null; exit 1 ;; esac\n'
+            'case " $* " in *" -binary "*) ;; *) cat > /dev/null; exit 1 ;; esac\n'
             f'exec {shutil.which("openssl")} "$@"\n'
         )
         stub.chmod(0o755)
@@ -1151,14 +1155,20 @@ class TestAuditDigestUnavailable:
         assert self.SECRET not in (tmp_path / ".claude" / "audit.log").read_text()
         assert verify_log(tmp_path / ".claude" / "audit.log", self.KEY) == (1, 1, [])
 
-    def test_no_openssl_writes_nothing_and_exits_1(self, tmp_path: Path) -> None:
-        """Without openssl no line can be signed: none is written (an
-        unsigned one would break the chain), and the hook says why."""
+    def test_no_openssl_writes_the_line_unsigned_and_exits_1(
+        self, tmp_path: Path
+    ) -> None:
+        """Without openssl no line can be signed: it is written unsigned
+        (its hmac empty), as without a key, the head is not moved, and the
+        hook says why."""
         bin_dir = self._bin_dir(tmp_path, {"openssl"})
         result = self._log(tmp_path, bin_dir)
         assert result.returncode == 1
         assert "openssl is not installed" in result.stderr
-        assert read_entries(tmp_path) == []
+        assert "logged unsigned" in result.stderr
+        (entry,) = read_entries(tmp_path)
+        assert entry["hmac"] == ""
+        assert not (tmp_path / ".claude" / "audit.head").exists()
 
     def test_no_jq_reports_and_exits_1(self, tmp_path: Path) -> None:
         bin_dir = self._bin_dir(tmp_path, {"jq"})

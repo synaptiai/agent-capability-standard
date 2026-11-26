@@ -57,6 +57,23 @@ def _no_git_configuration_but_the_tests() -> Iterator[None]:
             patch.undo()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _a_home_with_no_audit_key() -> Iterator[None]:
+    """Every test, and every hook and verifier it runs, sees HOME as an empty
+    directory of its own, so no audit key file (``~/.config/acs/audit.key``,
+    which the log hook and ``tools/verify_audit_log.py`` prefer to
+    ``AUDIT_HMAC_KEY``) on the machine signs or verifies a test's log, and no
+    test reads the person's key. A test that needs a key file makes one in a
+    HOME of its own (``tests/test_audit_key_file.py``)."""
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-home-") as where:
+        patch.setenv("HOME", where)
+        try:
+            yield
+        finally:
+            patch.undo()
+
+
 # The directory of the plugin's hooks, and the repository's root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -104,13 +121,14 @@ def strict_sandbox_settings(
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _strict_sandbox_for_the_hooks() -> Iterator[None]:
+def _strict_sandbox_for_the_hooks(_a_home_with_no_audit_key: None) -> Iterator[None]:
     """Every hook a test runs reads a user settings file (CLAUDE_CONFIG_DIR)
     with the strict sandbox, whose deny rules cover the temporary directory
     and this repository: the pre-tool-use hook relaxes a read-only Bash
     command only under it, and the tests of the classification assume it.
     tests/test_strict_sandbox.py tests the rule itself, with settings of its
-    own."""
+    own. It runs after _a_home_with_no_audit_key, so the rules for the
+    audit key name the HOME the hooks see."""
     import json
 
     patch = pytest.MonkeyPatch()
