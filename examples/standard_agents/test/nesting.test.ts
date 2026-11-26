@@ -152,7 +152,7 @@ describe('nesting tokens', () => {
     // A bound tool: the refusal and its record name its capability, and the
     // record names the layer that decided it (§5.18.8).
     expect(refused).toMatchObject({ action: 'write', capability: 'mutate', status: 'refused' });
-    expect(refused?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding', version: '1.2.0' });
+    expect(refused?.recorded_by).toMatchObject({ name: '@synaptiai/standard-agents-binding', version: '1.2.0' });
     expect(refused?.recorded_by?.config_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(nestedResults[0]?.error_data).toMatchObject({ location: { tool: 'write', capability: 'mutate' } });
   });
@@ -196,12 +196,12 @@ describe('nesting tokens', () => {
 });
 
 // A composite may list a tool defined with plain defineTool that carries a
-// binding record (an `acs` annotation): the layer sees the invocation, so it
+// binding record (an `ai.synapti/acs` annotation): the layer sees the invocation, so it
 // checks and records the nested call itself (STANDARD 1.2.0 §5.18.4,
 // §4.4.2, §5.18.8). One with no binding the layer loads is V107.
 describe('nested calls of a tool the binding did not define (security round 1, batch 5)', () => {
   const args = z.object({}).passthrough();
-  const recordOf = (record: Record<string, unknown>) => ({ acs: { standard: '1.2.0', ontology: '2.2.0', ...record } });
+  const recordOf = (record: Record<string, unknown>) => ({ 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', ...record } });
 
   function relaySetup(notifyRecord: Record<string, unknown> | null) {
     const t = memoryThread();
@@ -601,7 +601,7 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
   // The registered tools, policies and secrets are the realm's: no test leaves them to the next.
   afterEach(() => resetLayer());
   const args = z.object({}).passthrough();
-  const recordOf = (record: Record<string, unknown>) => ({ acs: { standard: '1.2.0', ontology: '2.2.0', ...record } });
+  const recordOf = (record: Record<string, unknown>) => ({ 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', ...record } });
   const SECRET = 'hk_live_9f8e7d6c5b4a39281706';
   const text = (output: Record<string, unknown>): ToolResult => ({ status: 'success', result: JSON.stringify(output) });
 
@@ -1487,7 +1487,7 @@ describe("what an invocation through a composite's state returns holds no secret
       ? defineTool({
           description: 'fetch',
           args,
-          annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', tool: 'fetch', capability: 'retrieve' } },
+          annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', tool: 'fetch', capability: 'retrieve' } },
           execute: async () => fetch as ToolResult,
         })
       : groundedTool({ name: 'fetch', capability: 'retrieve', description: 'fetch', args, execute: fetch as () => Promise<never> });

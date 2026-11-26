@@ -108,7 +108,7 @@ function resources(cfg: WorkerConfig) {
       uri: `${cfg.origin}/spec/${cfg.standardVersion}/index.md`,
       name: 'standard',
       title: `Agent Capability Standard ${cfg.standardVersion} (Markdown)`,
-      description: 'The full text of the current version of the Standard.',
+      description: 'The full text of the newest version of the Standard.',
       mimeType: 'text/markdown',
       path: `/spec/${cfg.standardVersion}/index.md`,
     },

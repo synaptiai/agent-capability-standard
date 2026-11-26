@@ -25,7 +25,7 @@ describe('remark-page-meta', () => {
     expect(page.version).toBe('1.1.0');
     expect(page.date).toBe('2026-10-28');
     // The Status value spans lines 4-8 and holds two links.
-    expect(page.status).toMatch(/^Candidate Standard — accepted by RFC-0003 and RFC-0004; the reference validator/);
+    expect(page.status).toMatch(/^Standard — accepted by RFC-0003 and RFC-0004 and released with plugin 2.0.0; the reference validator/);
     expect(page.status).toMatch(/identity resolution or F505$/);
     expect(page.meta.map((m) => m.key)).toEqual(['Version', 'Status', 'Date', 'Supersedes']);
     // Kept in the body as a definition list, links rewritten.
