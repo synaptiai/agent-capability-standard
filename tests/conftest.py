@@ -57,6 +57,75 @@ def _no_git_configuration_but_the_tests() -> Iterator[None]:
             patch.undo()
 
 
+# The directory of the plugin's hooks, and the repository's root.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def strict_sandbox_settings(
+    *covered: str | os.PathLike[str], config_dir: str | os.PathLike[str]
+) -> dict[str, Any]:
+    """User settings holding the strict sandbox the pre-tool-use hook relaxes
+    read-only Bash under (hooks/README.md, The strict sandbox), with
+    ``Edit(//<dir>/**)`` and ``Read(//<dir>/**)`` deny rules for each
+    directory in ``covered`` (as written and as resolved), which cover the
+    records, settings files and hook scripts of every project and plugin
+    copy under them, and for the user configuration directory
+    ``config_dir``; with rules for the audit key file and Read rules for the
+    user's credentials (~/.ssh, gh's hosts.yml, ~/.git-credentials, the
+    keychains); and with envVars denials for the token variables."""
+    dirs: list[str] = []
+    for d in (*covered, config_dir):
+        for form in (os.path.abspath(d), os.path.realpath(d)):
+            if form not in dirs:
+                dirs.append(form)
+    home = os.path.expanduser("~")
+    deny = [f"{tool}(/{d.rstrip('/')}/**)" for d in dirs for tool in ("Edit", "Read")]
+    for h in dict.fromkeys((home, os.path.realpath(home))):
+        k = os.path.join(h, ".config", "acs", "audit.key")
+        deny += [f"Edit(/{k})", f"Read(/{k})"]
+        deny += [f"Read(/{h}/.ssh/**)", f"Read(/{h}/Library/Keychains/**)"]
+        deny += [f"Read(/{h}/.config/gh/hosts.yml)", f"Read(/{h}/.git-credentials)"]
+    deny.append("Read(//Library/Keychains/**)")
+    return {
+        "sandbox": {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "allowUnsandboxedCommands": False,
+            "network": {"allowedDomains": ["example.com"], "strictAllowlist": True},
+            "credentials": {
+                "envVars": [
+                    {"name": name, "mode": "deny"}
+                    for name in ("AUDIT_HMAC_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+                ]
+            },
+        },
+        "permissions": {"deny": deny},
+    }
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _strict_sandbox_for_the_hooks() -> Iterator[None]:
+    """Every hook a test runs reads a user settings file (CLAUDE_CONFIG_DIR)
+    with the strict sandbox, whose deny rules cover the temporary directory
+    and this repository: the pre-tool-use hook relaxes a read-only Bash
+    command only under it, and the tests of the classification assume it.
+    tests/test_strict_sandbox.py tests the rule itself, with settings of its
+    own."""
+    import json
+
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-claude-config-") as where:
+        settings = strict_sandbox_settings(
+            tempfile.gettempdir(), REPO_ROOT, config_dir=where
+        )
+        Path(where, "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        patch.setenv("CLAUDE_CONFIG_DIR", where)
+        try:
+            yield
+        finally:
+            patch.undo()
+
+
 @pytest.fixture
 def ontology_path() -> str:
     """Path to the capability ontology YAML file."""
