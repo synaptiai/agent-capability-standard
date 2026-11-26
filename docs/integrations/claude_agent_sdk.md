@@ -578,10 +578,10 @@ That boundary meets the rule for shell-like tools that [RFC-0011](../../spec/RFC
 title: The rule for shell-like tools, applied to the adapter
 ---
 flowchart TD
-  accDescr: Under the rule RFC-0011 proposes, a call of a shell-like tool such as Bash gets the tool's worst case unless the adapter's statement declares an operating-system boundary for the tool and the adapter verifies it for the call. The adapter's statement declares none, so once the RFC is Accepted every Bash call must get the worst case.
-  call["Bash call"] --> declared{"Boundary declared?"}
-  declared -->|"No: shell_tools none"| worst["Worst case"]
-  declared -->|Yes| verified{"Verified for this call?"}
+  accDescr: Under the rule RFC-0011 proposes, a call of a shell-like tool gets the tool's worst case unless the adapter's statement declares an operating-system boundary for the tool and the adapter verifies it for the call. The statement declares Claude Code's sandbox for Bash and none for Monitor, PowerShell, Skill, Agent and Task, whose calls always get the worst case. A Bash call is relaxed only when the options the adapter built hold the strict sandbox and the call does not set dangerouslyDisableSandbox.
+  call["Shell-like call"] --> declared{"Boundary declared?"}
+  declared -->|"No: not Bash"| worst["Worst case"]
+  declared -->|"Yes: Bash"| verified{"Strict sandbox for this call?"}
   verified -->|No| worst
   verified -->|Yes| relax["Classifier may relax"]
 ```
