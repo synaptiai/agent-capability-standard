@@ -2309,7 +2309,8 @@ here and marked so.
   `strictAllowlist: true`, from the hosts a domain profile's
   `allowed_destinations` name (`--profile`) and the package registries of
   the ecosystems whose manifests the project holds, never a loopback,
-  link-local or metadata name or an IP literal, and with every entry
+  link-local or metadata name, an IP literal or a name that resolves to the
+  address it spells out (`127.0.0.1.nip.io`), and with every entry
   already there that is not a host name removed (`*` and `*:443` among
   them, which match every host); the records' deny rules
   (`layer_records.py`); read denials for the keychains (macOS), `~/.ssh`,
@@ -2326,7 +2327,9 @@ here and marked so.
   settings file that is not strict JSON rather than overwrite it, and on
   native Windows, which has no sandbox, writes nothing. The plan and
   `check` name the project's own settings that weaken the sandbox, and
-  `check` fails on them and on a user setting that undoes these; a project
+  `check` fails on them and on a user setting that undoes these (a proxy
+  port, a true `allowAllUnixSockets`, or a `WebFetch(domain:...)` rule for
+  a host the allowlist may not hold), which the setup removes; a project
   whose settings set `HOME` or `CLAUDE_CONFIG_DIR` is refused. The
   computation is `grounded_agency/sandbox_settings.py` (standard library
   only, Python 3.9 or later, run as `/usr/bin/env -i /usr/bin/python3 -I`

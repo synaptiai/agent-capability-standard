@@ -258,6 +258,11 @@ _REFUSED_SUFFIXES = (
     ".localdomain",
     ".internal",
     ".arpa",
+    # Services that resolve a name to the address it spells out, dotted,
+    # dashed or in hex (127.0.0.1.nip.io, 127-0-0-1.sslip.io).
+    ".nip.io",
+    ".sslip.io",
+    ".xip.io",
 )
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 _TOP_LABEL = re.compile(r"[a-z]{2,63}|xn--[a-z0-9-]{1,59}")
@@ -537,9 +542,12 @@ def check_host(entry: str) -> str | None:
             "it is an IP literal or a one-label name: only a dotted DNS name "
             "whose last label is alphabetic is listed"
         )
-    if len(labels) >= 4 and all(label.isdigit() for label in labels[:4]):
-        return "it starts with a dotted IP address, and such names resolve to it"
-    if name in _REFUSED_HOSTS or any(name.endswith(s) for s in _REFUSED_SUFFIXES):
+    if any(
+        all(lb.isdigit() for lb in labels[i : i + 4]) for i in range(len(labels) - 3)
+    ):
+        return "it holds a dotted IP address, and such names resolve to it"
+    dotted = "." + name
+    if name in _REFUSED_HOSTS or any(dotted.endswith(s) for s in _REFUSED_SUFFIXES):
         return "it names a loopback, link-local or metadata host, or a local-use name"
     return None
 
@@ -555,6 +563,18 @@ def _refused_entry(entry: str) -> str | None:
     if "*" in name and not (name.startswith("*.") and "*" not in name[2:]):
         return "it matches every host, IP literals and metadata addresses included"
     return check_host(host)
+
+
+def _refused_web_fetch(rule: Any) -> str | None:
+    """Why a permission rule ``WebFetch(domain:<host>)`` names a host the
+    allowlist may not hold (Claude Code adds such a rule's host to the
+    sandbox's allowlist), or None for any other rule."""
+    m = (
+        re.fullmatch(r"WebFetch\(domain:(.*)\)", rule)
+        if isinstance(rule, str)
+        else None
+    )
+    return None if m is None else _refused_entry(m.group(1))
 
 
 def _valid_pattern(pattern: str) -> bool:
@@ -1088,7 +1108,11 @@ def merge_settings(
     the ones it has; ``sandbox.excludedCommands`` and a true
     ``sandbox.filesystem.disabled`` are removed (each takes commands or the
     filesystem rules out of the sandbox), and so is an allowlist entry that
-    may not be listed. Every other key is left as it is, in its place.
+    may not be listed. So is every setting :func:`_undoing` names: a proxy
+    port, a true ``allowAllUnixSockets``, and a ``WebFetch(domain:...)``
+    allow rule for a host the allowlist may not hold; the read-back fails
+    on each, so leaving one would fail every run. Every other key is left
+    as it is, in its place.
     """
     new = copy.deepcopy(current)
     removed: list[str] = []
@@ -1097,6 +1121,16 @@ def merge_settings(
     perms = new.setdefault("permissions", {})
     deny = perms.setdefault("deny", [])
     deny.extend(r for r in computed["permissions"]["deny"] if r not in deny)
+    allow = perms.get("allow")
+    if isinstance(allow, list):
+        kept_allow = []
+        for r in allow:
+            reason = _refused_web_fetch(r)
+            if reason is None:
+                kept_allow.append(r)
+            else:
+                removed.append(f"permissions.allow {json.dumps(r)}: {reason}")
+        perms["allow"] = kept_allow
 
     sb = new.setdefault("sandbox", {})
     for key in ("enabled", "failIfUnavailable", "allowUnsandboxedCommands"):
@@ -1109,6 +1143,19 @@ def merge_settings(
         del sb["excludedCommands"]
 
     net = sb.setdefault("network", {})
+    for key in ("httpProxyPort", "socksProxyPort"):
+        if key in net:
+            removed.append(
+                f"sandbox.network.{key} {json.dumps(net[key])}: your own proxy then "
+                "filters the traffic, and the allowlist stops applying"
+            )
+            del net[key]
+    if net.get("allowAllUnixSockets") is True:
+        removed.append(
+            "sandbox.network.allowAllUnixSockets true: a socket such as Docker's "
+            "lets a command act outside the sandbox"
+        )
+        del net["allowAllUnixSockets"]
     domains = net.setdefault("allowedDomains", [])
     kept = []
     for d in domains:
@@ -1189,11 +1236,9 @@ def _undoing(settings: dict[str, Any]) -> list[str]:
         out.append("sandbox.network.allowAllUnixSockets is true")
     allow_rules = _member(settings, "permissions").get("allow")
     for r in allow_rules if isinstance(allow_rules, list) else []:
-        m = re.fullmatch(r"WebFetch\(domain:(.*)\)", r) if isinstance(r, str) else None
-        if m is not None:
-            reason = _refused_entry(m.group(1))
-            if reason is not None:
-                out.append(f"permissions.allow {json.dumps(r)}: {reason}")
+        reason = _refused_web_fetch(r)
+        if reason is not None:
+            out.append(f"permissions.allow {json.dumps(r)}: {reason}")
     return out
 
 

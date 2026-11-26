@@ -844,8 +844,10 @@ alphabetic, optionally `*.`-prefixed or with a `:port`. So no IP literal in
 any spelling (`127.1`, `2130706433`, `[::1]`, `169.254.169.254`) and no
 one-label name (`localhost`, `metadata`) is listed; neither is a name under
 `.localhost`, `.local`, `.localdomain`, `.internal` or `.arpa`,
-`metadata.google.internal`, `metadata.goog`, or a name that starts with a
-dotted address (`127.0.0.1.nip.io`). Claude Code's proxy opens an IP
+`metadata.google.internal`, `metadata.goog`, a name that holds a dotted
+address anywhere in it (`127.0.0.1.nip.io`, `foo.169.254.169.254.nip.io`),
+or a name under `nip.io`, `sslip.io` or `xip.io`, which resolve a name to
+the address it spells out, dotted, dashed or in hex. Claude Code's proxy opens an IP
 literal that is listed, metadata address included, and refuses a listed
 name that resolves only to a local address. Every entry already in your
 settings that is not of this form is removed, and the plan says so: an IP
@@ -873,8 +875,11 @@ lists such rules.
   wrong type is refused and left as it is.
 - Every list gains the entries it lacks, after the ones it has, so entries
   written for another project stay. The three switches and
-  `strictAllowlist` are set. `excludedCommands` and a true
-  `sandbox.filesystem.disabled` are removed. Every other key, a key Claude
+  `strictAllowlist` are set. `excludedCommands`, a true
+  `sandbox.filesystem.disabled`, a proxy port (`httpProxyPort`,
+  `socksProxyPort`), a true `allowAllUnixSockets`, and a
+  `WebFetch(domain:...)` allow rule for a host the allowlist may not hold
+  are removed, and the plan lists each one. Every other key, a key Claude
   Code does not document included, is left in its place.
 - A settings file that is a symbolic link is written through to its target,
   which keeps its mode. The new file is written beside it and renamed over
@@ -883,14 +888,16 @@ lists such rules.
   wrote: Claude Code accepts a misspelled key without a word, so a typo in
   a safety key leaves it unset. It names any key of yours under `sandbox`
   or `permissions` that Claude Code does not document.
-- The plan names settings of yours it leaves that weaken the sandbox: a
-  proxy port (your proxy then filters the traffic, not the allowlist), Unix
-  sockets, `enableWeakerNetworkIsolation`, `enableWeakerNestedSandbox`,
-  `allowAppleEvents`, `allowNestedUserNamespaces`, `allowRead` or
-  `allowWrite`, and `WebFetch(domain:...)` allow rules. Of these, the
-  read-back and `check` fail on a proxy port, `allowAllUnixSockets`, and a
-  `WebFetch(domain:...)` rule for a host the allowlist may not hold. An
-  `allowRead` or `allowWrite` entry is named but does not fail them: under
+- The plan names settings of yours it leaves that weaken the sandbox:
+  `allowUnixSockets` entries, `enableWeakerNetworkIsolation`,
+  `enableWeakerNestedSandbox`, `allowAppleEvents`,
+  `allowNestedUserNamespaces`, `allowRead` or `allowWrite`, and the
+  `WebFetch(domain:...)` allow rules it keeps. None of these fails the
+  read-back or `check`. `check` fails on a proxy port, a true
+  `allowAllUnixSockets`, or a `WebFetch(domain:...)` rule for a host the
+  allowlist may not hold, which a later edit can add back; running the
+  command again removes them. An `allowRead` or `allowWrite` entry does not
+  fail `check`: under
   Claude Code 2.1.332 an entry at or above a path denied here (the key
   file, a record) did not reopen it.
 - The plan and `check` name what the project's `.claude/settings.json` and

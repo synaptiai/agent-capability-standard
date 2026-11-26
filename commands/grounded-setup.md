@@ -121,6 +121,11 @@ key it wrote. Show its output as it is.
   second run, after the sandbox is on), give the user that last line,
   without `To write it: `, to run in a terminal outside Claude Code. Run there without
   `--digest`, it shows the change and asks before writing.
+- Exit status 1: the file was written, but read back it falls short of
+  these settings. Show the output as it is, name each setting it lists, say
+  that the setup is not complete, and stop. Do not report success.
+- Any other exit status that is not 0: show the output as it is, say that
+  the setup is not complete, and stop.
 
 On "Do not write anything", say that nothing was written.
 

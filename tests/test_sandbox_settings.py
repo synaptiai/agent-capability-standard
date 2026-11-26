@@ -207,6 +207,15 @@ class TestProfileDestinations:
         "printer.local",
         "1.0.0.127.in-addr.arpa",
         "127.0.0.1.nip.io",
+        "foo.127.0.0.1.nip.io",
+        "a.169.254.169.254.sslip.io",
+        "x.10.0.0.1.example.com",
+        "127-0-0-1.nip.io",
+        "7f000001.nip.io",
+        "anything.xip.io",
+        "*.nip.io",
+        "*.sslip.io",
+        "nip.io",
         "*",
         "*:443",
         "*.*",
@@ -472,6 +481,57 @@ class TestMerge:
         assert list(new) == list(user)
         assert "secret-value-not-to-show" not in plan.diff()
 
+    def test_settings_that_undo_these_are_removed(
+        self, tmp_path: Path, project: str, home: str
+    ) -> None:
+        """The read-back fails on each of these, so the merge removes them:
+        plan shows the removal, apply passes its read-back, and a second
+        plan has nothing to change."""
+        settings = tmp_path / "settings.json"
+        _write_json(
+            settings,
+            {
+                "sandbox": {
+                    "network": {
+                        "httpProxyPort": 8080,
+                        "socksProxyPort": 1080,
+                        "allowAllUnixSockets": True,
+                        "allowUnixSockets": ["/var/run/x.sock"],
+                    }
+                },
+                "permissions": {
+                    "allow": [
+                        "Bash(ls)",
+                        "WebFetch(domain:docs.example.com)",
+                        "WebFetch(domain:169.254.169.254)",
+                        "WebFetch(domain:*)",
+                    ]
+                },
+            },
+        )
+        plan = _plan(project, home, settings)
+        removed = "\n".join(plan.removed)
+        for part in (
+            "httpProxyPort",
+            "socksProxyPort",
+            "allowAllUnixSockets",
+            "WebFetch(domain:169.254.169.254)",
+            "WebFetch(domain:*)",
+        ):
+            assert part in removed
+        assert "docs.example.com" not in removed
+        assert "httpProxyPort" in plan.diff()
+        ss.apply_plan(plan, plan.digest, home)
+        new = json.loads(settings.read_text())
+        assert new["sandbox"]["network"]["allowUnixSockets"] == ["/var/run/x.sock"]
+        assert new["permissions"]["allow"] == [
+            "Bash(ls)",
+            "WebFetch(domain:docs.example.com)",
+        ]
+        assert ss.verify_settings(new, plan.computed.settings) == []
+        second = _plan(project, home, settings)
+        assert not second.changes and second.removed == []
+
     def test_idempotent(self, tmp_path: Path, project: str, home: str) -> None:
         settings = tmp_path / "settings.json"
         _write_json(settings, {"model": "m"})
@@ -733,9 +793,7 @@ def test_weakening_settings_are_reported(
     _write_json(
         settings,
         {
-            "sandbox": {
-                "network": {"httpProxyPort": 8080, "allowAllUnixSockets": True}
-            },
+            "sandbox": {"network": {"allowUnixSockets": ["/var/run/x.sock"]}},
             "permissions": {"allow": ["WebFetch(domain:example.org)"]},
         },
     )
@@ -751,7 +809,6 @@ def test_weakening_settings_are_reported(
     warnings = _plan(project, home, settings).warnings
     text = "\n".join(warnings)
     for part in (
-        "httpProxyPort",
         "Unix sockets",
         "WebFetch(domain:example.org)",
         "turns the sandbox off",

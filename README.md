@@ -197,8 +197,8 @@ around it, a network allowlist (the hosts your domain profile's
 registries your project uses), deny rules that keep the agent's commands
 and file tools from the hooks' records, your credentials (the keychain on
 macOS, `~/.ssh`, gh's and git's tokens, the package registries' tokens,
-the audit key) and the project's Claude Code settings. It needs a
-`python3` of 3.9 or later: the one in Apple's command line tools, or in a
+the audit key) and the project's Claude Code settings. It needs the
+system's `/usr/bin/python3`, 3.9 or later: the one in Apple's command line tools, or in a
 current Linux distribution, is enough. A sandboxed `gh` or `git push` then cannot authenticate, and neither
 can a publish to a package registry. A repository's own settings can still turn the sandbox off,
 exclude commands or widen its write scope; only managed settings prevent
