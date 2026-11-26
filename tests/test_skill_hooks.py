@@ -2202,10 +2202,8 @@ class TestAuditCommandHook:
             "sed -i s/a/b/ src/*.py",
             # What step 6 runs besides the append
             'mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"',
-            "hostname -s",
             "date -u +%Y%m%dT%H%M%SZ",
-            "printf '%s' '{\"a\":1}' | openssl dgst -sha256 -hmac "
-            '"${AUDIT_HMAC_KEY:-grounded-agency-audit-host}"',
+            "printf '%s' '{\"a\":1}' | openssl dgst -sha256 -hmac \"$AUDIT_HMAC_KEY\"",
             "test -L .claude/audit/records.jsonl && echo link",
             "ls -la .claude/audit 2>/dev/null",
             "LINE='{\"a\":1}'",
@@ -3299,7 +3297,12 @@ def test_the_plugin_log_records_a_digest_and_not_the_input(
         "tool_input": TOOL_INPUTS[tool],
         "tool_response": {"stdout": SECRET},
     }
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    env = {
+        **os.environ,
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        # A key: without one the hook writes the line unsigned and exits 1
+        "AUDIT_HMAC_KEY": "skill-test-key",
+    }
     result = subprocess.run(
         ["bash", str(POSTTOOLUSE_HOOK)],
         input=json.dumps(tool_call),

@@ -1168,7 +1168,7 @@ here and marked so.
     or set `PATH`, `LD_*` or `OPENSSL_*`; and a new hook on Edit, Write,
     MultiEdit and NotebookEdit refuses an edit of the records file or of
     another file under `.claude/audit/`, links followed. Compute the HMAC
-    and run `hostname -s` in commands of their own.
+    in a command of its own.
   - Skill hooks, security round 2 (they stay registered for the rest of
     the session once the skill ran): the send skill's hook now refuses, in
     every command, a word a glob or a brace may expand to `curl`, `wget`
@@ -1467,15 +1467,72 @@ here and marked so.
 - Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`
-  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
-  the hook's default key), so `tools/verify_audit_log.py --log-file
-  .claude/audit/records.jsonl --no-head` checks the file (no head anchors
-  its end). Lines an earlier version
+  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (the
+  record is unsigned without it), so `tools/verify_audit_log.py --log-file
+  .claude/audit/records.jsonl --no-head --hmac-key "$AUDIT_HMAC_KEY"`, run
+  outside Claude Code, checks the file (no head anchors its end; without
+  `--hmac-key` the verifier uses the key file when it exists, which did not
+  sign these records). Lines an earlier version
   wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
   `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
   move an existing file aside and let the skill start a new one (it does so
   itself when the last line has no `hmac`), and read the old members under
   `details` in new lines.
+- Plugin audit log, its key: the log hook and `tools/verify_audit_log.py`
+  read the HMAC key from `~/.config/acs/audit.key` when that file exists,
+  else from `AUDIT_HMAC_KEY`, so the file wins when both are set. No key is
+  derived from the host name. The file is used only when it is a regular
+  file owned by the user, with mode 600 or 400, one link (a second hard
+  link, made where the agent's commands can read, would expose the key),
+  in a directory that is not a symbolic link and that group and others
+  cannot write, and its first line is 32 to 4096 visible ASCII characters;
+  the hook also refuses a key file inside the project directory, which the
+  agent's commands may write. A file that fails one of these is refused,
+  and `AUDIT_HMAC_KEY` is not used in its place. The hook computes the HMAC
+  from SHA-256 with the key passed through pipes, so the key is on no
+  command line. Without a key, or without `openssl`, the hook writes the
+  line unsigned (`hmac` empty), leaves the head and the anchor as they are,
+  and reports it (exit 1, a non-blocking error); the verifier reports each
+  unsigned line, and with no key runs no check (exit 2). The key file is
+  meant to be out of reach of the agent's commands, so the audit skill,
+  which signs through them, signs its records under `AUDIT_HMAC_KEY` and
+  writes them unsigned without it. Create the key file (`set -C` keeps an
+  existing key):
+  ```bash
+  mkdir -p ~/.config/acs && chmod 700 ~/.config/acs
+  (umask 077; set -C; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > ~/.config/acs/audit.key)
+  ```
+  Then deny the agent both reading and writing it, in user settings, with
+  literal absolute paths: `permissions.deny` `Read(//<key file>)`,
+  `Edit(//<key file>)` and `Edit(//<key directory>/**)`, a
+  `sandbox.credentials.files` deny entry for the key file, and
+  `sandbox.filesystem.denyWrite` for the directory (`hooks/README.md`,
+  "The audit key"). A key file the agent can replace gives no evidence
+  against the agent.
+  A log signed with the key derived from the host name verifies only with
+  that key. Outside Claude Code (the pre-tool-use hook refuses a command
+  that names these files), move `.claude/audit.log`, `.claude/audit.head`
+  and the anchor, `<git dir>/acs/audit.head`, aside together; otherwise the
+  hook reports the old head, which another key signed, on every call.
+  Verify the moved files with the earlier key (each path is where that
+  file was moved):
+  ```bash
+  python tools/verify_audit_log.py --hmac-key "grounded-agency-audit-$(hostname -s)" \
+    --log-file moved/audit.log --head-file moved/audit.head --anchor-file moved/anchor.head
+  ```
+  The earlier hook took the short host name each time it signed, and used
+  `grounded-agency-audit-default` where `hostname -s` failed: if an intact
+  log fails with this command, give that key, or the key with the short
+  host name the machine had when the log was written. A log signed with
+  `AUDIT_HMAC_KEY` before a key file existed is moved aside and verified
+  the same way, with `--hmac-key` given that key.
+- Checkpoint key: the take hook, the pre-tool-use hook and the rollback
+  skill's hook compute the HMAC of a checkpoint's commit entry under the
+  project's checkpoint key (`<git dir>/acs/checkpoints/key`) from openssl's
+  SHA-256, with the key passed through pipes. Before, they passed the key
+  to `openssl dgst -hmac` on its command line, where any process of the
+  user could read it. The value is the same, so entries written before
+  still verify.
 - Plugin: the `persist` skill refuses content that holds a credential-shaped
   value (a URL's userinfo password and an `Authorization` header's value
   included), and the `audit` skill an append to

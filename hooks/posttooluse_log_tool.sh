@@ -60,7 +60,8 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # hook refuses a call that names the head, .claude or the git directory's
 # acs/ (F504). To start a new log, move audit.log, audit.head and the anchor
 # aside together. A head stays valid for as long as its key, and the agent's
-# commands can read it, the anchor and (from their environment) the key: a
+# commands can read it and the anchor (and the key, from AUDIT_HMAC_KEY in
+# their environment, or from a key file not denied to them): a
 # cut written back with an earlier head, or with one the key signs anew, by
 # a command a person approved that names neither, verifies. A witness, a
 # copy of the head kept where the agent cannot write (verify_audit_log.py
@@ -76,7 +77,8 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # env that is not Claude Code's own (one of the hooks' settings, or one that
 # changes what this hook runs), or cannot be read (no key the repository may
 # know signs a line: project_layer_settings), a symlinked audit.log (refused,
-# SEC-006), no openssl, a line that could not be built, a last line whose
+# SEC-006), no key or no openssl (the line is written unsigned, below), a
+# line that could not be built, a last line whose
 # hmac cannot be read (the line starts a new chain), an input digest that
 # could not be computed (the line says "unavailable"), a head the log no
 # longer matches or that cannot be written (the line is written; see
@@ -88,9 +90,23 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # warning, and the verifier reports any chain-order break.
 #
 # SEC-005: Audit log integrity via HMAC chaining.
-# NOTE: The default HMAC key (derived from hostname) provides integrity
-# against accidental corruption only. For adversarial tamper resistance,
-# set AUDIT_HMAC_KEY to a proper secret.
+#
+# The key: the first line of ~/.config/acs/audit.key ($HOME/.config/acs/
+# audit.key, HOME an absolute path), when that file exists; else the value
+# of AUDIT_HMAC_KEY; else none. The file is used only when it is a regular
+# file (not a symbolic link) owned by the user the hook runs as, with no
+# permission for group or others (mode 600 or 400), with one link (a second
+# hard link, made where a sandboxed command can read, would expose it), in
+# a directory owned by that user, not a symbolic link, that group and
+# others cannot write and that is not inside the project directory (which
+# the agent's commands may write), and its first line is 32 to 4096 visible
+# ASCII characters. A file that exists but fails one of these is refused,
+# and AUDIT_HMAC_KEY is not used in its place. Without a key, or without openssl, the line is written unsigned
+# (its hmac is empty), the head and the anchor are left as they are, and
+# the hook says why and exits 1. tools/verify_audit_log.py reads the same
+# key by the same rules (but the project directory's, which it does not
+# know), and reports every unsigned line. The key is on no command line:
+# hmac_hex builds the HMAC from SHA-256 (hooks/hmac_sha256.sh, copied below).
 
 # SEC-006: Consistent path resolution (matches pretooluse_require_checkpoint.sh)
 set -euo pipefail
@@ -507,12 +523,6 @@ if [ -L "$log_file" ]; then
   fail "audit.log is a symlink (refused, SEC-006)"
 fi
 
-# Without openssl no line can be signed; an unsigned line would make every
-# later line fail verification, so none is written.
-if ! command -v openssl &> /dev/null; then
-  fail "openssl is not installed, so the line could not be signed"
-fi
-
 # Build log entry with timestamp
 ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 action_id="$call_id"
@@ -521,24 +531,205 @@ if [[ -z "$action_id" ]]; then
   action_id="${ts}-$$-${rand:-00000000}"
 fi
 
-# HMAC key: use AUDIT_HMAC_KEY env var, or derive from hostname.
-# WARNING: The default hostname-derived key provides integrity against
-# accidental corruption ONLY. It is trivially discoverable and does NOT
-# provide adversarial tamper resistance. For production/adversarial
-# environments, set the AUDIT_HMAC_KEY environment variable to a proper
-# cryptographic secret (e.g., 32+ random hex characters).
-hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s 2>/dev/null || echo 'default')}"
-
-# HMAC-SHA-256 (hex) of stdin under the key
-hmac_hex() {
-  openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}'
+# key_file_refusal FILE: why FILE cannot hold the audit key (the rules in
+# the header), printed; nothing when it can. The owner, the permission bits
+# and the link count come from stat, GNU's form tried first and BSD's next
+# (PATH may hold either); an answer in neither form refuses the file.
+key_file_refusal() {
+  local file="$1" dir uid stats owner mode links kdir proj
+  dir="${file%/*}"
+  if [ -L "$file" ]; then
+    printf 'it is a symbolic link'
+    return 0
+  fi
+  if [ ! -f "$file" ]; then
+    printf 'it is not a regular file'
+    return 0
+  fi
+  uid=$(id -u 2>/dev/null) || uid=""
+  if [[ ! "$uid" =~ ^[0-9]+$ ]]; then
+    printf 'the user the hook runs as could not be read (id -u)'
+    return 0
+  fi
+  stats=$(stat -c '%u %a %h' -- "$file" 2>/dev/null) \
+    || stats=$(stat -f '%u %Lp %l' -- "$file" 2>/dev/null) || stats=""
+  if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})\ ([0-9]+)$ ]]; then
+    printf 'its owner, mode and link count could not be read (stat)'
+    return 0
+  fi
+  owner="${BASH_REMATCH[1]}"
+  mode="${BASH_REMATCH[2]}"
+  links="${BASH_REMATCH[3]}"
+  if [ "$owner" != "$uid" ]; then
+    printf 'it is owned by user %s, not by the user the hook runs as (%s)' "$owner" "$uid"
+  elif [ "${mode: -2}" != "00" ]; then
+    printf 'its mode is %s: group or others may read or write it (chmod 600)' "$mode"
+  elif [ "$links" != 1 ]; then
+    printf 'it has %s hard links: another name for it may be readable where the key is not denied' "$links"
+  elif [ -L "$dir" ]; then
+    # stat reports a link itself, not its directory, and a deny rule names
+    # the path, not where the link leads.
+    printf 'its directory is a symbolic link'
+  elif [ ! -d "$dir" ]; then
+    printf 'its directory is not a directory'
+  else
+    stats=$(stat -c '%u %a' -- "$dir" 2>/dev/null) \
+      || stats=$(stat -f '%u %Lp' -- "$dir" 2>/dev/null) || stats=""
+    if [[ ! "$stats" =~ ^([0-9]+)\ ([0-7]{3,4})$ ]]; then
+      printf 'the owner and mode of its directory could not be read (stat)'
+    elif [ "${BASH_REMATCH[1]}" != "$uid" ]; then
+      printf 'its directory is owned by user %s, not by the user the hook runs as (%s)' "${BASH_REMATCH[1]}" "$uid"
+    elif (( 8#${BASH_REMATCH[2]} & 8#022 )); then
+      printf 'its directory'"'"'s mode is %s: group or others may replace the file (chmod 700)' "${BASH_REMATCH[2]}"
+    else
+      # The sandbox lets the agent's commands write the project directory:
+      # a key there is one they can replace. Both as the system resolves
+      # them, so a link on the way is seen.
+      kdir=$(cd -P -- "$dir" 2>/dev/null && pwd) || kdir=""
+      proj=$(cd -P -- "$project_dir" 2>/dev/null && pwd) || proj=""
+      if [ -z "$kdir" ]; then
+        printf 'its directory could not be resolved (cd -P)'
+      elif [ -n "$proj" ]; then
+        case "$kdir/" in
+          "${proj%/}"/*) printf 'its directory is inside the project directory (%s), which the agent'"'"'s commands may write' "$proj" ;;
+        esac
+      fi
+    fi
+  fi
+  return 0
 }
+
+# key_file_id FILE: FILE's device and inode, as stat prints them, GNU's
+# form first; nothing when stat cannot say.
+key_file_id() {
+  stat -c '%d %i' -- "$1" 2>/dev/null || stat -f '%d %i' -- "$1" 2>/dev/null || true
+}
+
+# The HMAC key, and why there is none (key_note) when hmac_key is empty.
+hmac_key=""
+key_note=""
+key_file=""
+case "${HOME:-}" in
+  /*) key_file="${HOME%/}/.config/acs/audit.key" ;;
+esac
+if ! command -v openssl &> /dev/null; then
+  key_note="openssl is not installed"
+elif [ -n "$key_file" ] && { [ -e "$key_file" ] || [ -L "$key_file" ]; }; then
+  refusal=$(key_file_refusal "$key_file")
+  if [ -z "$refusal" ]; then
+    # The file read must be the file checked: its identity, and the rules,
+    # are taken again after the read, and a file put in its place is
+    # refused. (bash cannot check the file it opened, as the verifier does
+    # with fstat, so a swap and a swap back within the read go unseen.)
+    key_id=$(key_file_id "$key_file")
+    file_key=""
+    IFS= read -r file_key < "$key_file" 2>/dev/null || true
+    if [ -z "$key_id" ] || [ "$(key_file_id "$key_file")" != "$key_id" ] \
+      || [ -n "$(key_file_refusal "$key_file")" ]; then
+      file_key=""
+      refusal="it was replaced while it was read"
+    fi
+  fi
+  if [ -z "$refusal" ]; then
+    # (A count in the pattern: BSD's regcomp, macOS bash 3.2's, refuses one
+    # over 255.)
+    if (LC_ALL=C; [[ "$file_key" =~ ^[!-~]+$ ]] && (( ${#file_key} >= 32 && ${#file_key} <= 4096 ))); then
+      hmac_key="$file_key"
+    else
+      refusal="its first line is not a key of 32 to 4096 visible ASCII characters"
+    fi
+    file_key=""
+  fi
+  if [ -n "$refusal" ]; then
+    key_note="the key file $key_file is refused: $refusal (AUDIT_HMAC_KEY is not used in its place)"
+  fi
+elif [ -n "${AUDIT_HMAC_KEY:-}" ]; then
+  hmac_key="$AUDIT_HMAC_KEY"
+else
+  key_note="no audit key: there is no ${key_file:-~/.config/acs/audit.key (HOME is not an absolute path)} and AUDIT_HMAC_KEY is not set (hooks/README.md says how to make the key file)"
+fi
+
+# BEGIN hmac-sha256 (source: hooks/hmac_sha256.sh; tests/test_hmac_sha256.py keeps every copy equal)
+# HMAC-SHA-256 (RFC 2104) built on openssl's SHA-256, so that the key is on
+# no command line: `openssl dgst -hmac KEY` would put the key in the process
+# list, which any process of the user can read. The key and the pads reach
+# od and openssl only through a pipe from the shell's builtin printf. It is
+# POSIX sh (the rollback skill's hook runs under sh), so it has no local
+# variables: every name it sets starts with hmac_.
+# hmac_pads KEY: sets hmac_ipad and hmac_opad from KEY (hashed first when it
+# is over 64 bytes, then padded with zero bytes to 64 bytes), XOR 0x36 and
+# XOR 0x5c, as printf escapes (\ooo): a variable cannot hold a zero byte.
+# Status 1, with both empty, for an empty key or when od, awk or openssl
+# fails.
+# hmac_hex: prints the HMAC-SHA-256, in hex, of standard input under the key
+# hmac_pads was given last. Status 1, printing nothing, when openssl fails.
+hmac_ipad=""
+hmac_opad=""
+hmac_pad_awk() {
+  awk '
+    function xor8(a, c, r, p) {
+      r = 0
+      for (p = 1; p < 256; p *= 2) if (int(a / p) % 2 != int(c / p) % 2) r += p
+      return r
+    }
+    { for (f = 1; f <= NF; f++) b[n++] = $f + 0 }
+    END {
+      if (n > 64) { print "long"; exit }
+      i = ""
+      o = ""
+      for (k = 0; k < 64; k++) {
+        v = (k < n) ? b[k] : 0
+        i = i sprintf("\\%03o", xor8(v, 54))
+        o = o sprintf("\\%03o", xor8(v, 92))
+      }
+      print n + 0, i, o
+    }'
+}
+hmac_pads() {
+  hmac_ipad=""
+  hmac_opad=""
+  hmac_pad=$(printf '%s' "$1" | od -An -v -tu1 | hmac_pad_awk) || hmac_pad=""
+  if [ "$hmac_pad" = long ]; then
+    hmac_pad=$(printf '%s' "$1" | openssl dgst -sha256 -binary 2>/dev/null | od -An -v -tu1 | hmac_pad_awk) || hmac_pad=""
+    case "$hmac_pad" in "32 "*) ;; *) hmac_pad="" ;; esac
+  fi
+  case "$hmac_pad" in
+    "" | "0 "* | *[!0-9\ \\]*) hmac_pad="" ;;
+  esac
+  hmac_pad=${hmac_pad#* }
+  hmac_ipad=${hmac_pad% *}
+  hmac_opad=${hmac_pad#* }
+  hmac_pad=""
+  if [ "${#hmac_ipad}" != 256 ] || [ "${#hmac_opad}" != 256 ]; then
+    hmac_ipad=""
+    hmac_opad=""
+    return 1
+  fi
+}
+hmac_hex() {
+  [ -n "$hmac_ipad" ] || return 1
+  # shellcheck disable=SC2059 # the pads are escapes for printf to expand
+  hmac_inner=$({ printf "$hmac_ipad"; cat; } | openssl dgst -sha256 -binary 2>/dev/null | od -An -v -tu1 | awk '{ for (f = 1; f <= NF; f++) printf "\\%03o", $f }') || hmac_inner=""
+  [ "${#hmac_inner}" = 128 ] || return 1
+  # shellcheck disable=SC2059
+  hmac_out=$({ printf "$hmac_opad"; printf "$hmac_inner"; } | openssl dgst -sha256 -binary 2>/dev/null | od -An -v -tx1 | tr -d ' \n') || hmac_out=""
+  case "$hmac_out" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#hmac_out}" = 64 ] || return 1
+  printf '%s' "$hmac_out"
+}
+# END hmac-sha256
+
+if [ -n "$hmac_key" ] && ! hmac_pads "$hmac_key"; then
+  hmac_key=""
+  key_note="the key could not be prepared for signing (od or openssl failed)"
+fi
 
 # Append the line. Returns 0 when it was written with a valid chain link and
 # the head moved to it, 3 when it was written but starts a new chain (the
 # last line's hmac could not be read), 4 when it was written but the head
-# was not moved (said on standard error), and 1 when nothing was written (the
-# line could not be built or signed).
+# was not moved (said on standard error), 5 when it was written unsigned (no
+# key, or no openssl: key_note says which), and 1 when nothing was written
+# (the line could not be built or signed).
 _do_append() {
   # Get previous entry's HMAC for chaining (empty string for first entry)
   local prev_hmac="" broken=0 entries=0
@@ -553,9 +744,13 @@ _do_append() {
   # one); cut: no, for either, or one this key did not sign, or one that
   # cannot be read (a log removed with its head, the anchor left); held:
   # one cannot be written.
+  # Without a key (unsigned) neither is read nor moved: a head cannot be
+  # checked or signed with no key.
   local head_state="ok" head_entries="" head_hmac_recorded="" kept=0 file
+  [ -n "$hmac_key" ] || head_state="unsigned"
   for file in "$head_file" "$anchor_file"; do
     [ -n "$file" ] || continue
+    [ "$head_state" != "unsigned" ] || break
     if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
       [ "$head_state" = "cut" ] || head_state="held"
     elif [ -f "$file" ]; then
@@ -628,10 +823,14 @@ _do_append() {
     return 1
   fi
 
-  local entry_hmac
-  entry_hmac=$(printf '%s' "$entry_content" | openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}') || entry_hmac=""
-  if [[ ! "$entry_hmac" =~ ^[0-9a-f]{64}$ ]]; then
-    return 1
+  # Unsigned without a key: the hmac is empty (never an HMAC under an empty
+  # key, which anyone could compute).
+  local entry_hmac=""
+  if [ -n "$hmac_key" ]; then
+    entry_hmac=$(printf '%s' "$entry_content" | hmac_hex) || entry_hmac=""
+    if [[ ! "$entry_hmac" =~ ^[0-9a-f]{64}$ ]]; then
+      return 1
+    fi
   fi
 
   # Build final compact JSON entry with HMAC
@@ -648,6 +847,7 @@ _do_append() {
   # already there, nor through a link), then renamed over the old one.
   local head_problem=0
   case "$head_state" in
+    unsigned) return 5 ;;
     cut)
       echo "posttooluse_log_tool: audit.log no longer holds the entry its head records, or the head's anchor (${anchor_file:-none}) does (entry ${head_entries:-?} of the log, hmac ${head_hmac_recorded:-?}; the log had ${entries:-?} lines), or one is not a head this key signed: entries, or the log with its head, were removed or changed. The head and the anchor are kept as the evidence; to start a new log, move audit.log, audit.head and the anchor aside together" >&2
       head_problem=1
@@ -781,10 +981,14 @@ fi
 case "$rc" in
   0) ;;
   3)
-    echo "posttooluse_log_tool: the last line of audit.log has no readable hmac; this line starts a new chain" >&2
+    echo "posttooluse_log_tool: the last line of audit.log has no readable hmac (it is unsigned, or was written before Standard 1.2); this line starts a new chain" >&2
     exit 1
     ;;
   4) exit 1 ;;
+  5)
+    echo "posttooluse_log_tool: ${key_note}; this tool call was logged unsigned, and the log's head was not moved" >&2
+    exit 1
+    ;;
   *) fail "the log line could not be built or written" ;;
 esac
 
