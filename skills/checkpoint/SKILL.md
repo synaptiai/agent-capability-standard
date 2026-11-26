@@ -79,7 +79,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    1. `git stash create "checkpoint:<id>"` saves the tracked state as an unreferenced stash commit and prints its sha; **an empty output means a clean tree**
    2. On a clean tree, `git rev-parse HEAD`: the restore point is `HEAD` (record `restore_kind`: `stash` or `head`)
    3. `git ls-files --others --exclude-standard -- <paths>`: untracked files, which the stash does not capture, go in `excluded`
-   Under the plugin's hooks, `git stash create` takes a checkpoint only where Claude Code's strict sandbox is verified for the call (the hooks README, "The strict sandbox"); otherwise it is refused with F501 like every Bash call, and the person has to set the sandbox up before any checkpoint can be taken.
+   Under the plugin's hooks this works only where Claude Code's strict sandbox is verified (hooks README, "The strict sandbox"); otherwise it is refused with F501.
    Never `git stash store` or `git update-ref`: either is a gated `mutate` that names a commit the caller chooses. For `file_copy`, copy each file with a manifest of its SHA-256 into a private directory outside the scope.
 
 4) **Generate the restore command**: how to roll back (skill-level aid, not contract)

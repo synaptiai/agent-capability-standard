@@ -24,11 +24,14 @@ hooks:
 
             The safety layer checks the restore command: `git stash apply <sha>`,
             with the full id of the commit a checkpoint recorded, is a
-            `rollback` call (a checkpoint taken earlier, F503); applying any
-            other commit, and the skill's own restore, a `git restore
-            --source=<sha> ...` line, is a `mutate` call (a fresh checkpoint,
-            F501, and approval, F502). An expired or used checkpoint can still
-            be restored (STANDARD 1.2.0 §5.2.2).
+            `rollback` call (a checkpoint taken earlier, F503) where Claude
+            Code's strict sandbox is verified for the call, and a gated
+            `mutate` otherwise; applying any other commit, and the skill's
+            own restore, a `git restore --source=<sha> ...` line, is a
+            `mutate` call (a fresh checkpoint, F501, and approval, F502).
+            Without the verified sandbox no checkpoint can be taken through
+            Bash, so a restore is refused with F501. An expired or used
+            checkpoint can still be restored (STANDARD 1.2.0 §5.2.2).
 
             Before executing rollback, verify:
             1. Current state has been captured (for audit)
@@ -380,6 +383,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - `git stash apply <sha>` aborts once a file it touches changed since the checkpoint; a bare `git stash pop` or `apply` is refused (F503)
    - `file_copy`: copy each file back from the manifest, and remove the files created in scope since
    - Never touch `.claude/`, `.audit/` (the record of what happened) or the host's state
+   - Under the plugin's hooks a restore runs only where Claude Code's strict sandbox is verified (hooks README, "The strict sandbox"); otherwise it is refused with F501
 
 4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again, for `verification`
 

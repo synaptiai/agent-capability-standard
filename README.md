@@ -188,6 +188,8 @@ This gives you:
 - Workflow patterns that compose capabilities
 - Safety hooks (checkpoint enforcement, audit logging)
 
+Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
+
 ### Option 2: Standalone Validation
 
 Use the validator independently:
@@ -460,6 +462,8 @@ claude plugin install agent-capability-standard
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Validator** | Design-time validation for custom workflows |
+
+Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 
 ### Local Development
 
