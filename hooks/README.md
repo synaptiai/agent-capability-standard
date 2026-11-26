@@ -22,7 +22,11 @@ says why). The Python SDK adapter and the Standard Agents binding claim it
 
 ## Platforms
 
-The hooks need `bash`, `jq` and `openssl`. CI runs them, and every test, on Linux (GNU tools,
+The hooks need `bash`, `jq` and `openssl`, and perl or `find`, `awk` and a
+GNU or BSD `stat` (the pre-tool-use hook counts the links of the layer's
+records with them; without them every call is blocked with `R407` while
+the git directory's `acs/` exists, and every call the hook gates
+otherwise). CI runs them, and every test, on Linux (GNU tools,
 bash 5) and on macOS. On macOS:
 
 - **Bash.** The hooks start under `/bin/sh` and run the first `bash` on
@@ -453,7 +457,33 @@ Then:
   these bounds takes about 4 seconds). Reading the records is not refused; a path a command builds when
   it runs, a pattern the shell expands and a link a command reaches without
   naming it (copying a directory that holds one) are not seen, nor is a
-  text over 4096 bytes read for paths.
+  text over 4096 bytes read for paths. This reading is an advisory early
+  refusal, not the boundary: the deny rules below are.
+- **A record with another name**: a regular file under the records with
+  more links than names among them has a hard link elsewhere, through which
+  a command or a file tool can read or write it past the deny rules (the
+  Linux sandbox runtime denies a path, not a file). While a file under `acs/`
+  in the git directory git names for the project (the checkpoint key, the
+  entered commits, the head's anchor) has one, every call of any tool is
+  blocked with `F504 CONSTRAINT_VIOLATED:`, reads included (`Read`, `Grep`,
+  `cat`): the key could be read through the link. While a file of the
+  project's records (`.claude/checkpoint.ok`, `.claude/checkpoints/`,
+  `.claude/audit.log`, `.claude/audit.head`) has one, every call the hook
+  does not let pass outright (`mutate`, a `git stash create` put to a
+  person, a restore of a recorded checkpoint) is blocked the same way,
+  whatever it names, before a marker is used. The reason names the record;
+  remove the other name outside the session (`find <directory> -samefile
+  <record>` lists them), since the command that removes it is refused too.
+  The hook counts each regular file of the records that exist with `lstat`,
+  following no link, with perl, or, where perl is not installed, with
+  `find` and GNU `stat -c %h` or BSD `stat -f %l`. A file that goes while it
+  is counted (a marker a parallel call takes) is no error. A count that
+  finds a second name is taken once more after 0.2 seconds (the take hook
+  enters the checkpoint key with `ln`, so it has two names for a moment),
+  as is a `find` and `stat` count that meets an error; perl's count blocks
+  the call at once when it meets an error. A directory of the records that cannot be read blocks the call
+  with `R407`, with either counter, as does a git that does not say in time
+  which git directory is the project's, for a call the hook gates.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
   file (not a symlink, SEC-006) that git does not track (a repository can
   ship a tracked one; git is asked from the marker's own directory, so a
@@ -544,6 +574,136 @@ is written for the reader:
 ```json
 {"checkpoint_id": "3f2a...", "commit": "3f2a...", "created_at": 1706000000, "expires_at": 1706001800, "source": "git stash create"}
 ```
+
+### Keeping the Agent from the Records
+
+The hooks alone write the layer's records:
+
+| Record | What it is |
+|--------|------------|
+| `.claude/checkpoint.ok` | The checkpoint marker |
+| `.claude/checkpoints/` | Used and ended markers (`used/`, `ended/`) |
+| `.claude/audit.log`, `.claude/audit.head` | The audit log and its head |
+| `<git dir>/acs/` | The checkpoint key and entered commits (`checkpoints/`) and the head's anchor (`audit.head`) |
+
+The audit log is not rotated: a person who starts a new log moves
+`audit.log`, `audit.head` and the anchor aside under names of their own.
+
+The boundary that keeps the agent's commands and file tools from the records
+is Claude Code's permission deny rules, with the sandbox on. What was run
+(Claude Code 2.1.332 on macOS, in `bypassPermissions` mode, on 2026-11-25):
+`Edit(...)` deny rules for the marker, the checkpoint directories and the
+audit log (relative, with `/**` and `audit.log*`; one absolute `//` form gave
+the same result) refused the `Write` and `Edit` tools, and every route a
+sandboxed command took: a symbolic or hard link made in the session, a
+rename of the record or of a directory above it, `cp`, `rm`, truncation and
+an interpreter's writes. A `Read(...)` rule, on a test directory, refused
+the `Read` tool and `cat`. On Linux only the sandbox runtime was run
+(`@anthropic-ai/sandbox-runtime` 0.0.82): literal absolute `denyWrite` paths
+refused every route tried, and a glob was skipped. The exact rules below
+(absolute, one per record), with the sandbox's `denyWrite` list, were run
+under Claude Code 2.1.332 on macOS on 2026-11-25 for a fresh project: they
+refused all 11 command routes tried (an append to the log and to the head,
+`touch` of the marker, a new file under `.claude/checkpoints/` and under
+`acs/`, a symbolic link to the log and to `.claude`, `python3`, `cp`, `rm`,
+and a rename of `.claude`). The `Write` and `Edit` tools and the `Read`
+rules on the git directories' records were not run with these rules, and
+they have not been run under Claude Code on Linux. The sandbox's own `filesystem.denyWrite`
+list covers sandboxed commands only, not the file tools. The hooks' reading of a call's
+paths (above) refuses some calls early, and is advisory: it cannot see a
+path a command builds when it runs. It still applies where the sandbox does
+not: to hooks, to MCP servers and to commands the settings run outside the
+sandbox.
+
+`grounded_agency/layer_records.py` gives the rules for a project. It uses
+the standard library alone and the syntax of Python 3.9, so it runs from the
+plugin's directory under the system's `python3` (3.9 or newer):
+
+```bash
+python3 -I grounded_agency/layer_records.py /path/to/project
+```
+
+It prints a settings fragment, every path literal and absolute (the Linux
+sandbox runtime skips a glob such as `audit.log*`):
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Edit(//path/to/project/.claude/checkpoint.ok)",
+      "Edit(//path/to/project/.claude/checkpoints/**)",
+      "Edit(//path/to/project/.claude/audit.log)",
+      "Edit(//path/to/project/.claude/audit.head)",
+      "Edit(//path/to/project/.git/acs/**)",
+      "Read(//path/to/project/.git/acs/**)"
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyWrite": [
+        "/path/to/project/.claude/checkpoint.ok",
+        "/path/to/project/.claude/checkpoints",
+        "/path/to/project/.claude/audit.log",
+        "/path/to/project/.claude/audit.head",
+        "/path/to/project/.git/acs"
+      ]
+    }
+  }
+}
+```
+
+- A permission rule's `//` opens an absolute path. A directory is denied as
+  a whole: `dir/**` in a rule, the plain directory in `denyWrite`.
+- Every record gets an `Edit(...)` rule. Only `acs/` gets a `Read(...)`
+  rule: it holds the checkpoint key. The project's records hold no secret,
+  and the audit skill cites the audit log as evidence.
+- The git directory is the one `git rev-parse --absolute-git-dir` names for
+  the project, where the hooks keep `acs/`: in a linked worktree, whose
+  `.git` is a file, that is `.git/worktrees/<name>/acs` in the main
+  repository. The `acs/` of the repository's other git directories gets the
+  same rules: the main checkout's, each linked worktree's
+  (`.git/worktrees/<name>`) and each submodule's (`.git/modules/<path>`,
+  nested ones included), since a session in one checkout can otherwise
+  write another's commit entries or read its key. A project in no
+  repository has no `acs/` rule.
+- A rule names a path that exists when the settings are made, so make them
+  again after `git worktree add` or a submodule's first checkout.
+- A project path reached through a symbolic link gets the rules under both
+  its written and its physical path (`/var` and `/private/var` on macOS).
+- A path that holds a character a rule reads as a pattern (`*`, `?`, `[`,
+  `]`, `{`, `}`, `(`, `)`, `\`) or a control character cannot be written as
+  a literal rule; the module refuses it (exit status 2), as it does when git
+  does not say which git directory is the project's.
+- `grounded_agency.layer_records.deny_settings(project_dir)` returns the
+  same fragment to Python code; `layer_records(project_dir)` returns the
+  records' paths. The pre-tool-use hook holds the same list of records, and
+  a test keeps the two equal.
+
+A deny rule protects a path, not a file. A record with a second hard link
+made outside the boundary (by a person, a hook, an MCP server or a command
+run outside the sandbox) can be written through that link on Linux, so the
+pre-tool-use hook refuses every call it does not let pass outright while a
+record has one (above).
+
+While a sandboxed command runs, the Linux sandbox runtime puts empty files
+and directories in the project as mount points (`.bashrc`, `.gitconfig`,
+`.mcp.json`, an empty `.claude/` where there is none, and, under these
+rules, an empty file at a record's path that does not exist yet), removed
+when the command ends normally but left behind when it is killed. The
+hooks must ignore them, and do for the files: an empty `.claude/` is used
+as it is; an empty marker is removed, and the call needs a checkpoint; an
+empty file has one link, so the link count passes it; the log hook reads
+an empty `audit.head` as none and writes the head anew, while the anchor
+in `acs/` still shows a cut log; an empty `audit.log` is a log with no
+entries, a cut where its head or anchor records some. What the runtime
+puts at a directory record that does not exist yet (`.claude/checkpoints`,
+`acs`) has not been run; an empty file there would stop the hooks from
+keeping that record (no marker is written, and the log hook says the
+anchor is not kept) until it is removed.
+
+The hooks write a new marker and a new head in `.claude/checkpoints/`, and
+new entries, keys and anchors in `acs/`, then rename them onto the record,
+so no file a hook writes is outside the rules before it becomes a record.
 
 ## Audit Trail
 

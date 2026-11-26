@@ -751,6 +751,10 @@ _do_append() {
   # one); cut: no, for either, or one this key did not sign, or one that
   # cannot be read (a log removed with its head, the anchor left); held:
   # one cannot be written.
+  # An empty audit.head is read as none: the Linux sandbox runtime leaves
+  # one at the head's path, as a mount point, while a command runs (and
+  # after a command it killed); a head this hook writes is never empty. The
+  # anchor still shows a cut. An empty anchor is a cut.
   # Without a key (unsigned) neither is read nor moved: a head cannot be
   # checked or signed with no key.
   local head_state="ok" head_entries="" head_hmac_recorded="" kept=0 file
@@ -758,6 +762,9 @@ _do_append() {
   for file in "$head_file" "$anchor_file"; do
     [ -n "$file" ] || continue
     [ "$head_state" != "unsigned" ] || break
+    if [ "$file" = "$head_file" ] && [ -f "$file" ] && [ ! -L "$file" ] && [ ! -s "$file" ]; then
+      continue
+    fi
     if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
       [ "$head_state" = "cut" ] || head_state="held"
     elif [ -f "$file" ]; then
@@ -866,7 +873,13 @@ _do_append() {
     *)
       # The log's end as it is now: its last line, which is this one unless a
       # run that could not take the lock appended after it.
-      local written last_hmac sig="" head_tmp="$log_dir/.audit.head.$$"
+      # The new head is written in .claude/checkpoints/, a directory the deny
+      # rules cover as a whole (on the head's file system, so the rename is
+      # atomic), so that no command can link or change it before the rename.
+      local written last_hmac sig="" head_tmp=""
+      if mkdir -p "$log_dir/checkpoints" 2>/dev/null && [ ! -L "$log_dir/checkpoints" ]; then
+        head_tmp="$log_dir/checkpoints/.audit.head.$$"
+      fi
       written=$(awk 'END { print NR }' "$log_file" 2>/dev/null) || written=""
       last_hmac=$(tail -1 "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || last_hmac=""
       if [[ "$written" =~ ^[1-9][0-9]{0,11}$ && "$last_hmac" =~ ^[0-9a-f]{64}$ ]]; then
@@ -895,7 +908,7 @@ _do_append() {
         echo "posttooluse_log_tool: the head's anchor (${anchor_file}) could not be written; a log removed with its head may not be seen" >&2
         head_problem=1
       fi
-      if [[ "$sig" =~ ^[0-9a-f]{64}$ ]] \
+      if [ -n "$head_tmp" ] && [[ "$sig" =~ ^[0-9a-f]{64}$ ]] \
         && (set -C; printf '{"entries":%s,"hmac":"%s","head_hmac":"%s"}\n' "$written" "$last_hmac" "$sig" > "$head_tmp") 2>/dev/null \
         && mv -f "$head_tmp" "$head_file" 2>/dev/null; then
         if [[ "$head_state" == "new" ]]; then
@@ -903,7 +916,7 @@ _do_append() {
           head_problem=1
         fi
       else
-        rm -f "$head_tmp" 2>/dev/null || true
+        [ -z "$head_tmp" ] || rm -f "$head_tmp" 2>/dev/null || true
         echo "posttooluse_log_tool: audit.head could not be written; the log's end is not anchored past its last head" >&2
         head_problem=1
       fi

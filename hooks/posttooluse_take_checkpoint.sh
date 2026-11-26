@@ -592,7 +592,12 @@ if [ "$commit" != "HEAD" ]; then
   fi
 fi
 
-tmp=$(mktemp "${claude_dir}/checkpoint.XXXXXX") || exit 0
+# The new marker is written in .claude/checkpoints/, a directory the deny
+# rules cover as a whole (on the marker's file system, so the rename is
+# atomic), so that no command can link or change it before the rename.
+mkdir -p "${claude_dir}/checkpoints" 2>/dev/null || exit 0
+[ ! -L "${claude_dir}/checkpoints" ] || exit 0
+tmp=$(mktemp "${claude_dir}/checkpoints/.marker.XXXXXX") || exit 0
 if jq -c -n \
   --arg id "$checkpoint_id" \
   --arg commit "$commit" \

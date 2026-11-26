@@ -41,8 +41,20 @@ GIT_ENV = {
     "GIT_CONFIG_NOSYSTEM": "1",
 }
 SYSTEM_PATH = os.environ.get("PATH", "/usr/bin:/bin")
-# The programs the pre-tool-use hook runs on a Bash call with no marker.
-HOOK_PROGRAMS = ("bash", "jq", "git", "cat", "readlink", "grep", "sleep")
+# The programs the pre-tool-use hook runs on a Bash call with no marker
+# (find, stat and awk count the records' links where perl is not installed).
+HOOK_PROGRAMS = (
+    "bash",
+    "jq",
+    "git",
+    "cat",
+    "readlink",
+    "grep",
+    "sleep",
+    "find",
+    "stat",
+    "awk",
+)
 
 
 def _program(path: Path) -> None:
