@@ -1,9 +1,9 @@
 {
-  "layer": { "name": "@acs/standard-agents-binding", "version": "1.2.0" },
+  "layer": { "name": "@synaptiai/standard-agents-binding", "version": "1.2.0" },
   "host": "Standard Agent Specification 0.2.0 runtime",
   "standard": "1.2.0",
   "ontology": "2.2.0",
-  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes with state.invokeTool, while it runs, to a tool it lists that is defined with plain defineTool, carries a binding record (its acs annotation) and is registered with registerTools as the tool the runtime runs under that name",
+  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes with state.invokeTool, while it runs, to a tool it lists that is defined with plain defineTool, carries a binding record (its ai.synapti/acs annotation) and is registered with registerTools as the tool the runtime runs under that name",
   "does_not_cover": "other calls of tools defined with plain defineTool, a call the runtime runs under a name a composite lists for a grounded tool included; provider-executed tools; writes made by effects, hooks, handlers or endpoints",
   "scope": "one thread (threadId), executions ordered by the runtime",
   "boundaries": ["a new execution (flowId)", "a call outside an execution authorises nothing"],

@@ -4,7 +4,7 @@
 // Markdown copy, llms-full.txt (the
 // Specification, Capabilities and Workflows sections in one file), robots.txt and
 // the sitemap. All are built from the route table.
-import { loadVersions, olderVersionNote } from '../data/versions';
+import { loadVersions } from '../data/versions';
 import { homeDescription, opening } from './home';
 import { SITE_ORIGIN } from './links';
 import { ROUTES, SECTIONS, type Route, type Section } from './routes';
@@ -37,12 +37,9 @@ const summaryLine = homeDescription;
 
 function versionsLine(): string {
   const v = loadVersions();
-  const currentText = readRepoFile(v.standard.current.source);
-  const previous = v.standard.previous
-    .map((p) => `${p.version}${olderVersionNote(p.version, currentText).stillSupported ? ' (still supported)' : ''}`)
-    .join(', ');
+  const previous = v.standard.previous.map((p) => `${p.version} (${p.status})`).join(', ');
   return [
-    `Current: Standard ${v.standard.current.version} (${v.standard.current.status}).`,
+    `Newest: Standard ${v.standard.current.version} (${v.standard.current.status}).`,
     previous && `Previous: Standard ${previous}.`,
     `Ontology ${v.ontology}. Claude Code plugin ${v.plugin}.`,
   ]

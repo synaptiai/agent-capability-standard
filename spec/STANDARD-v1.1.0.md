@@ -1,9 +1,9 @@
 # Standard: Agent Capability Ontology + Workflow DSL
 
 **Version:** 1.1.0
-**Status:** Candidate Standard — accepted by
+**Status:** Standard — accepted by
 [RFC-0003](RFC-0003-orchestration-extensions.md) and
-[RFC-0004](RFC-0004-agent-identity.md); the reference validator
+[RFC-0004](RFC-0004-agent-identity.md) and released with plugin 2.0.0; the reference validator
 and executor implement §4, §5 and §9–§11; they do not check §3.1's
 grounding, §7's identity resolution or F505
 **Date:** 2026-10-28

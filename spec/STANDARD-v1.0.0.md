@@ -1,7 +1,7 @@
 # Standard: Agent Capability Ontology + Workflow DSL
 
 **Version:** 1.0.0
-**Status:** Candidate Standard
+**Status:** Supported — released with plugin 1.0.0; superseded by [STANDARD-v1.1.0](STANDARD-v1.1.0.md)
 **Date:** 2026-01-24
 
 ---

@@ -4,12 +4,12 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet?logo=anthropic)](https://github.com/synaptiai/synapti-marketplace)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Spec](https://img.shields.io/badge/Spec-v1.2.0_Candidate-blue.svg)](spec/STANDARD-v1.2.0.md)
+[![Spec](https://img.shields.io/badge/Spec-v1.2.0_Candidate_Standard-blue.svg)](spec/STANDARD-v1.2.0.md)
 [![Plugin](https://img.shields.io/badge/Plugin-v2.0.0-green.svg)](CHANGELOG.md)
 
 **Documentation:** [acs.synapti.ai](https://acs.synapti.ai/) has the specification, a page for every capability, workflow and domain, and search. Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
 
-> **Versioning:** The spec version (v1.2.0, Candidate Standard, accepted by RFC-0005 to RFC-0010; [v1.1.0](spec/STANDARD-v1.1.0.md) and [v1.0.0](spec/STANDARD-v1.0.0.md) still supported) tracks the standard itself. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version tracks the standard itself: v1.2.0 is a Candidate Standard, accepted by RFC-0005 to RFC-0010 and not yet released; [v1.1.0](spec/STANDARD-v1.1.0.md) is the released Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) is Supported. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -331,8 +331,8 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 | Document | Purpose |
 |----------|---------|
 | [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md)) |
-| [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Previous specification (still supported) |
-| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Earlier specification (still supported) |
+| [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Released specification (Standard) |
+| [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Earlier specification (Supported) |
 | [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
 | [SECURITY.md](spec/SECURITY.md) | Threat model and mitigations |
 
@@ -526,4 +526,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](s
 
 ---
 
-**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0010; v1.1.0, released 2026-10-28, and v1.0.0, released 2026-01-24, still supported)
+**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0010, not yet released); v1.1.0, released 2026-10-28, is the released Standard; v1.0.0, released 2026-01-24, is Supported. [GOVERNANCE](spec/GOVERNANCE.md#standard-versions) defines these statuses.

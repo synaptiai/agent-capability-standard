@@ -24,11 +24,16 @@ Five version numbers are in use. Each is declared in one file, and
 
 ## Standard
 
+The statuses and the meaning of the date are defined under
+[Standard versions](GOVERNANCE.md#standard-versions) in GOVERNANCE. The date
+is the one in the version's header: for a Candidate Standard, the date its
+RFCs were accepted; for a released version, its release date.
+
 | Version | Date | Status |
 |---------|------|--------|
-| [1.2.0](STANDARD-v1.2.0.md) | Unreleased | Candidate Standard, current |
-| [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Supported |
-| [1.0.0](STANDARD-v1.0.0.md) | 2026-01-24 | Supported |
+| [1.2.0](STANDARD-v1.2.0.md) | 2026-11-15 | Candidate Standard (unreleased) |
+| [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Standard (released with plugin 2.0.0) |
+| [1.0.0](STANDARD-v1.0.0.md) | 2026-01-24 | Supported (released with plugin 1.0.0) |
 
 Standard 1.2.0 is accepted by
 [RFC-0005](RFC-0005-tool-calling-hosts.md),
@@ -86,8 +91,8 @@ and targets a later 1.x version.
 title: The Standard's versions
 ---
 flowchart LR
-  accDescr: Standards 1.0.0 and 1.1.0 are supported; 1.1.0 was accepted through RFC-0003 and RFC-0004; 1.2.0, accepted through RFC-0005 to RFC-0010, is the current candidate; RFC-0002 is a draft for a later 1.x version.
-  v10["1.0.0: supported"] --> v11["1.1.0: supported, via RFC-0003 and RFC-0004"] --> v12["1.2.0: current, via RFC-0005 to RFC-0010"] --> v1x["Later 1.x: RFC-0002 in draft"]
+  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the released Standard; 1.2.0, accepted through RFC-0005 to RFC-0010, is a Candidate Standard; RFC-0002 is a draft for a later 1.x version.
+  v10["1.0.0: Supported"] --> v11["1.1.0: Standard, via RFC-0003 and RFC-0004"] --> v12["1.2.0: Candidate Standard, via RFC-0005 to RFC-0010"] --> v1x["Later 1.x: RFC-0002 in draft"]
 ```
 
 ## Plugin and tools
