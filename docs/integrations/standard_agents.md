@@ -118,7 +118,7 @@ requirement of the other.
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
-| A capability: one of 36 verbs with an input contract, an output contract and safety flags ([§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition)) | A function tool: a description, an argument schema and an `execute` function ([Tools §2](https://standardagentspec.org/0.2.0/specification/tools#2-function-tool-definition)) | Fits | A tool performs one capability and says which in `annotations.acs` |
+| A capability: one of 36 verbs with an input contract, an output contract and safety flags ([§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition)) | A function tool: a description, an argument schema and an `execute` function ([Tools §2](https://standardagentspec.org/0.2.0/specification/tools#2-function-tool-definition)) | Fits | A tool performs one capability and says which in `annotations['ai.synapti/acs']` |
 | Domain parameter (`detect` with `domain: anomaly`) | Nothing comparable | ACS only | A `domain` field in the annotation |
 | Input contract as JSON Schema, checked when a workflow is validated ([§5.5](../../spec/STANDARD-v1.1.0.md#55-consumer-contract-checking)) | `args` as a Zod schema, validated on every call ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Partial | The tool's `args` are the tool's contract; they specialise the capability's inputs and need not equal them |
 | Output contract with required fields, `evidence_anchors` among them | A result is a status and one string; there is no output schema | ACS only | The output object is JSON in `result`; the binding checks the required fields |
@@ -132,7 +132,7 @@ requirement of the other.
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
-| `risk`, `mutation`, `requires_checkpoint`, `requires_approval` on every capability | Nothing comparable. Tool `annotations` are hints with no defined keys | ACS only | The effective flags travel in `annotations.acs` |
+| `risk`, `mutation`, `requires_checkpoint`, `requires_approval` on every capability | Nothing comparable. Tool `annotations` are hints with no defined keys | ACS only | The effective flags travel in `annotations['ai.synapti/acs']` |
 | "Validators, executors and safety layers MUST act on effective flags" ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) | A runtime must "never let them affect execution" ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Fits | The annotation may publish the flags; enforcement may not be keyed on it by a runtime. The binding enforces in the tool's own code |
 | A check that refuses a step before it runs | No hook can refuse a tool call. `tool_call_started` is observational; the others run afterwards ([Hooks §5](https://standardagentspec.org/0.2.0/specification/hooks#5-tool-execution-hooks)) | ACS only | Enforcement in the tool's own `execute`. [Proposed to SA](#changes-proposed-to-the-standard-agent-specification) |
 | A gate whose expression errors fires, except an `end` gate ([§5.8.2](../../spec/STANDARD-v1.1.0.md#582-evaluation)) | A hook's "failures are non-fatal to the decorated turn" | Partial | Nothing safety-relevant is placed in a hook |
@@ -281,16 +281,16 @@ four the example also uses a `tool_call_done` hook for the audit trail,
 to wake the thread after a decision, and the thread file system for its
 restore point.
 
-### Classify: the `acs` annotation
+### Classify: the `ai.synapti/acs` annotation
 
-A tool's `acs` annotation carries its **tool binding record**
+A tool's `ai.synapti/acs` annotation carries its **tool binding record**
 ([Standard 1.2.0 §5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)), the record a safety
 layer reads to know what a call of the tool does. `groundedTool` writes it
 from the tool's definition. For the example's `write_config`:
 
 ```typescript
 annotations: {
-  acs: {
+  'ai.synapti/acs': {
     standard: '1.2.0',
     ontology: '2.2.0',
     tool: 'write_config',
@@ -321,13 +321,13 @@ The schema is
 [`standard_agents_annotation.schema.json`](../../schemas/interop/standard_agents_annotation.schema.json),
 generated from the ontology. It refuses a copy that names another layer than
 the capability's or a flag weaker than the ontology's, so a reader that does
-use the copies is not misled. Every other member of an `acs` annotation is
+use the copies is not misled. Every other member of an `ai.synapti/acs` annotation is
 read as the record's, so one the record does not have (a misspelt `aproval`
 or `flag`) is S303 and the annotation does not load: the tool is unbound
 rather than read in part ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)),
 `groundedTool` refuses a composite that lists it (V107), the lint reports it
 (W617) and `deriveAgentManifest` names it malformed. Vendor data goes under a
-key that starts with `x-`. A tool with no `acs` annotation is **unbound**:
+key that starts with `x-`. A tool with no `ai.synapti/acs` annotation is **unbound**:
 [§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools) treats each of its calls as the strictest
 case, high risk with a checkpoint and an approval. A tool that only signals
 the host carries `{ standard, ontology, tool, control: true }` instead
@@ -336,8 +336,19 @@ the host carries `{ standard, ontology, tool, control: true }` instead
 SA says annotations are "implementation-specific hints, keyed by the runtime
 or tool that reads them", that the specification "defines no annotation
 keys", and that a runtime "**MUST** ignore keys it does not" understand. So
-`acs` is a key this binding owns, other owners' keys are left alone, and a
-runtime that has never heard of ACS carries the classification untouched.
+`ai.synapti/acs` is a key this binding owns, other owners' keys are left
+alone, and a runtime that has never heard of ACS carries the classification
+untouched.
+
+The key follows the naming rule the Model Context Protocol gives for `_meta`
+keys ([MCP 2025-11-25, General fields](https://modelcontextprotocol.io/specification/2025-11-25/basic)):
+a reverse-DNS prefix of a domain the project controls, then a slash, then a
+name. SA has no naming rule of its own, and a prefix the project controls
+keeps the key apart from those of other packages that follow the same rule.
+JavaScript reads it with bracket access,
+`tool.annotations?.['ai.synapti/acs']`. A reader reads this key only: a tool
+whose annotations hold a bare `acs` key and no `ai.synapti/acs` key is
+unbound, like a tool with no annotation.
 
 The annotation describes; it cannot enforce. SA is explicit:
 
@@ -345,7 +356,7 @@ The annotation describes; it cannot enforce. SA is explicit:
 > results, or what is sent to the model. A tool behaves identically in a
 > runtime that ignores them.
 
-A runtime that changed its behaviour because of `acs` would not conform.
+A runtime that changed its behaviour because of `ai.synapti/acs` would not conform.
 Enforcement therefore has to live somewhere else.
 
 ### Which construct for which capability
@@ -654,7 +665,7 @@ export default groundedTool({
   need: the most approvers, the shortest expiry, and a role one of them
   sets (its own first), since its approval covers their nested calls. A
   listed tool is one defined with `groundedTool` or `controlTool`, or with
-  plain `defineTool` and an `acs` annotation that loads as a binding record;
+  plain `defineTool` and an `ai.synapti/acs` annotation that loads as a binding record;
   one with no binding the binding loads throws when the composite is
   defined (V107).
 - **The list is enforced twice.** The binding passes the names as the tool's
@@ -876,7 +887,7 @@ offers:
 
 | Code | When |
 |---|---|
-| W617 UNBOUND_TOOL (warning) | A tool has no `acs` annotation. Its calls are the strictest case |
+| W617 UNBOUND_TOOL (warning) | A tool has no `ai.synapti/acs` annotation. Its calls are the strictest case |
 | V111 TOOL_NAME_MISMATCH (error) | A tool states another name than the one the prompt offers it under. An approver would be shown, and the trace would record, another tool's name |
 | V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
 | F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval, those the applied profiles require included |
@@ -1129,7 +1140,7 @@ In Standard Agents an agent exercises what the tools its prompts offer
 perform, what the tools they invoke perform (a composite's `invokes`,
 §5.18.4), and what its subagents may: `deriveAgentManifest`
 (`examples/standard_agents/src/acs/agents.ts`) builds an agent's manifest
-from the `acs` annotations of those tools, following `invokes` transitively,
+from the `ai.synapti/acs` annotations of those tools, following `invokes` transitively,
 and from its subagents' manifests. It loads the annotations as binding
 records, as the layer does, and reads the capabilities from what loads.
 Pass the helper tools a composite invokes

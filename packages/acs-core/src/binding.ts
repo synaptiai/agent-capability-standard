@@ -783,7 +783,7 @@ function checkOffered(
 }
 
 /**
- * The members of an `acs` annotation that are copies (§5.18.1): the name the
+ * The members of an `ai.synapti/acs` annotation that are copies (§5.18.1): the name the
  * tool is offered under, the capability's layer and the effective flags. A
  * layer computes these itself and ignores them.
  */
@@ -797,13 +797,15 @@ const ANNOTATION_COPIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Read a Standard Agents `acs` annotation as a tool binding record (§5.18.1:
+ * Read a Standard Agents `ai.synapti/acs` annotation as a tool binding record (§5.18.1:
  * an annotation is a carrier, read as the record). `tool` is the name the
  * tool is offered under; the copies an annotation holds (`layer`, the
  * effective flags) are ignored. Every other member is the record's, an
  * unknown one included, so `checkBindings` reports it (S303) and does not
  * load the record: a record a layer cannot read in full is not read in part.
- * Null for a value that is not an object.
+ * Null for a value that is not an object. The caller passes the value of the
+ * `ai.synapti/acs` key; a bare `acs` key is another owner's, and a tool with
+ * only that key is unbound.
  */
 export function annotationRecord(name: string, annotation: unknown): Record<string, unknown> | null {
   if (!isObject(annotation)) return null;

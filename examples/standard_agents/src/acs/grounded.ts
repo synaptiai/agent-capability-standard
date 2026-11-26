@@ -127,14 +127,19 @@ import {
 } from './records.js';
 import { serially } from './serial.js';
 
-/** The key this binding owns in a tool's `annotations`. */
-export const ANNOTATION_KEY = 'acs';
+/**
+ * The key this binding owns in a tool's `annotations`: a reverse-DNS prefix
+ * of a domain the project controls, then a slash, as the Model Context
+ * Protocol names `_meta` keys. Read it with bracket access. A tool whose
+ * annotations hold a bare `acs` key and no `ai.synapti/acs` key is unbound.
+ */
+export const ANNOTATION_KEY = 'ai.synapti/acs';
 
 /** The binding's name, as every record it writes names the layer (§5.18.8). */
-export const LAYER_NAME = '@acs/standard-agents-binding';
+export const LAYER_NAME = '@synaptiai/standard-agents-binding';
 
 /**
- * What `annotations.acs` holds: the tool binding record of the tool
+ * What `annotations['ai.synapti/acs']` holds: the tool binding record of the tool
  * (`tool`, `ontology`, `capability`, and the declared members), the
  * Standard it cites, and informative copies of its layer and effective
  * flags. `schemas/interop/standard_agents_annotation.schema.json` is the
@@ -157,7 +162,7 @@ export interface AcsAnnotation extends SafetyFlags {
   destination?: string;
 }
 
-/** What `annotations.acs` holds for a control-only tool (§5.18.3). */
+/** What `annotations['ai.synapti/acs']` holds for a control-only tool (§5.18.3). */
 export interface AcsControlAnnotation {
   standard: string;
   ontology: string;
@@ -210,8 +215,8 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * role one of them sets), transitively; a call it makes to a tool not
    * listed is refused with F504, and a tool with no `invokes` may invoke
    * none (it declares `uses: []`). A listed tool is one defined with
-   * `groundedTool` or `controlTool`, or with plain `defineTool` and an `acs`
-   * annotation that loads as a binding record, whose nested calls the
+   * `groundedTool` or `controlTool`, or with plain `defineTool` and an
+   * `ai.synapti/acs` annotation that loads as a binding record, whose nested calls the
    * composite's nesting state checks as a grounded tool's call (a `persist`
    * or `audit` call's data for secrets, a `send`'s destination against
    * every policy in force, that the composite's decisions are valid for its
@@ -232,7 +237,7 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   args: Args;
   variables?: VariableDefinition[];
   progressArgument?: string;
-  /** Other owners' annotation keys. The `acs` key is set by the wrapper. */
+  /** Other owners' annotation keys. The `ai.synapti/acs` key is set by the wrapper. */
   annotations?: Record<string, unknown>;
   /**
    * How long a checkpoint can authorise this tool's call, in milliseconds:
@@ -458,7 +463,7 @@ const POLICY = new WeakMap<object, ApprovalPolicy>();
 
 /**
  * The binding a tool another tool invokes has when it was not defined here
- * (§5.18.4): its `acs` annotation read as a binding record (copies
+ * (§5.18.4): its `ai.synapti/acs` annotation read as a binding record (copies
  * ignored), when that loads on its own; undefined for a tool with no
  * annotation, or one that does not load (unbound, §5.18.2: V107 in
  * `invokes`).
@@ -1273,7 +1278,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   // transitively, applies to that tool's sends (POLICED).
   let policed = false;
   // The listed tools not defined with groundedTool or controlTool, by the
-  // binding their `acs` annotation loads as: the composite's nesting state
+  // binding their `ai.synapti/acs` annotation loads as: the composite's nesting state
   // checks and records their calls (§5.18.4). One with no binding the layer
   // loads is unbound, and a composite may not list it (V107): the layer
   // could tell neither what it does nor where it sends.
@@ -1291,7 +1296,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     const bound = invokedBinding(invoked, tool);
     if (bound === undefined) {
       throw new Error(
-        `groundedTool '${name}': V107 UNRESOLVED_TARGET: it invokes '${invoked}', which has no binding the layer loads (a tool defined with plain defineTool and no acs annotation, or one that does not load on its own), so the layer can tell neither what its calls do nor where they send; define it with groundedTool or controlTool, or give it a binding record (STANDARD 1.2.0 §5.18.2, §5.18.4)`,
+        `groundedTool '${name}': V107 UNRESOLVED_TARGET: it invokes '${invoked}', which has no binding the layer loads (a tool defined with plain defineTool and no ai.synapti/acs annotation, or one that does not load on its own), so the layer can tell neither what its calls do nor where they send; define it with groundedTool or controlTool, or give it a binding record (STANDARD 1.2.0 §5.18.2, §5.18.4)`,
       );
     }
     plain.set(invoked, bound);
@@ -2152,7 +2157,7 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
   return definition;
 }
 
-/** The `acs` annotation of a tool definition, if it has a well-formed one. */
+/** The `ai.synapti/acs` annotation of a tool definition, if it has a well-formed one. */
 export function acsAnnotation(tool: { annotations?: Record<string, unknown> }): AcsAnnotation | null {
   const value = tool.annotations?.[ANNOTATION_KEY];
   if (typeof value !== 'object' || value === null) return null;
@@ -2162,7 +2167,7 @@ export function acsAnnotation(tool: { annotations?: Record<string, unknown> }): 
     : null;
 }
 
-/** The `acs` annotation of a control-only tool, if the tool has one. */
+/** The `ai.synapti/acs` annotation of a control-only tool, if the tool has one. */
 export function acsControlAnnotation(tool: { annotations?: Record<string, unknown> }): AcsControlAnnotation | null {
   const value = tool.annotations?.[ANNOTATION_KEY];
   if (typeof value !== 'object' || value === null) return null;
