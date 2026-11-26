@@ -2261,15 +2261,17 @@ here and marked so.
   absolute. `acs/` is named in the git directory git names for the project
   (a linked worktree's own) and in each other git directory of the
   repository: the main checkout's, linked worktrees' and submodules'. It
-  uses the standard library alone;
+  uses the standard library alone and the syntax of Python 3.9;
   `python3 -I grounded_agency/layer_records.py [PROJECT_DIR]` prints the
   settings as JSON.
 - Plugin hooks: the pre-tool-use hook refuses every call (`F504`) while a
   file under `acs/` has a name outside the records, and every call it does
   not let pass outright while one of the project's records has (a hard link
   made outside the sandbox, through which a command could read or write the
-  record past the deny rules). It counts links with perl, or with GNU or
-  BSD `stat` where perl is not installed. The deny rules are the boundary;
+  record past the deny rules). It counts links with perl, or, where perl
+  is not installed, with `find`, `awk` and GNU or BSD `stat`; without them
+  every call is blocked with `R407` while the git directory's `acs/`
+  exists, and every call the hook gates otherwise. The deny rules are the boundary;
   the hook's reading of a call's paths is an early refusal
   (`hooks/README.md`, `spec/SECURITY.md` §5.5).
 - Plugin hooks: the log hook reads an empty `audit.head` (a mount point the

@@ -24,8 +24,9 @@ says why). The Python SDK adapter and the Standard Agents binding claim it
 
 The hooks need `bash`, `jq` and `openssl`, and perl or `find`, `awk` and a
 GNU or BSD `stat` (the pre-tool-use hook counts the links of the layer's
-records with them; without them every call it gates is blocked with
-`R407`). CI runs them, and every test, on Linux (GNU tools,
+records with them; without them every call is blocked with `R407` while
+the git directory's `acs/` exists, and every call the hook gates
+otherwise). CI runs them, and every test, on Linux (GNU tools,
 bash 5) and on macOS. On macOS:
 
 - **Bash.** The hooks start under `/bin/sh` and run the first `bash` on
@@ -472,10 +473,11 @@ Then:
   The hook counts each regular file of the records that exist with `lstat`,
   following no link, with perl, or, where perl is not installed, with
   `find` and GNU `stat -c %h` or BSD `stat -f %l`. A file that goes while it
-  is counted (a marker a parallel call takes) is no error; a count that
-  finds one, or meets an error, is taken once more after 0.2 seconds (the
-  take hook enters the checkpoint key with `ln`, so it has two names for a
-  moment). A directory of the records that cannot be read blocks the call
+  is counted (a marker a parallel call takes) is no error. A count that
+  finds a second name is taken once more after 0.2 seconds (the take hook
+  enters the checkpoint key with `ln`, so it has two names for a moment),
+  as is a `find` and `stat` count that meets an error; perl's count blocks
+  the call at once when it meets an error. A directory of the records that cannot be read blocks the call
   with `R407`, with either counter, as does a git that does not say in time
   which git directory is the project's, for a call the hook gates.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
@@ -595,8 +597,14 @@ an interpreter's writes. A `Read(...)` rule, on a test directory, refused
 the `Read` tool and `cat`. On Linux only the sandbox runtime was run
 (`@anthropic-ai/sandbox-runtime` 0.0.82): literal absolute `denyWrite` paths
 refused every route tried, and a glob was skipped. The exact rules below
-(absolute, one per record, `Read` rules on the git directories' records) have not been run
-under Claude Code on either system. The sandbox's own `filesystem.denyWrite`
+(absolute, one per record), with the sandbox's `denyWrite` list, were run
+under Claude Code 2.1.332 on macOS on 2026-11-25 for a fresh project: they
+refused all 11 command routes tried (an append to the log and to the head,
+`touch` of the marker, a new file under `.claude/checkpoints/` and under
+`acs/`, a symbolic link to the log and to `.claude`, `python3`, `cp`, `rm`,
+and a rename of `.claude`). The `Write` and `Edit` tools and the `Read`
+rules on the git directories' records were not run with these rules, and
+they have not been run under Claude Code on Linux. The sandbox's own `filesystem.denyWrite`
 list covers sandboxed commands only, not the file tools. The hooks' reading of a call's
 paths (above) refuses some calls early, and is advisory: it cannot see a
 path a command builds when it runs. It still applies where the sandbox does
@@ -604,7 +612,8 @@ not: to hooks, to MCP servers and to commands the settings run outside the
 sandbox.
 
 `grounded_agency/layer_records.py` gives the rules for a project. It uses
-the standard library alone, so it runs from the plugin's directory:
+the standard library alone and the syntax of Python 3.9, so it runs from the
+plugin's directory under the system's `python3` (3.9 or newer):
 
 ```bash
 python3 -I grounded_agency/layer_records.py /path/to/project
