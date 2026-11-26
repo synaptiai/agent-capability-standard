@@ -357,9 +357,14 @@ describe('design system on the built site', () => {
     }
   });
 
-  it('shows the newest Standard file version in the header chip, and a skip link to the main content', () => {
-    // Expected: the highest version among spec/STANDARD-v*.md file names.
-    const chip = `><span class="version-chip__word">Standard </span>v${standardFileVersions()[0]}</a>`;
+  it('shows the newest Standard file version and its status word in the header chip, and a skip link to the main content', () => {
+    // Expected: the highest version among spec/STANDARD-v*.md file names, and
+    // "Candidate" when that file's header status is Candidate Standard
+    // (spec/GOVERNANCE.md), "Standard" otherwise.
+    const newest = standardFileVersions()[0]!;
+    const statusLine = /^\*\*Status:\*\*\s*(.+)$/m.exec(repoText(`spec/STANDARD-v${newest}.md`))![1]!;
+    const word = statusLine.startsWith('Candidate Standard') ? 'Candidate' : 'Standard';
+    const chip = `><span class="version-chip__word">${word} </span>v${newest}</a>`;
     for (const f of pages()) {
       const h = html(f);
       expect(h.includes(chip), f).toBe(true);

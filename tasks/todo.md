@@ -311,7 +311,9 @@ findings file and the PVC review, checked against the tree.
    - Versions: `plugin.json`, `pyproject.toml` and `__version__` (0.1.0;
      the foundation design planned 0.2.0), and both `CITATION.cff` files
      (still 1.1.0).
-   - Standard 1.2.0 out of Candidate; the ROADMAP; CHANGELOG [Unreleased]
+   - Standard 1.2.0 released as Standard once it meets the release criteria
+     in spec/GOVERNANCE.md, "Standard versions" (1.1.0 becomes Supported);
+     the ROADMAP; CHANGELOG [Unreleased]
      becomes `[v3.0.0]`, which `release.yml` requires; then the tag.
    - The release notes must warn about the hooks' behaviour changes and
      the 1.1 runs that end differently (two F503 fixtures, an approved

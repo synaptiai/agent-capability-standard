@@ -1,10 +1,10 @@
 ---
 // The site header: the mark and wordmark (home link, named by the visible
-// wordmark so the name contains what is on screen at every width), a chip with the current
-// Standard version, the search trigger, the
+// wordmark so the name contains what is on screen at every width), a chip with the newest
+// Standard version and its status ("Standard" once released, "Candidate" before), the search trigger, the
 // GitHub link, the theme toggle and, below 1024px, the menu button. A second
 // row links to each section.
-import { loadVersions } from '../data/versions';
+import { loadVersions, statusPhrase } from '../data/versions';
 import { currentStandard } from '../lib/generated';
 import { GITHUB_BASE } from '../lib/repo';
 import { ROUTES, SECTIONS, type Route } from '../lib/routes';
@@ -18,7 +18,11 @@ interface Props {
 }
 
 const { route } = Astro.props;
-const version = loadVersions().standard.current.version;
+const { version, status } = loadVersions().standard.current;
+// A Candidate Standard is not the released Standard (spec/GOVERNANCE.md,
+// "Standard versions"), so the chip does not call it "Standard".
+const chipWord = status === 'Candidate Standard' ? 'Candidate' : 'Standard';
+const chipTitle = `Standard ${version}, ${statusPhrase(status)}`;
 const specUrl = currentStandard().url;
 // Each section links to its first page in sidebar order.
 const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
@@ -41,7 +45,7 @@ const nav = SECTIONS.filter((s) => s.id !== 'home').map((s) => ({
       </span>
       <span class="visually-hidden"> home</span>
     </a>
-    <a class="version-chip" href={specUrl}><span class="version-chip__word">Standard </span>v{version}</a>
+    <a class="version-chip" href={specUrl} title={chipTitle}><span class="version-chip__word">{chipWord} </span>v{version}</a>
     <div class="site-header__search"><Search /></div>
     <a class="site-header__github btn btn--quiet" href={GITHUB_BASE}>
       <PixelGlyph name="code" />
