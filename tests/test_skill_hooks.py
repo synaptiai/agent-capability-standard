@@ -404,22 +404,32 @@ class TestFrontmatterHooks:
         matcher whose time grows with the square of the text (2.5 s at
         200 KB for the scheme rule added in security round 4, batch 5). The
         scan reads bytes (LC_ALL=C) and decides 400 KB in well under a
-        second."""
+        second with GNU grep, and in linear time with any grep (BSD grep,
+        on macOS, reads about ten times slower)."""
         script = SECRET_SCAN.read_text(encoding="utf-8") + (
             '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
         )
-        started = time.perf_counter()
-        result = subprocess.run(
-            [shell, "-c", script],
-            input=text,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-            env={**os.environ, "LC_ALL": "C.UTF-8"},
-        )
-        assert result.stdout.strip() == "no", result.stderr
-        assert time.perf_counter() - started < 5
+
+        def seconds_at(given: str) -> float:
+            started = time.perf_counter()
+            result = subprocess.run(
+                [shell, "-c", script],
+                input=given,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+                env={**os.environ, "LC_ALL": "C.UTF-8"},
+            )
+            assert result.stdout.strip() == "no", result.stderr
+            return time.perf_counter() - started
+
+        # BSD grep (macOS) reads about ten times slower than GNU grep, but
+        # linearly: there the test checks how the time grows, not a limit
+        if GNU_GREP:
+            assert seconds_at(text) < 5
+        else:
+            assert_linear(seconds_at, text[: len(text) // 4], text[: len(text) // 2])
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
