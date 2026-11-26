@@ -45,7 +45,8 @@ describe('figure slots', () => {
       }
       expect(cutAtSlots(html, slots).filter((p) => p.key !== undefined)).toHaveLength(slots.length);
     }
-  });
+    // It renders every version of the Standard: about 5 s on a CI runner
+  }, 60_000);
 
   it('places the wait replay directly before the paragraph that opens "Delays."', async () => {
     const html = (await renderRepoFile(STD)).code;

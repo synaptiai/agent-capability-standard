@@ -33,7 +33,8 @@ describe('Standard Markdown copies', () => {
     const count = (blocks: string[]) => blocks.filter((b) => b.startsWith('**Figure: ')).length;
     expect(count(specFigureBlocks())).toBe(SLOTS_BY_VERSION['1.2.0']!.length);
     expect(count(specOlderBlocks('spec/STANDARD-v1.0.0.md', SLOTS_BY_VERSION['1.0.0']!))).toBe(SLOTS_BY_VERSION['1.0.0']!.length);
-  });
+    // It builds the figure blocks of the whole 1.2.0 Standard: over 5 s on a loaded machine
+  }, 60_000);
 
   it("states the 1.0.0 world-state field count and the decision tree's outcomes", async () => {
     const { SLOTS_BY_VERSION } = await import('../src/lib/spec-slots');

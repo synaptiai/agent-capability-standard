@@ -573,6 +573,19 @@ The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.
 
 That boundary meets the rule for shell-like tools that [RFC-0011](../../spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft, proposes ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)), which binds a claim of class SL once RFC-0011 is Accepted, for the settings sources the adapter reads ([The Sandbox](#the-sandbox)). The classifier itself is advisory: it reads text that the shell interprets.
 
+```mermaid
+---
+title: The rule for shell-like tools, applied to the adapter
+---
+flowchart TD
+  accDescr: Under the rule RFC-0011 proposes, a call of a shell-like tool such as Bash gets the tool's worst case unless the adapter's statement declares an operating-system boundary for the tool and the adapter verifies it for the call. The adapter's statement declares none, so once the RFC is Accepted every Bash call must get the worst case.
+  call["Bash call"] --> declared{"Boundary declared?"}
+  declared -->|"No: shell_tools none"| worst["Worst case"]
+  declared -->|Yes| verified{"Verified for this call?"}
+  verified -->|No| worst
+  verified -->|Yes| relax["Classifier may relax"]
+```
+
 ## Structured Output
 
 Use `output_format` to get structured JSON responses:
