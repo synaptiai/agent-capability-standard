@@ -15,7 +15,7 @@ export interface Env {
 export interface WorkerConfig {
   /** The release of this repository (.claude-plugin/plugin.json), the MCP server's version. */
   version: string;
-  /** The current version of the Standard, e.g. "1.1.0". */
+  /** The newest version of the Standard, e.g. "1.2.0" (released or a Candidate). */
   standardVersion: string;
   /** Production origin, used for canonical links and absolute URLs. */
   origin: string;

@@ -1155,6 +1155,6 @@ The standard is framework-agnostic. The validator works on YAML/JSON definitions
 
 ---
 
-*Agent Capability Standard v1.1.0 (Candidate Standard; v1.0.0 still supported)*
+*Agent Capability Standard v1.1.0 (Standard; v1.0.0 Supported; v1.2.0 a Candidate Standard)*
 *Copyright 2026 Synapti.ai*
 *Licensed under Apache 2.0*

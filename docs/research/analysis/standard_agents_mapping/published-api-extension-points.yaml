@@ -71,13 +71,13 @@ rows:
     member returns a tool definition; a definition is reachable through the PackedExports.tools loaders
     or a direct import. Searched: loadTool, getToolNames.'
   combined: 'Generate one literal per capability from the ontology, together with the flags the wrapper
-    enforces, so the two cannot drift: `annotations: { acs: { standard: ''1.1.0'', ontology: ''2.1.0'',
+    enforces, so the two cannot drift: `annotations: { ''ai.synapti/acs'': { standard: ''1.1.0'', ontology: ''2.1.0'',
     capability: ''mutate'', layer: ''EXECUTE'', risk: ''high'', mutation: true, requires_checkpoint: true,
     requires_approval: true } }`. It describes; the enforcing code never reads it (row tools-03). Its
     readers are code that imports the definition (the same package, or a checker that calls the PackedExports.tools
     loaders) and a runtime that opts in; a hook that receives a call by name cannot read it (row thread-02).
-    The short key `acs` is open to collision; if SA adopts a key-naming rule (see the Standard Agent Specification
-    findings), the key should become a name ACS controls. Tier 1.'
+    The key is `ai.synapti/acs`, a reverse-DNS name of a domain the project controls, so it cannot collide with the key of a
+    package that follows the same rule (ACS-Q15). Tier 1.'
   see_also:
   - tools-contracts#cls-02
   - tools-contracts#cls-03
@@ -106,12 +106,12 @@ rows:
     a safety layer to act on effective flags. The two requirements are compatible: a wrapper inside `execute`
     acts on flags it holds in code and never reads annotations, so the tool behaves identically in a runtime
     that ignores them. The relation is therefore not a conflict: no pair of normative sentences is jointly
-    unsatisfiable. One design would break SA: carrying the flags only in `annotations.acs` and having
+    unsatisfiable. One design would break SA: carrying the flags only in the `ai.synapti/acs` annotation and having
     a runtime refuse or delay a call because of them violates tools.md lines 146 and 156. Whether the
     MUST NOT also binds definition code, such as a hook that reads an annotation, is not stated; reading
     it as addressed to runtimes is an inference. The published types are silent on the point.'
   combined: 'Keep enforcement out of annotations: the wrapper closes over a flag table generated from
-    the ontology and gates inside `execute` (row tools-04). A lint that compares `annotations.acs` with
+    the ontology and gates inside `execute` (row tools-04). A lint that compares the `ai.synapti/acs` annotation with
     that table is tooling and changes no execution. A runtime-level gate driven by ACS annotations cannot
     be built on 0.2.0 as written. Tier 1.'
   see_also:
@@ -636,7 +636,7 @@ rows:
     record a call but cannot deny it. Searched: loadTool, getToolNames, loadHook, loadHandler, loadEffect.'
   combined: 'Generate one static module `{ toolName: capabilityId }` at build time from the project''s
     tool files, or from the PackedExports.tools keys, import it from the hooks, and lint it against each
-    definition''s `annotations.acs`. A registry filled when definitions load is not reliable: packed definitions
+    definition''s `ai.synapti/acs` annotation. A registry filled when definitions load is not reliable: packed definitions
     sit behind lazy loaders, and the text does not say that a tool module and a hook module share one
     instance. A call to a name outside the table (a host tool, a lifecycle tool, a `provider:` or `mcp:`
     callable) is recorded as unclassified. No rule for unknown tools is enforced, since a hook cannot
@@ -1507,8 +1507,9 @@ rows:
     so a library must not add entries by hand. Searched: PromptSchemaRegistry, SchemaFields, ProviderCallable,
     McpCallable.'
   combined: 'The binding exports its own types generated from the ontology (a capability id union and
-    an `AcsAnnotation` interface) and a checked accessor that validates `tool.annotations?.acs` at run
-    time. It adds nothing to the StandardAgentSpec registries. Tier 1: compile-time only.'
+    an `AcsAnnotation` interface) and a checked accessor that validates
+    `tool.annotations?.[''ai.synapti/acs'']` at run time. It adds nothing to the StandardAgentSpec
+    registries. Tier 1: compile-time only.'
   see_also:
   - tools-contracts#cls-12
   - packaging-conformance-governance#type-01
@@ -1536,7 +1537,7 @@ rows:
     workflows and input bindings and reports other unknown fields as W604; SA has the slot on function
     tools only. ACS also has a must-understand mechanism (`workflow_extensions.requires`, V106), which
     SA lacks (row agent-01). The published types add nothing to the SA rule.'
-  combined: 'The binding uses each slot in its own direction. ACS data rides in SA as `annotations.acs`
+  combined: 'The binding uses each slot in its own direction. ACS data rides in SA as the `ai.synapti/acs` annotation
     (row tools-02). Standard Agents data rides in an ACS catalog or workflow as `x-` fields, or as `x-`
     keys in a step''s `input_bindings`, which the host receives; for example `x-standardagents: { agent:
     ''release_agent'', tool: ''write_config'' }`. Validators accept these without a warning. Neither slot

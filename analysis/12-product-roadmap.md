@@ -146,7 +146,7 @@ Fixtures live in `tests/fixtures/` (79 at the time of writing, including edge-se
 
 ### 1.10 Additional Deliverables
 
-- **Formal standard** (`spec/STANDARD-v1.0.0.md`) with normative language (RFC 2119), and Standard v1.1.0 (`spec/STANDARD-v1.1.0.md`, a Candidate Standard accepted by RFC-0003 and RFC-0004: condition expression language, warnings, edge and safety-flag semantics, orchestration extensions; v1.0.0 remains supported)
+- **Formal standard** (`spec/STANDARD-v1.0.0.md`) with normative language (RFC 2119), and Standard v1.1.0 (`spec/STANDARD-v1.1.0.md`, the released Standard, accepted by RFC-0003 and RFC-0004: condition expression language, warnings, edge and safety-flag semantics, orchestration extensions; v1.0.0 is Supported)
 - **Whitepaper** (`spec/WHITEPAPER.md`) with motivation, design rationale, and evaluation approach
 - **Governance model** (`spec/GOVERNANCE.md`) with SemVer, RFC process, and compatibility rules
 - **Security policy** (`spec/SECURITY.md`) for vulnerability reporting
@@ -468,7 +468,7 @@ Support different safety enforcement strategies for different deployment context
 | **Focus** | Skill taxonomy and categorization | Capability ontology with safety semantics |
 | **Safety model** | None (no checkpoint, evidence, or trust concepts) | Checkpoint-before-mutation, evidence grounding, trust-weighted resolution |
 | **Composition** | Flat skill listing | Typed I/O contracts with workflow DSL |
-| **Maturity** | v0.8.0 (pre-1.0) | v1.0.0 (candidate standard) |
+| **Maturity** | v0.8.0 (pre-1.0) | v1.1.0 (Standard); v1.2.0 a Candidate Standard |
 | **Relationship** | Complementary -- we map 15 OASF categories | Grounded Agency adds the safety and composition layer OASF lacks |
 
 **Strategic position:** Grounded Agency is not a competitor to OASF but a safety and composition layer on top. The OASF adapter (`grounded_agency/adapters/oasf.py`) enables bidirectional interoperability. OASF provides breadth of skill taxonomy; Grounded Agency provides depth of safety and formal composition.

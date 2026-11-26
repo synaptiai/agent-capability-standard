@@ -13,7 +13,7 @@ import { crossCheck, loadDiagnostics, parseDiagRs, parseSpecDiagnostics } from '
 import { buildOntology, loadOntology } from '../src/data/ontology';
 import { buildProfile, checkProposals, loadProfiles } from '../src/data/profiles';
 import { loadSkills, parseFrontmatter } from '../src/data/skills';
-import { loadVersions, olderVersionNote } from '../src/data/versions';
+import { loadVersions, olderVersionNote, statusPhrase } from '../src/data/versions';
 import { readRepoFile } from '../src/lib/repo';
 import { loadWorkflows, parseCatalog, referenceRoots } from '../src/data/workflows';
 import {
@@ -420,7 +420,7 @@ describe('citation, versions and counts', () => {
     const files = standardFileVersions();
     expect([v.standard.current, ...v.standard.previous].map((x) => x.version)).toEqual(files);
     for (const s of [v.standard.current, ...v.standard.previous]) {
-      // The status is the first clause of the file's Status line ("Candidate Standard" in both).
+      // The status is the first clause of the file's Status line ("Candidate Standard", "Standard", "Supported").
       const text = repoText(s.source);
       const statusLine = /^\*\*Status:\*\* (.+)$/m.exec(text)![1]!;
       expect(s.status).not.toBe('');
@@ -479,20 +479,24 @@ describe('the note on an older Standard version', () => {
     '',
   ].join('\n');
 
-  it('states support and links the appendix only where the current text does', () => {
+  it('links the appendix only where the newest text has one', () => {
     expect(olderVersionNote('1.1.0', v120)).toEqual({
-      stillSupported: true,
       changes: { label: 'Appendix D', anchor: 'appendix-d-changes-from-110' },
     });
-    expect(olderVersionNote('1.0.0', v120)).toEqual({ stillSupported: false, changes: null });
+    expect(olderVersionNote('1.0.0', v120)).toEqual({ changes: null });
   });
 
   it('reads the real 1.1.0 text for 1.0.0', () => {
-    // spec/STANDARD-v1.1.0.md: "**Supersedes:** [STANDARD-v1.0.0](STANDARD-v1.0.0.md) (still supported; ...)"
-    // and "## Appendix C: Changes from 1.0.0", whose id the spike's done-check names.
+    // spec/STANDARD-v1.1.0.md: "## Appendix C: Changes from 1.0.0", whose id the spike's done-check names.
     expect(olderVersionNote('1.0.0', readRepoFile('spec/STANDARD-v1.1.0.md'))).toEqual({
-      stillSupported: true,
       changes: { label: 'Appendix C', anchor: 'appendix-c-changes-from-100' },
     });
+  });
+
+  it('states each status as GOVERNANCE names it', () => {
+    expect(statusPhrase('Standard')).toBe('the released Standard');
+    expect(statusPhrase('Candidate Standard')).toBe('a Candidate Standard');
+    expect(statusPhrase('Supported')).toBe('Supported');
+    expect(statusPhrase('Unsupported')).toBe('Unsupported');
   });
 });

@@ -1404,7 +1404,7 @@ findings:
     and an unknown capability is V101 where it is used. Code:
     `core/src/agents.rs`, `grounded_agency/coordination/manifest.py` and
     `AgentDescriptor.from_manifest`/`manifest`/`maxima`, `packages/acs-core/src/agents.ts`, and the
-    binding''s `deriveAgentManifest`, which loads each `acs` annotation as a binding record, as the
+    binding''s `deriveAgentManifest`, which loads each `ai.synapti/acs` annotation as a binding record, as the
     layer does, follows `invokes`, and refuses to derive from unannotated, unloadable or ungiven
     invoked tools and from declared flags its capabilities do not carry; vectors
     `tests/conformance/agents/maxima.json`; fixture `fail_agents_unknown_capability`.'
@@ -1815,7 +1815,7 @@ findings:
     (another ontology major, or a cited Standard the layer does not support), V110 and W602, and
     carriers that may hold informative copies a layer ignores. Loaders:
     grounded_agency/capabilities/bindings.py (`load_bindings`, the MCP `metadata` carrier in
-    grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `acs`
+    grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `ai.synapti/acs`
     annotation). The generated schemas/interop/standard_agents_annotation.schema.json makes the
     annotation a carrier and refuses a copy inconsistent with the capability. A record with a member
     that has no I-JSON form is S303, by one number rule in both loaders (an integer beyond ±2^53, or a
@@ -2061,7 +2061,7 @@ findings:
     Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 10-13 pin the versions.'
   status: fixed
   resolution: '`schemas/interop/standard_agents_mapping.yaml` pins SA 0.2.0, its commit, `@standardagents/spec`
-    0.45.10, Standard 1.2.0, ontology 2.2.0 (1.1.0 and 2.1.0 when it was fixed) and the `acs` annotation
+    0.45.10, Standard 1.2.0, ontology 2.2.0 (1.1.0 and 2.1.0 when it was fixed) and the `ai.synapti/acs` annotation
     key with its schema. It records twelve
     capability rulings, three anchor `ref` forms, the timestamp units and the identity field map, each
     with the mapping rows it rests on. Review changed `subagent_message` from `is` to `carrier`, because
@@ -3156,3 +3156,8 @@ questions:
   - 'SA: content/0.2.0/specification/tools.md §8 Annotations (lines 125, 143)'
   depends: The key every annotated tool carries and every reader looks up. A rename after packages are
     published leaves their tools unclassified to a reader of the new key.
+  answer: 'The key is `ai.synapti/acs`: a reverse-DNS prefix of a domain the project controls, then a
+    slash, as the Model Context Protocol names `_meta` keys (MCP 2025-11-25, General fields). JavaScript
+    reads it with bracket access. There is no transition: a reader reads `ai.synapti/acs` only, and a tool
+    whose annotations hold a bare `acs` key and no `ai.synapti/acs` key is unbound (§5.18.1, §5.18.2).
+    The layer name the binding''s records carry is `@synaptiai/standard-agents-binding` (§5.18.8).'

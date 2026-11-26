@@ -40,8 +40,9 @@ checkout can otherwise reach another's key and commit entries. A rule names
 the git directories that exist when it is made: the settings are made again
 after ``git worktree add`` or a submodule's first checkout.
 
-The module uses the standard library alone, so it also runs from a plugin
-checkout with no compiled extension::
+The module uses the standard library alone and the syntax of Python 3.9, so
+it also runs from a plugin checkout with no compiled extension, under the
+system's ``python3`` (3.9 or newer)::
 
     python3 -I <plugin>/grounded_agency/layer_records.py [PROJECT_DIR]
 
@@ -165,7 +166,11 @@ def _subdirectories(path: str) -> list[str]:
     try:
         with os.scandir(path) as entries:
             return sorted(e.path for e in entries if e.is_dir(follow_symlinks=False))
-    except FileNotFoundError, NotADirectoryError:
+    # Two clauses: the bare list of PEP 758 is a syntax error before Python
+    # 3.14, and the file runs under the system's python3 (3.9 on macOS).
+    except FileNotFoundError:
+        return []
+    except NotADirectoryError:
         return []
     except OSError as e:
         raise LayerRecordsError(f"cannot list {path!r}: {e.strerror}") from e

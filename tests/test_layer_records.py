@@ -271,6 +271,55 @@ def test_the_module_runs_without_the_package(tmp_path: Path) -> None:
     assert "usage: layer_records.py" in result.stderr
 
 
+def test_the_module_parses_as_python_3_9() -> None:
+    """The file runs under the system's python3, which is 3.9 on macOS: its
+    syntax is that of Python 3.9 (no PEP 758 except clause, no match)."""
+    import ast
+
+    ast.parse(MODULE.read_text(), filename=str(MODULE), feature_version=(3, 9))
+
+
+def _older_python3() -> str | None:
+    """A python3 older than the one running the tests, if there is one."""
+    for candidate in ("/usr/bin/python3", shutil.which("python3")):
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        try:
+            version = subprocess.run(
+                [candidate, "-I", "-c", "import sys; print(*sys.version_info[:2])"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+        except OSError, subprocess.SubprocessError:
+            continue
+        parts = version.split()
+        if len(parts) == 2 and all(p.isdigit() for p in parts):
+            if (int(parts[0]), int(parts[1])) < sys.version_info[:2]:
+                return candidate
+    return None
+
+
+def test_the_module_runs_under_an_older_python3(tmp_path: Path) -> None:
+    """Where an older python3 is installed (macOS's /usr/bin/python3 is
+    3.9), the copied file prints the settings under it."""
+    python = _older_python3()
+    if python is None:
+        pytest.skip("no python3 older than the one running the tests")
+    copy = tmp_path / "layer_records.py"
+    shutil.copy(MODULE, copy)
+    project = tmp_path / "project"
+    project.mkdir()
+    result = subprocess.run(
+        [python, "-I", str(copy), str(project)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == deny_settings(str(project))
+
+
 # ─── The hook's link count ───
 
 needs_bash_and_jq = pytest.mark.skipif(

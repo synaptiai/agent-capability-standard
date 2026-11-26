@@ -5,10 +5,10 @@ import { declaredAgents, deriveAgentManifest, ManifestDerivationError, taskRefus
 import { groundedTool } from '../src/acs/grounded.js';
 import { lintDelegationTargets } from '../src/acs/lint.js';
 
-// An `acs` annotation as a tool carries it: the versions it was written
+// An `ai.synapti/acs` annotation as a tool carries it: the versions it was written
 // against, then its binding record's members (§5.18.1).
 const acs = (record: Record<string, unknown>) => ({
-  annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', ...record } },
+  annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', ...record } },
 });
 
 describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', () => {
@@ -40,6 +40,9 @@ describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', 
       expect((e as ManifestDerivationError).unannotated).toEqual(['shell']);
       expect((e as ManifestDerivationError).missingChildren).toEqual(['b']);
     }
+    // A bare `acs` key is another owner's key: the tool is unannotated.
+    const bare = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve' } } };
+    expect(thrown(() => deriveAgentManifest({ name: 'a', tools: { bare } })).unannotated).toEqual(['bare']);
     // An unannotated control-only tool is no gap: control: true is its annotation.
     expect(() => deriveAgentManifest({ name: 'a', tools: { done: acs({ control: true }) } })).not.toThrow();
   });
@@ -105,7 +108,7 @@ describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', 
       [{ bad: acs({ control: true, capability: 'mutate' }) }, {}],
       [{ bad: acs({ control: true, invokes: ['writer'] }) }, { writer }],
       [{ bad: acs({ capability: 'retrieve', flags: { mutation: 'yes' } }) }, {}],
-      [{ bad: { annotations: { acs: { capability: 'retrieve' } } } }, {}],
+      [{ bad: { annotations: { 'ai.synapti/acs': { capability: 'retrieve' } } } }, {}],
       // Security round 3: an unknown member was dropped, so a send read as
       // a retrieve and a delegation was gated as read-only
       [{ bad: acs({ capability: 'retrieve', aditional_capabilities: ['send'] }) }, {}],
@@ -113,7 +116,7 @@ describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', 
     ] as const) {
       const error = thrown(() => deriveAgentManifest({ name: 'a', tools, invoked }));
       expect(error.malformed.map((m) => m.tool)).toEqual(['bad']);
-      expect(error.message).toContain("tools whose acs annotation does not load: bad (S30");
+      expect(error.message).toContain("tools whose ai.synapti/acs annotation does not load: bad (S30");
     }
     // A composite over a malformed tool: the malformed one is named, the
     // composite (not loaded only because of it) is not.

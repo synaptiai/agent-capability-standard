@@ -122,7 +122,7 @@ rows:
     tools have none, so an ACS `delegate` classification on `subagent_create` has no carrier. Searched
     (content/0.2.0): ontolog, risk, checkpoint, rollback, evidence (no matches); taxonomy (once, in another
     sense).'
-  combined: 'On each function tool, set the `acs` annotation key to the object defined by `schemas/interop/standard_agents_annotation.schema.json`
+  combined: 'On each function tool, set the `ai.synapti/acs` annotation key to the object defined by `schemas/interop/standard_agents_annotation.schema.json`
     (`standard`, `ontology`, `capability`, `layer`, `risk`, `mutation`, `requires_checkpoint`, `requires_approval`).
     The annotation is self-declared disclosure; enforcement is the tool''s own `execute`, which returns
     an error result when no checkpoint record exists. That covers only locally executed function tools
@@ -396,7 +396,7 @@ rows:
     runtime read annotations (''**MAY** read keys it understands, typically to choose how it displays
     a tool call'') and gives hooks no equivalent. Searched (content/0.2.0 and index.d.ts): loadTool, getToolNames
     (no matches).'
-  combined: 'Within one package: generate a constant map from tool name to its `acs` annotation at build
+  combined: 'Within one package: generate a constant map from tool name to its `ai.synapti/acs` annotation at build
     time and import it from the audit hook (`tool_call_done`), keyed by `toolCall.function.name`. Do not
     present a hook from an ACS-provided child package as able to classify or audit a parent''s tools by
     capability; it can record names, arguments and results only. See the SA gap on giving tool hooks the
@@ -622,7 +622,7 @@ rows:
     cannot filter agents by ACS capability, and the ACS registry knows nothing of SA packages.'
   combined: 'No binding is needed for a grounded package to work. A host that wants a capability view
     of installed SA agents has to build it from package code: import each package, await its tool loaders
-    and read the `acs` annotations (pkg-04). The result is host tooling outside both specifications.'
+    and read the `ai.synapti/acs` annotations (pkg-04). The result is host tooling outside both specifications.'
 - id: type-01
   relation: fits
   acs:
@@ -1129,7 +1129,7 @@ rows:
     claim (''**Reference implementation:** L4''). Searched (ACS spec/, docs/guides/, README.md, docs/FAQ.md):
     conformance statement, conformance claim, conformance class, claims conformance (no matches).'
   combined: 'An ACS conformance statement for an SA agent cannot be placed in a slot that either specification
-    defines. The per-tool `acs` annotation is a classification, not a conformance statement: it is unverified
+    defines. The per-tool `ai.synapti/acs` annotation is a classification, not a conformance statement: it is unverified
     by construction (''Annotations are non-normative.''), and the published annotation schema has no member
     for the enforcement a tool performs. Keep the description of what the package''s code enforces in
     the README, as prose with the versions pinned, and avoid ''conformant'' and ''certified'' until ACS
