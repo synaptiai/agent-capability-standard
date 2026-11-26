@@ -460,7 +460,7 @@ describe("a nested call is covered only by the decisions the composite's call co
             description: 'write',
             args,
             annotations: {
-              acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', approval: { expires: '1m' } },
+              'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', approval: { expires: '1m' } },
             },
             execute: async () => {
               wrote += 1;

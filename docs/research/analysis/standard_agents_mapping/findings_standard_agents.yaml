@@ -1493,8 +1493,8 @@ findings:
   disposition: not_proposed
   disposition_note: 'No issue asks for it: issue 05 contains no key-naming rule, and issue 04 says only
     that keys ''are owned by whoever writes them''. It is advice, not a defect; Tools §8 already keeps
-    an unknown key from affecting execution. The reference binding''s own key, `acs`, is a bare word (examples/standard_agents/src/acs/grounded.ts)
-    and would not satisfy the proposed rule.'
+    an unknown key from affecting execution. The reference binding''s own key, `ai.synapti/acs` (examples/standard_agents/src/acs/grounded.ts),
+    is a reverse-DNS name and satisfies the proposed rule.'
   concerns:
   - tools-contracts
   - published-api-extension-points
