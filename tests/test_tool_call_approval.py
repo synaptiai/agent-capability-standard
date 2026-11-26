@@ -384,6 +384,7 @@ class TestUnclassifiedTool:
         assert not hasattr(adapter_module, "_UNCLASSIFIED_TOOL")
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 class TestBashApprovalFlags:
     """A Bash command asks for approval only when its class requires it."""
 
@@ -549,6 +550,7 @@ class TestHookCheckpointRule:
 class TestHookApprovalRule:
     """F502: a call that requires approval is put to the host."""
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("tool_name", "tool_input", "subject"),
@@ -669,6 +671,7 @@ class TestHookApprovalRule:
         )
         assert _decision(result) == "ask"
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("tool_name", "tool_input"),
@@ -855,6 +858,7 @@ class TestPermissionCallbackApproval:
         assert asking_adapter.has_valid_checkpoint()
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     async def test_no_host_callback_allows_what_needs_no_approval(
         self, asking_adapter: GroundedAgentAdapter

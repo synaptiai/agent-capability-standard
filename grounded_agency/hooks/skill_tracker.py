@@ -158,8 +158,10 @@ def create_checkpoint_recorder(
 
     Args:
         checkpoint_tracker: CheckpointTracker to update
-        mapper: Classifies the calls; a mapper over the packaged ontology
-            when omitted
+        mapper: Classifies the calls. When omitted, a mapper over the
+            packaged ontology with no operating-system boundary, under
+            which every Bash call is its worst case and ``git stash
+            create`` takes no checkpoint: pass the adapter's mapper.
         expiry_minutes: The checkpoints' maximum age (at most 30); the
             tracker's default when omitted
         refuses_output: Whether the safety layer refuses the call's output

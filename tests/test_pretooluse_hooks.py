@@ -147,8 +147,10 @@ class TestPreToolUseCheckpointHook:
         assert _decision(result) == "deny"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("bash_under_sandbox")
     async def test_allows_readonly_bash(self, strict_adapter: GroundedAgentAdapter):
-        """Test that read-only Bash commands are allowed."""
+        """Test that read-only Bash commands are allowed under a verified
+        sandbox (with none, every Bash call is the worst case)."""
         hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(

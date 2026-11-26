@@ -14,9 +14,8 @@ also carries the rule for shell-like tools that
 RFC-0011 is Accepted; the reference validator and executor implement §4, §5
 and §9–§11 and claim class EX (§10.5); the Python SDK adapter and the
 Standard Agents binding implement §5.18 and claim class SL (§10.4), and the
-adapter's Bash classifier relaxes calls with no operating-system boundary
-declared, which RFC-0011's rule, once Accepted, does not allow; the
-executor and both layers check
+adapter relaxes a Bash call only under the operating-system boundary it
+declares and verifies (§5.18.3); the executor and both layers check
 grounding (§5.20) and apply domain profiles (§5.21); `grounded_agency`
 implements §7.1's entity ids and §8's arithmetic; §7.2 and §7.3 are not
 implemented

@@ -242,6 +242,7 @@ class TestAnInputTheHookDidNotCheck:
         # Refused: the hold is released, the checkpoint stays valid.
         assert adapter.has_valid_checkpoint()
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     async def test_a_call_that_needs_a_checkpoint_it_does_not_hold_is_f501(
         self, tmp_path: Path

@@ -28,10 +28,15 @@ from grounded_agency.capabilities.mapper import ToolCapabilityMapper
 ROOT = Path(__file__).resolve().parents[1]
 PRE = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None or shutil.which("jq") is None,
-    reason="the hook needs jq; a repository needs git",
-)
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = [
+    pytest.mark.usefixtures("bash_under_sandbox"),
+    pytest.mark.skipif(
+        shutil.which("git") is None or shutil.which("jq") is None,
+        reason="the hook needs jq; a repository needs git",
+    ),
+]
 
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",

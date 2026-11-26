@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,12 @@ from grounded_agency import (
 )
 from grounded_agency.errors import Severity
 from grounded_agency.mcp import _guarded, create_grounded_mcp_server
+from grounded_agency.utils import sandbox as sandbox_module
+from grounded_agency.utils.sandbox import (
+    CREDENTIAL_ENV_VARS,
+    boundary_paths,
+    strict_sandbox,
+)
 from tests.conftest import FakeClock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,7 +98,18 @@ def test_the_statement_schema_checks_an_os_boundary() -> None:
     assert not validator.is_valid(statement)
 
 
-def test_the_statement_matches_the_adapter() -> None:
+def test_the_statement_matches_the_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The boundary the adapter verifies reads the home directory, Claude
+    # Code's configuration and managed settings: the test's own, empty.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for name in ("CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    for name in [n for n in os.environ if n.startswith("CLAUDE_CODE_SANDBOX")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setattr(sandbox_module, "managed_settings_files", lambda: [])
+    monkeypatch.setattr(sandbox_module, "unread_policy_sources", lambda env=None: [])
     from grounded_agency import __version__
     from grounded_agency.adapter import PROMPTING_PERMISSION_MODES
 
@@ -110,9 +128,9 @@ def test_the_statement_matches_the_adapter() -> None:
     assert statement["approval"]["expires"] is None
     # Every check of section 5.18.10 is applied (class SL): the output
     # contract by default, and turning it off is outside the class. The rule
-    # for shell-like tools (section 5.18.3) binds a claim of class SL only
-    # once RFC-0011, a Draft, is Accepted, so the Bash classifier's gap is
-    # not listed here yet (RFC-0011 decision 8).
+    # for shell-like tools (section 5.18.3, RFC-0011) is met: Bash is relaxed
+    # only under the declared sandbox (below), so nothing is listed in
+    # not_applied.
     assert "not_applied" not in statement
     assert GroundedAgentConfig().check_outputs is True
     # Each setting that turns a check off is named outside the class: with
@@ -140,11 +158,29 @@ def test_the_statement_matches_the_adapter() -> None:
     assert "other MCP servers" not in without
     assert "PostToolUse hook checks the result of any other" in without
     assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
-    # Section 5.18.3 (RFC-0011, Draft): the adapter declares no
-    # operating-system boundary for Claude Code's shell-like tools.
-    assert statement["shell_tools"] == dict.fromkeys(
-        ("Bash", "Monitor", "PowerShell", "Skill", "Agent", "Task"), "none"
-    )
+    # Section 5.18.3 (RFC-0011, Draft): Bash runs under the sandbox the
+    # adapter turns on and verifies; the other shell-like tools of Claude
+    # Code declare no boundary, and get one worst case whatever their input.
+    shell = statement["shell_tools"]
+    assert set(shell) == {"Bash", "Monitor", "PowerShell", "Skill", "Agent", "Task"}
+    assert all(shell[name] == "none" for name in set(shell) - {"Bash"})
+    bash = shell["Bash"]
+    assert "Claude Code's sandbox" in bash["mechanism"]
+    # The credentials the strict sandbox keeps out of reach are those the
+    # statement names, and the configuration keys are named as the
+    # strict sandbox sets them.
+    for name in CREDENTIAL_ENV_VARS:
+        assert name in bash["credentials"]
+    sandbox = strict_sandbox(boundary_paths(str(ROOT), [], []))
+    said = " ".join(v for v in bash.values() if isinstance(v, str))
+    for key, value in sandbox.items():
+        if isinstance(value, bool):
+            assert key in said, key
+    assert "strictAllowlist" in bash["network"]
+    assert "failIfUnavailable" in bash["verification"]
+    assert "dangerouslyDisableSandbox" in bash["routes_outside"]
+    assert any("can_use_tool" in o for o in bash["outside"])
+    assert "not_applied" not in statement
     mapper = ToolCapabilityMapper()
     unbound = mapper.map_tool("an_unknown_tool", {})
     # Monitor and PowerShell get an unbound tool's worst case for any input.
@@ -160,12 +196,24 @@ def test_the_statement_matches_the_adapter() -> None:
         mapping = mapper.map_tool(name, first)
         assert mapping == mapper.map_tool(name, second)
         assert mapping.requires_checkpoint and mapping.requires_approval
-    # The Bash classifier still relaxes calls with no boundary declared,
-    # which RFC-0011's rule, once Accepted, does not allow (issue #184).
-    # When it stops, this fails and the statement and docs change with it.
-    assert mapper.map_tool("Bash", {"command": "ls"}).capability_id == "observe"
+    # With no verified boundary, every Bash call is its worst case: a
+    # mapper no adapter set one for, and an adapter before it wraps options.
+    for command in ("ls", "git stash create"):
+        mapping = mapper.map_tool("Bash", {"command": command})
+        assert {"mutate", "send"} <= set(mapping.capabilities)
+        assert mapping.requires_checkpoint and mapping.requires_approval
+    adapter = GroundedAgentAdapter(GroundedAgentConfig())
+    assert adapter.mapper.map_tool("Bash", {"command": "ls"}).capability_id != (
+        "observe"
+    )
+    # Options it wraps with the defaults hold the boundary, and the Bash
+    # classifier relaxes their calls.
+    adapter.wrap_options(ClaudeAgentOptions(cwd=str(ROOT), setting_sources=[]))
+    assert adapter.mapper.map_tool("Bash", {"command": "ls"}).capability_id == (
+        "observe"
+    )
     assert (
-        mapper.map_tool("Bash", {"command": "git stash create"}).capability_id
+        adapter.mapper.map_tool("Bash", {"command": "git stash create"}).capability_id
         == "checkpoint"
     )
 

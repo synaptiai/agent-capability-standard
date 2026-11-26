@@ -137,8 +137,9 @@ as before. It adds:
   [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft,
   proposes: a layer gives every call of a shell-like tool (a shell, an
   interpreter) the tool's worst case unless the call runs under an
-  operating-system boundary the layer declares and verifies. The adapter's
-  Bash classifier does not meet that rule yet.
+  operating-system boundary the layer declares and verifies. The adapter
+  runs Bash under Claude Code's sandbox by default and relaxes a Bash call
+  only while it has verified that sandbox.
 - **The host protocol** ([§5.19](spec/STANDARD-v1.2.0.md#519-host-protocol)):
   the actions, responses and run operations between an executor and its
   host as a published schema, with cancellation, run records and a

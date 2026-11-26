@@ -130,6 +130,7 @@ class TestDynamicToolRegistration:
         assert mapping.mutation is False
         assert mapping.requires_checkpoint is False
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     def test_bash_still_works_after_registration(self, mapper: ToolCapabilityMapper):
         """Test that Bash classification isn't affected by registrations."""
         mapper.register_mcp_tool("mcp__test__x", "search", "low")

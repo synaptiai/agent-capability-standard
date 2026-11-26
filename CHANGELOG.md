@@ -133,6 +133,58 @@ here and marked so.
   classified `observe`. Move such an entry into `options.env` or the
   host's environment, or pass `setting_sources` without `"project"` and
   `"local"`. The plugin's hooks refuse the same calls.
+- Python SDK, `wrap_options()`: Bash runs under Claude Code's sandbox by
+  default, and the Bash classifier relaxes a call (a read-only command,
+  `git stash create`, a recorded restore, a local change without `send`)
+  only while that sandbox is verified for it (STANDARD 1.2.0 §5.18.3, as
+  RFC-0011 proposes it). Where the options carry no sandbox of their own,
+  `wrap_options()` sets a strict one: on, refusing to start when it cannot
+  sandbox (`failIfUnavailable`), no unsandboxed commands, no excluded
+  commands, a network allowlist of
+  `GroundedAgentConfig.sandbox_allowed_domains` (empty by default: no
+  host) with `strictAllowlist`, and the keychains, `~/.ssh`, `~/.gnupg`,
+  `~/.netrc`, the cloud tools' and package registries' credential files,
+  gh's and git's credential files, the audit key file, Claude Code's
+  credentials, the paths in `GroundedAgentConfig.sandbox_deny_paths`, the
+  token and agent variables and every variable whose name looks like a
+  credential's (with `sandbox_deny_env` for more) out of reach. It also
+  adds `permissions.deny` rules to the options' `settings` (a settings
+  file is read and passed inline): `Edit` and `Read` of the adapter's
+  records, `Edit` of the project's `.claude/` and `.mcp.json`, the
+  repository's git configuration and hooks, the user's Claude Code
+  settings, and the code that runs outside the sandbox (the
+  `grounded_agency` and `claude_agent_sdk` packages, the interpreter and
+  its site-packages, `cli_path`, local plugins and the files stdio MCP
+  servers run), and `Read` of the credential files. The `Edit` rules
+  apply to the file tools too, so a wrapped session cannot edit an
+  editable install of `grounded_agency` in its project. A sandboxed command cannot reach the network,
+  so `gh`, `git push`, `curl` or a package install from Bash fails unless
+  its host is on `sandbox_allowed_domains`, and with the keychain denied
+  `gh` and `git push` cannot authenticate. Options with a sandbox of their
+  own (`sandbox`, or a `sandbox` member of `settings`) keep it; the
+  classifier relaxes their Bash calls only if it holds every value of the
+  strict one. Claude Code refuses to start where it cannot start the
+  sandbox (Linux without bubblewrap and socat, native Windows, a container
+  that cannot run bubblewrap); there, pass
+  `GroundedAgentConfig(sandbox=False)`. Without a verified sandbox
+  (`sandbox=False`, a weaker sandbox, a `WebFetch` allow rule or an `Edit`,
+  `Write` or `Read` allow rule with a path in `settings` or
+  `allowed_tools`, `add_dirs` or `permissions.additionalDirectories`, any
+  `extra_args` flag but `debug-to-stderr`, `mcp_servers` given as a file
+  or text, a settings source the CLI reads that may weaken it or that
+  changed since the wrap, a policy source the adapter does not read, a
+  non-empty allowlist while a destination policy is in force, options
+  changed after the wrap, or options not yet wrapped), every Bash call is a gated `mutate` and `send`: `ls`
+  needs a checkpoint and approval, and `git stash create` takes no
+  checkpoint (use `create_checkpoint`). The deny rules are added either
+  way. A call that sets `dangerouslyDisableSandbox` is always the worst
+  case.
+  `ToolCapabilityMapper.os_boundary` is the check; with `None`, the
+  default, every Bash call is the worst case, so a bare
+  `ToolCapabilityMapper()`, and `create_checkpoint_recorder` or
+  `create_evidence_collector` without the adapter's mapper, classify
+  `ls` as `mutate` and `send` and record no checkpoint for
+  `git stash create`.
 - Python SDK, `register_mcp_tool` (Fixed): a capability the ontology does
   not define raises `ValueError` (V101) at registration, where v2.0.0
   registered the tool; a declared `risk` below the capability's is ignored
@@ -2134,12 +2186,10 @@ here and marked so.
   file that code outside the boundary runs, credentials (the user's, the
   host's and the layer's) out of reach, and a network allowlist that
   refuses other hosts. The conformance statement schema has a required
-  member `shell_tools`; the Python adapter's statement declares `"none"`
-  for Bash, Monitor, PowerShell, Skill, Agent and Task, and the Standard
-  Agents binding's declares no shell-like tool. The adapter's Bash
-  classifier still relaxes Bash calls, so once RFC-0011 is Accepted it does
-  not conform to class SL until it gates every Bash call or runs Bash under
-  a boundary it declares and verifies. The plugin's text readers (the
+  member `shell_tools`; the Python adapter's statement declares Claude
+  Code's sandbox as Bash's boundary and `"none"` for Monitor, PowerShell,
+  Skill, Agent and Task, and the Standard Agents binding's declares no
+  shell-like tool. The plugin's text readers (the
   records guard, the Bash classification, the send and audit skills'
   command hooks) are documented as advisory, not as the boundary.
 - Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
