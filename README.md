@@ -187,6 +187,23 @@ This gives you:
 - 36 atomic capability skills organized by layer
 - Workflow patterns that compose capabilities
 - Safety hooks (checkpoint enforcement, audit logging)
+- `/grounded-setup`, which turns on Claude Code's strict sandbox in your user settings
+
+Then run `/grounded-setup` in Claude Code, in each project you use the
+plugin in. It shows the settings it would add to `~/.claude/settings.json`
+as a diff and writes them only when you agree: the sandbox on with no way
+around it, a network allowlist (the hosts your domain profile's
+`allowed_destinations` name, given with `--profile`, and the package
+registries your project uses), deny rules that keep the agent's commands
+and file tools from the hooks' records, your credentials (the keychain on
+macOS, `~/.ssh`, gh's and git's tokens, the package registries' tokens,
+the audit key) and the project's Claude Code settings. It needs a
+`python3` of 3.9 or later: the one in Apple's command line tools, or in a
+current Linux distribution, is enough. A sandboxed `gh` or `git push` then cannot authenticate, and neither
+can a publish to a package registry. A repository's own settings can still turn the sandbox off,
+exclude commands or widen its write scope; only managed settings prevent
+that. On native Windows, which has no sandbox, it writes nothing. See
+[Setting up the sandbox](hooks/README.md#setting-up-the-sandbox).
 
 ### Option 2: Standalone Validation
 
@@ -385,6 +402,7 @@ agent-capability-standard/
 ├── packages/acs-core/       # TypeScript package: ontology table, flags, digest; the core through WebAssembly
 ├── grounded_agency/         # Python package (SDK integration)
 ├── hooks/                   # Safety hooks (checkpoint, audit)
+├── commands/                # Plugin commands (/grounded-setup)
 ├── tools/                   # Validator CLI (thin wrapper over core/)
 ├── tests/                   # Conformance fixtures
 ├── spec/                    # Standard documentation
@@ -459,6 +477,7 @@ claude plugin install agent-capability-standard
 | **Workflow Patterns** | Reusable compositions (analyze, mitigate, optimize, orchestrate) |
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
+| **Setup command** | `/grounded-setup`: turns on Claude Code's strict sandbox in your user settings, after showing the change ([Setting up the sandbox](hooks/README.md#setting-up-the-sandbox)) |
 | **Validator** | Design-time validation for custom workflows |
 
 ### Local Development

@@ -692,6 +692,283 @@ The hooks write a new marker and a new head in `.claude/checkpoints/`, and
 new entries, keys and anchors in `acs/`, then rename them onto the record,
 so no file a hook writes is outside the rules before it becomes a record.
 
+The `/grounded-setup` command (below) writes these rules, with the rest of
+the sandbox's settings, to your user settings.
+
+## Setting up the sandbox
+
+A plugin cannot change your settings itself. The `/grounded-setup` command
+turns on Claude Code's sandbox as the boundary the hooks rely on, in your
+user settings (`~/.claude/settings.json`, or `settings.json` in the
+directory `CLAUDE_CONFIG_DIR` names). Run it in Claude Code, in the project:
+
+```text
+/grounded-setup [--profile <domain profile file>] [--allow-domain <host>]...
+```
+
+It shows the change as a diff, asks, and writes only when you agree. The
+command runs `grounded_agency/sandbox_settings.py`, which uses the standard
+library alone and needs Python 3.9 or later (the `python3` of Apple's
+command line tools, 3.9, or of a current Linux distribution is enough);
+you can run it yourself from a terminal:
+
+```bash
+/usr/bin/env -i /usr/bin/python3 -I <plugin>/grounded_agency/sandbox_settings.py plan  [--project DIR] [--profile FILE] [--allow-domain HOST]...
+/usr/bin/env -i /usr/bin/python3 -I <plugin>/grounded_agency/sandbox_settings.py apply [same options] [--digest HEX]
+/usr/bin/env -i /usr/bin/python3 -I <plugin>/grounded_agency/sandbox_settings.py check [same options]
+/usr/bin/env -i /usr/bin/python3 -I <plugin>/grounded_agency/sandbox_settings.py settings [same options]
+```
+
+The command runs the script with the system's interpreter,
+`/usr/bin/python3`, by its absolute path, under `env -i`: a repository's
+`.claude/settings.json` can set any variable for every Bash call in its
+`env` block. `PATH` would put its own `python3` first, and on macOS
+`DEVELOPER_DIR` makes the `/usr/bin/python3` stub run a program of its
+choosing: under Claude Code 2.1.332 on macOS, on 2026-11-26, with both set
+in a project's `env`, `python3` and `/usr/bin/python3` each ran the
+project's program, and the command's form ran the system's Python 3.9. An absolute path is not looked up in `PATH`, bash imports no
+exported function whose name holds a slash, and `env -i` passes on no
+variable but `CLAUDE_CONFIG_DIR`, which the command adds when you set it
+(Python then takes your home directory from the password database). Use
+the same form when you run it yourself. A project `env` that sets
+`BASH_ENV` runs a repository script before every Bash call, which no
+command line prevents; the pre-tool-use hook blocks every call while a
+project's `env` sets such a variable (above). The script refuses to run
+under a Python inside the project, in an environment inside the project,
+or in a directory another user owns or every user can write, and the plan
+names the Python that ran it. It also refuses, and writes nothing, when
+the project's settings set `HOME` or `CLAUDE_CONFIG_DIR` in their `env`
+block, since those would move the settings file written or the paths
+denied.
+
+- `plan` prints the hosts of the allowlist and where each comes from, the
+  entries it removes, settings it leaves that weaken the sandbox, the
+  change to the `permissions` and `sandbox` members as a diff (the rest of
+  the file, which can hold credentials in its `env` block, is not shown),
+  and a digest of the change. It writes nothing. Text from the profile or
+  the project (a destination, a manifest's path) is printed as JSON, so
+  none of it can start a line; the command that writes the change is the
+  last line.
+- `apply --digest HEX` writes the change that digest names, and refuses
+  when the file or the computed settings changed since the plan. In a
+  terminal, without `--digest`, it shows the plan and asks.
+- `check` reports what your settings lack, a setting of yours that undoes
+  them, and what the project's own settings files do that may weaken them
+  (exit status 1 for any of these).
+- `settings` prints the computed settings alone, as JSON, for managed
+  settings or `--settings`.
+
+Within Claude Code, each run of the script is a Bash call the pre-tool-use
+hook gates: it needs a checkpoint (`git stash create`) and your approval.
+Where neither can be had (a project in no git repository or with no commit
+yet, or a permission mode that puts no call to a person, such as
+`bypassPermissions`), the command gives you the `apply` line to run in a
+terminal instead; there, without `--digest`, it shows the change and asks.
+
+### What it writes
+
+Every filesystem path is literal and absolute, with no glob but a
+directory's trailing `/**` in a permission rule: the Linux sandbox runtime
+skips a glob in `denyWrite`, and Claude Code ignored relative `sandbox.filesystem`
+entries passed with `--settings`.
+
+| Setting | Value |
+|---------|-------|
+| `sandbox.enabled`, `sandbox.failIfUnavailable` | `true`: Claude Code exits at startup where the sandbox cannot start, rather than run commands unsandboxed |
+| `sandbox.allowUnsandboxedCommands` | `false`: the `dangerouslyDisableSandbox` parameter is ignored |
+| `sandbox.excludedCommands` | removed: a command it names runs outside the sandbox |
+| `sandbox.network.allowedDomains` | the hosts below |
+| `sandbox.network.strictAllowlist` | `true`: a host not on the list is refused in every permission mode. Without it, `bypassPermissions` lets an unlisted host through |
+| `permissions.deny` | the records' rules (above); `Read(...)` and `Edit(...)` for the audit key file and `Edit(.../**)` for its directory; `Edit(...)` for the project's `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/**`, and for the plugin's `hooks/**` |
+| `sandbox.filesystem.denyWrite` | the same paths, for a sandbox configured from this list |
+| `sandbox.filesystem.denyRead`, `sandbox.credentials.files` (`deny`) | on macOS `~/Library/Keychains` and `/Library/Keychains`; `~/.ssh`, `~/.config/gh/hosts.yml`, `~/.git-credentials`, `~/.netrc`; the package registries' and Docker's credential files `~/.npmrc`, `~/.yarnrc.yml`, `~/.pypirc`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`, `~/.gem/credentials`, `~/.docker/config.json`, `~/.config/composer/auth.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, `~/.pub-cache/credentials.json`; and `~/.config/acs/audit.key` |
+| `sandbox.credentials.envVars` (`deny`) | `GH_TOKEN`, `GITHUB_TOKEN`, `AUDIT_HMAC_KEY`, and the registries' publish tokens `NPM_TOKEN`, `NODE_AUTH_TOKEN`, `CARGO_REGISTRY_TOKEN`, `GEM_HOST_API_KEY`, `TWINE_PASSWORD`, `UV_PUBLISH_TOKEN`, `POETRY_PYPI_TOKEN_PYPI` |
+
+`permissions.deny` rules cover the file tools and sandboxed commands;
+`sandbox.filesystem` entries cover sandboxed commands only. A project's
+settings files and hook scripts are denied because a command that could
+write them could weaken the sandbox for the next session. The registries'
+credential files and tokens are denied because the allowlist names those
+registries, and a sandboxed command holding a publish token could send the
+project's files out through them. A path reached
+through a symbolic link (the project, or your home directory) is written
+under its written and its physical path.
+
+It also creates the audit key file, `~/.config/acs/audit.key`, when there
+is none: 32 random bytes as 64 hexadecimal digits, mode 600, in a mode 700
+directory, never printed. An existing key file is checked by its mode,
+owner and link count only, and left as it is.
+
+### The network allowlist
+
+The allowlist holds:
+
+- the hosts a domain profile's `allowed_destinations` name, when you give
+  the profile with `--profile` (YAML or JSON; the plugin applies no profile
+  of its own, so none is active unless you name it). A URL, or a prefix
+  that names its whole authority (`https://hooks.example.com/*`), gives its
+  host, and its port when it names one: the allowlist is by host, so a path
+  in the pattern widens to the whole host. `*.example.com` gives itself. An
+  address (`ops@example.com`, `*@example.com`) or a destination that names
+  no host gives none, and the plan lists it. A pattern that is not one of
+  the Standard's forms (§4.4.2) refuses the profile. The YAML is read for
+  that one key without a YAML library: a block list or a one-line flow list
+  of plain or quoted strings; any other form of it is refused;
+- the public registries of the ecosystems whose manifest or lock files the
+  project holds, in its top directory and three levels below (hidden,
+  dependency and build directories skipped): npm and Yarn, PyPI, crates.io,
+  Go modules, RubyGems, Maven Central, Gradle, NuGet, Packagist, pub.dev
+  and Hex. A registry the project's own files configure (`.npmrc`,
+  `pip.conf`) is not read, since the repository controls those files and
+  the allowlist applies to every project. The Go module proxy
+  (`proxy.golang.org`) fetches a module from whatever host its path names,
+  so a request to it can carry data to any host; the plan says so beside
+  the Go hosts;
+- each host given with `--allow-domain`.
+
+With no profile, the list holds the registries alone, and with no
+manifests it is empty: sandboxed commands reach no host. The plan shows the
+list before anything is written.
+
+An entry is listed only when it is a dotted DNS name whose last label is
+alphabetic, optionally `*.`-prefixed or with a `:port`. So no IP literal in
+any spelling (`127.1`, `2130706433`, `[::1]`, `169.254.169.254`) and no
+one-label name (`localhost`, `metadata`) is listed; neither is a name under
+`.localhost`, `.local`, `.localdomain`, `.internal` or `.arpa`,
+`metadata.google.internal`, `metadata.goog`, or a name that starts with a
+dotted address (`127.0.0.1.nip.io`). Claude Code's proxy opens an IP
+literal that is listed, metadata address included, and refuses a listed
+name that resolves only to a local address. Every entry already in your
+settings that is not of this form is removed, and the plan says so: an IP
+literal, a local name, and a wildcard other than a leading `*.` (`*`,
+`*:443`, `*.*`), which Claude Code's matcher reads as every host, IP
+literals and metadata addresses included.
+
+A destination pattern of the profile with a blank, a control or another
+unprintable character refuses the profile; one with a character outside
+ASCII is not listed (give its host in the `xn--` form with
+`--allow-domain`).
+
+The send skill's command hook, which reads a command's text for a request
+to a private address or an unlisted host, is advisory: it cannot see a
+destination a command builds when it runs. The allowlist, enforced by the
+sandbox's proxy, holds whatever the spelling. A `WebFetch(domain:...)`
+allow rule in your settings adds its host to the allowlist too; the plan
+lists such rules.
+
+### Your settings file
+
+- It is read as Claude Code reads it, as strict JSON. A file with a
+  comment, a trailing comma, a key given twice in one object, a top level
+  that is not an object, or a `sandbox` or `permissions` member of the
+  wrong type is refused and left as it is.
+- Every list gains the entries it lacks, after the ones it has, so entries
+  written for another project stay. The three switches and
+  `strictAllowlist` are set. `excludedCommands` and a true
+  `sandbox.filesystem.disabled` are removed. Every other key, a key Claude
+  Code does not document included, is left in its place.
+- A settings file that is a symbolic link is written through to its target,
+  which keeps its mode. The new file is written beside it and renamed over
+  it, after a check that the file has not changed since it was read.
+- After writing, the script reads the file back and checks every key it
+  wrote: Claude Code accepts a misspelled key without a word, so a typo in
+  a safety key leaves it unset. It names any key of yours under `sandbox`
+  or `permissions` that Claude Code does not document.
+- The plan names settings of yours it leaves that weaken the sandbox: a
+  proxy port (your proxy then filters the traffic, not the allowlist), Unix
+  sockets, `enableWeakerNetworkIsolation`, `enableWeakerNestedSandbox`,
+  `allowAppleEvents`, `allowNestedUserNamespaces`, `allowRead` or
+  `allowWrite`, and `WebFetch(domain:...)` allow rules. Of these, the
+  read-back and `check` fail on a proxy port, `allowAllUnixSockets`, and a
+  `WebFetch(domain:...)` rule for a host the allowlist may not hold. An
+  `allowRead` or `allowWrite` entry is named but does not fail them: under
+  Claude Code 2.1.332 an entry at or above a path denied here (the key
+  file, a record) did not reopen it.
+- The plan and `check` name what the project's `.claude/settings.json` and
+  `.claude/settings.local.json` do, by key name only, and say for each
+  whether it was shown to override user settings: `sandbox.enabled: false`,
+  `excludedCommands` and `filesystem.allowWrite` were; `allowRead`,
+  `filesystem.disabled`, `failIfUnavailable: false`, the weaker-sandbox
+  switches, Unix sockets, proxy ports and `WebFetch(domain:...)` allow
+  rules have not been tested. `check` fails on each. From either project
+  file, `allowUnsandboxedCommands`, `network.strictAllowlist` and
+  `network.allowedDomains` had no effect, so they are not reported.
+
+### What a repository can still do, and what stops working
+
+User scope is where these keys take effect: under Claude Code 2.1.332 on
+macOS, every sandbox key, the network allowlist included, took effect from
+a user's `settings.json`. From a project's `.claude/settings.json` or
+`.claude/settings.local.json`, `allowUnsandboxedCommands`,
+`allowedDomains` and `strictAllowlist` had no effect. A repository's own
+`.claude/settings.json` or `.claude/settings.local.json` can still turn
+the sandbox off, exclude commands from it or widen its write scope, and
+the hook then gates every Bash call. It cannot turn the escape parameter
+back on, relax the network, or allow an edit a deny rule refuses. Only
+managed settings prevent the three overrides; writing them needs
+administrator rights. An administrator can take the `settings` output as a
+starting point for managed settings.
+
+With these settings, a sandboxed `gh` or `git push` cannot authenticate:
+the keychain, `~/.ssh`, gh's `hosts.yml`, `~/.git-credentials` and the
+token variables are denied to it. Neither can a publish to a package
+registry (`npm publish`, `cargo publish`, `gem push`, `twine upload`,
+`uv publish`). Tools that need the keychain fail. The tools also run
+without `~/.npmrc`, `~/.yarnrc.yml`, `~/.m2/settings.xml`,
+`~/.gradle/gradle.properties` and `~/.docker/config.json`, which are
+denied too: a private registry, a mirror or a proxy set there is not used.
+Under Claude Code 2.1.332, `npm config get registry` printed the public
+registry in the sandbox where `~/.npmrc` named a mirror, and the mirror
+outside it; so such an install fails or fetches from the public registry.
+A host not on the list is refused without a prompt. Run those commands
+yourself, outside Claude Code. On Linux and WSL2 the sandbox holds a write
+denial on a file that does not exist yet, such as
+`.claude/settings.local.json`, with an empty read-only placeholder while a
+sandboxed command runs; one left behind by a killed session makes Claude
+Code's own write there fail ("Yes, and don't ask again" is not saved).
+`claude doctor` lists such files; remove them while no session runs in the
+project. With `failIfUnavailable`, Claude Code on Linux does not start
+until `bubblewrap` and `socat` are installed; the plan says when they are
+missing.
+
+The rules name this project's paths and the plugin's directory: run
+`/grounded-setup` again in each project, after `git worktree add` or a
+submodule's first checkout, and after the plugin is updated.
+Once the sandbox is on, a sandboxed command cannot write
+`~/.claude/settings.json` or `~/.config/acs`; a later run that needs to
+write says so, and you run the `apply` line it prints from a terminal.
+
+On native Windows Claude Code has no sandbox; the command says so and
+writes nothing. Run Claude Code inside WSL2 instead.
+
+### What was run
+
+Claude Code 2.1.332 on macOS, on 2026-11-26, in `bypassPermissions` mode,
+with the settings `sandbox_settings.py` computed (under the system's
+Python 3.9) for a scratch project and a scratch home directory holding a
+fake key file, with `--allow-domain example.com`, passed with `--settings`
+(flag scope; not written to a user's `settings.json`). Each result was
+read from the tool result and the file on disk, against a control run of
+the same command outside the sandbox:
+
+| Probe | With the settings | Control |
+|-------|-------------------|---------|
+| Append to `.claude/audit.log` | refused ("operation not permitted"), the file unchanged | the byte written |
+| `cat` the key file | refused ("Operation not permitted") | the file's content printed |
+| `npm config get registry`, with a `~/.npmrc` naming a mirror | the public registry: the file was not read | the mirror |
+| Append to `.claude/audit.log` and `cat` the key file, with an `allowWrite` entry for the project's `.claude` directory and an `allowRead` entry for the key's directory, then with entries for the two files themselves | refused, both times | the byte written; the file read |
+| `curl https://www.iana.org/`, a host not on the list | refused: the proxy answered 403 ("host is not on the allow list") | 200 |
+| `curl https://example.com/`, on the list | 200 | 200 |
+| `curl http://10.0.0.1/`, a private address | refused at once ("Couldn't connect", 1 ms) | no answer within 6 s |
+| `curl http://169.254.169.254/`, the metadata address, directly and through the proxy | refused at once ("Couldn't connect", 1 to 2 ms) | no answer within 6 s |
+| the metadata address as `http://0xa9fea9fe/` | refused ("Couldn't connect") | refused too, so this row shows nothing |
+| the metadata address as `http://[::ffff:169.254.169.254]/` | refused: the proxy answered 403 ("host is not on the allow list") | refused at once ("Couldn't connect"); the refusal text above is the evidence |
+| `curl http://metadata.google.internal/` | refused: the proxy answered 403 ("host is not on the allow list") | the name does not resolve |
+| a listener on 127.0.0.1, as `127.1`, `127.0.0.1`, `localhost`, `2130706433` and `0x7f000001` | refused ("Couldn't connect"); `0x7f000001` also with `--noproxy` | 200 |
+| the same listener as `[::ffff:127.0.0.1]` and `127.0.0.1.nip.io` | refused: the proxy answered 403 ("host is not on the allow list"); without the proxy, refused or unresolved | 200 |
+
+These settings have not been run under Claude Code on Linux.
+
 ## Audit Trail
 
 The `posttooluse_log_tool.sh` hook keeps the plugin's log of tool calls,

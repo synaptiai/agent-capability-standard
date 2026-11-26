@@ -314,6 +314,7 @@ Every agent action must be:
 | `schemas/profiles/profile_schema.yaml` | Schema defining structure for domain profiles |
 | `skills/<name>/SKILL.md` | Individual skill implementations (flat structure, no nesting) |
 | `hooks/hooks.json` | Claude Code hooks for safety enforcement |
+| `commands/grounded-setup.md` | The `/grounded-setup` command: writes the strict sandbox settings `grounded_agency/sandbox_settings.py` computes to the user's settings (not a skill: `skills/` holds the capabilities and composed skills only) |
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
 | `_archive/` | Archived files from v1 (99-capability model) |
 | `schemas/interop/oasf_mapping.yaml` | OASF skill-code-to-capability mapping |
