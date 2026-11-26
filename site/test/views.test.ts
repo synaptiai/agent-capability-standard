@@ -4,11 +4,12 @@
 // on fixtures state where each expected value comes from.
 import { describe, expect, it } from 'vitest';
 import { governanceStatuses as scriptGovernanceStatuses } from '../scripts/check-design-data.mjs';
-import { governanceStatuses } from '../src/lib/governance';
+import { governanceStatuses, standardStatuses } from '../src/lib/governance';
 import { EDGE_TYPES, loadOntology } from '../src/data/ontology';
 import { capabilityUsage, loadWorkflows, parseCatalog } from '../src/data/workflows';
 import { inlineMarkdown, pageHref, refSlugger } from '../src/lib/generated';
 import { readRepoFile } from '../src/lib/repo';
+import { statusStyle } from '../src/lib/status';
 import {
   crossLayerEdges,
   edgeGroups,
@@ -390,6 +391,13 @@ describe('schema descriptions', () => {
 describe('other page helpers', () => {
   it('reads the four RFC statuses from GOVERNANCE.md (design notes, ia-home 6.7)', () => {
     expect(governanceStatuses(readRepoFile('spec/GOVERNANCE.md'))).toEqual(['Draft', 'Accepted', 'Rejected', 'Superseded']);
+  });
+
+  it('reads the four Standard statuses from GOVERNANCE.md apart from the RFC statuses, each with a badge style', () => {
+    const statuses = standardStatuses(readRepoFile('spec/GOVERNANCE.md'));
+    expect(statuses).toEqual(['Candidate Standard', 'Standard', 'Supported', 'Unsupported']);
+    for (const s of statuses) expect(() => statusStyle(s), s).not.toThrow();
+    expect(() => standardStatuses("An RFC's status is Draft or Accepted.")).toThrow(/A Standard document's status is/);
   });
 
   it('reads the RFC statuses with or without an Oxford comma', () => {

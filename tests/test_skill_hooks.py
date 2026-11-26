@@ -90,6 +90,7 @@ def run_command(
     cwd: Path,
     shell: str,
     env_override: dict[str, str] | None = None,
+    timeout: float = 30,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     if env_override:
@@ -102,7 +103,7 @@ def run_command(
         text=True,
         cwd=cwd,
         env=env,
-        timeout=30,
+        timeout=timeout,
     )
 
 
@@ -404,22 +405,32 @@ class TestFrontmatterHooks:
         matcher whose time grows with the square of the text (2.5 s at
         200 KB for the scheme rule added in security round 4, batch 5). The
         scan reads bytes (LC_ALL=C) and decides 400 KB in well under a
-        second."""
+        second with GNU grep, and in linear time with any grep (BSD grep,
+        on macOS, reads about ten times slower)."""
         script = SECRET_SCAN.read_text(encoding="utf-8") + (
             '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
         )
-        started = time.perf_counter()
-        result = subprocess.run(
-            [shell, "-c", script],
-            input=text,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-            env={**os.environ, "LC_ALL": "C.UTF-8"},
-        )
-        assert result.stdout.strip() == "no", result.stderr
-        assert time.perf_counter() - started < 5
+
+        def seconds_at(given: str) -> float:
+            started = time.perf_counter()
+            result = subprocess.run(
+                [shell, "-c", script],
+                input=given,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+                env={**os.environ, "LC_ALL": "C.UTF-8"},
+            )
+            assert result.stdout.strip() == "no", result.stderr
+            return time.perf_counter() - started
+
+        # BSD grep (macOS) reads about ten times slower than GNU grep, but
+        # linearly: there the test checks how the time grows, not a limit
+        if GNU_GREP:
+            assert seconds_at(text) < 5
+        else:
+            assert_linear(seconds_at, text[: len(text) // 4], text[: len(text) // 2])
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
@@ -2899,16 +2910,35 @@ class TestAuditCommandHook:
                 + " >> .claude/audit/records.jsonl"
             )
 
+        # BSD grep (macOS) reads about ten times slower than GNU grep, and a
+        # busy runner can take over 30 s for the full line there
+        limit = 30 if GNU_GREP else 300
+
         def seconds_at(line: str) -> float:
             started = time.monotonic()
-            run_command(hook, bash_call(command_of(line)), tmp_path, shell)
+            run_command(
+                hook, bash_call(command_of(line)), tmp_path, shell, timeout=limit
+            )
             return time.monotonic() - started
 
+        # BSD grep reads linearly: there the test checks how the time grows
+        # over a quarter and a half of the run, with the same time limit as
+        # the full line
         if not GNU_GREP:
             run = "a" * max(len(r) for r in re.findall("a+", record))
-            assert_linear(seconds_at, record.replace(run, run[: len(run) // 2]), record)
+            assert_linear(
+                seconds_at,
+                record.replace(run, run[: len(run) // 4]),
+                record.replace(run, run[: len(run) // 2]),
+            )
         started = time.monotonic()
-        result = run_command(hook, bash_call(command_of(record)), tmp_path, shell)
+        result = run_command(
+            hook,
+            bash_call(command_of(record)),
+            tmp_path,
+            shell,
+            timeout=limit,
+        )
         if GNU_GREP:
             assert time.monotonic() - started < 10
         if expect is None:

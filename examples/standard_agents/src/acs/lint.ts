@@ -4,7 +4,7 @@
  *
  * The workflow validator checks a workflow's steps against the ontology
  * before anything runs. A prompt has no steps, but it does have a fixed list
- * of tools, and each tool's `acs` annotation is a carrier of its tool binding
+ * of tools, and each tool's `ai.synapti/acs` annotation is a carrier of its tool binding
  * record (§5.18.1). From that list alone a host can check that every tool is
  * bound (W617), that each binding names the tool it is offered under (V111),
  * and that no tool needs a capability the prompt can never perform (V102).
@@ -45,7 +45,7 @@ type Tools = Record<string, { annotations?: Record<string, unknown> }>;
 /**
  * The binding records the offered tools carry, what each offered name
  * carries (the record of the name the tool states, its `tool`, or null for
- * a tool with no `acs` annotation), and, by that name, the effective flags
+ * a tool with no `ai.synapti/acs` annotation), and, by that name, the effective flags
  * each tool defined here computed (`computedFlags`): the record states none
  * of those the applied domain profiles raise (§5.21.3), its own and the
  * layer's, and they are what its calls are checked with.
@@ -91,7 +91,7 @@ function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
 /**
  * Check the tools of one prompt (§5.18.2).
  *
- * - A tool with no `acs` annotation is W617 (warning): its calls are
+ * - A tool with no `ai.synapti/acs` annotation is W617 (warning): its calls are
  *   treated as the strictest case.
  * - A tool whose stated name is not the name the prompt offers it under is
  *   V111 (error): an approver would be shown, and the trace would record,

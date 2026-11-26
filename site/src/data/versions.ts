@@ -47,26 +47,33 @@ export function standardVersions(): StandardVersion[] {
     .sort((a, b) => cmpSemver(b.version, a.version));
 }
 
+/**
+ * A version's status as a sentence complement, from its header status (the
+ * statuses are defined under "Standard versions" in spec/GOVERNANCE.md):
+ * "the released Standard", "a Candidate Standard", "Supported", "Unsupported".
+ */
+export function statusPhrase(status: string): string {
+  if (status === 'Standard') return 'the released Standard';
+  if (status === 'Candidate Standard') return 'a Candidate Standard';
+  return status;
+}
+
 export interface OlderVersionNote {
-  /** The current Standard's Supersedes line names this version as still supported. */
-  stillSupported: boolean;
-  /** The current Standard's "Appendix X: Changes from <version>" heading, if it has one. */
+  /** The newest Standard's "Appendix X: Changes from <version>" heading, if it has one. */
   changes: { label: string; anchor: string } | null;
 }
 
 /**
- * What the current Standard says about an older version, read from its text:
- * the `**Supersedes:**` header line and an H2 "Appendix X: Changes from
- * <version>". Either fact is left out when the text does not state it.
+ * Where the newest Standard lists the changes from an older version: its H2
+ * "Appendix X: Changes from <version>", or null when it has none. The older
+ * version's status comes from its own header, not from this text.
  */
 export function olderVersionNote(version: string, currentText: string): OlderVersionNote {
-  const supersedes = /^\*\*Supersedes:\*\*(.*)$/m.exec(currentText)?.[1] ?? '';
-  const stillSupported = supersedes.includes(`STANDARD-v${version}.md`) && /still supported/i.test(supersedes);
   const heading = computeAnchors(currentText).entries.find(
     (h) => h.depth === 2 && new RegExp(`^(Appendix [A-Z]+): Changes from ${version.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$`).test(h.text),
   );
   const changes = heading ? { label: heading.text.split(':')[0]!, anchor: heading.slug } : null;
-  return { stillSupported, changes };
+  return { changes };
 }
 
 function pyprojectVersion(text: string): string {

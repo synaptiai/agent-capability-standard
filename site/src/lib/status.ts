@@ -1,5 +1,5 @@
-// The badge style of each status value the site shows: RFC statuses (the
-// spec/GOVERNANCE.md vocabulary), the `**Document Status**:` values, the
+// The badge style of each status value the site shows: RFC and Standard
+// statuses (the spec/GOVERNANCE.md vocabulary), the `**Document Status**:` values, the
 // first clause of every other `**Status:**` line on a routed page (the
 // Standard's, the compliance documents', a guide's), and the label for
 // profile workflows no catalog defines. Every style has a `status:` glyph.
@@ -39,10 +39,16 @@ export const STATUS_STYLES: Readonly<Record<string, StatusStyle>> = {
   Informative: 'reference',
   'Critical Analysis': 'analysis',
   'Historical (Informative)': 'historical',
+  // The statuses of a Standard document (spec/GOVERNANCE.md, "Standard
+  // versions"). "Standard", the latest released version, is also the status
+  // of a part of the Standard published beside it (spec/EDGE_TYPES.md); both
+  // are normative. A Supported version is one validators must still accept;
+  // an Unsupported one a newer release has passed over.
   'Candidate Standard': 'candidate',
-  [PROPOSED_WORKFLOW_STATUS]: 'proposed',
-  // A part of the Standard published beside it (spec/EDGE_TYPES.md): normative.
   Standard: 'normative',
+  Supported: 'accepted',
+  Unsupported: 'superseded',
+  [PROPOSED_WORKFLOW_STATUS]: 'proposed',
   Template: 'template',
   'Reference implementation': 'implementation',
   'Reference analysis': 'analysis',

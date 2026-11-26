@@ -71,7 +71,7 @@ rows:
     promised to survive. Limits: the declaration has no run-time effect and no in-thread reader (row cls-04);
     a raw literal is not type-checked (row cls-12); and §8 says annotations are ''keyed by the runtime
     or tool that reads them'', whereas an ACS key is read by neither (open question).'
-  combined: 'defineTool({ annotations: { acs: { standard, ontology, capability, layer, domain, risk, mutation,
+  combined: 'defineTool({ annotations: { ''ai.synapti/acs'': { standard, ontology, capability, layer, domain, risk, mutation,
     requires_checkpoint, requires_approval } }, ... }), the key and the members that `schemas/interop/standard_agents_annotation.schema.json`
     defines (`domain` is optional; no other member is allowed). This type-checks against @standardagents/spec
     0.45.10. The key name and the value schema are ACS''s to define and publish. Its readers are build-time

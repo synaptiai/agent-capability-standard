@@ -109,7 +109,7 @@ export default groundedTool({
 });
 ```
 
-`groundedTool` returns an ordinary `defineTool` definition. It adds the `acs`
+`groundedTool` returns an ordinary `defineTool` definition. It adds the `ai.synapti/acs`
 annotation
 ([schema](../../schemas/interop/standard_agents_annotation.schema.json)), and
 wraps `execute` so that the call is refused until the capability's rules are
