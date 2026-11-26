@@ -91,7 +91,7 @@ rows:
     ACS side the effective flag is defined for a workflow step ('The safety flag a step is treated as')
     and 'safety layer' is not a defined term; reading §5.2.1 as binding on a tool-level guard is an inference
     (ACS gap).
-  combined: 'Publish `annotations: { acs: { standard, ontology, capability, layer, risk, mutation, requires_checkpoint,
+  combined: 'Publish `annotations: { ''ai.synapti/acs'': { standard, ontology, capability, layer, risk, mutation, requires_checkpoint,
     requires_approval } }` (the members `schemas/interop/standard_agents_annotation.schema.json` requires)
     as descriptive metadata for validators, catalogues and UIs, read from the definitions at build time
     (no Thread Client API route returns annotations). Enforce in the tool''s own `execute` (approval-01),

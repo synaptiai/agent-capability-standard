@@ -199,8 +199,9 @@ def render_annotation_schema(ontology: dict[str, Any]) -> str:
         ),
         "title": "Agent Capability Standard annotation for a Standard Agents tool",
         "description": (
-            "The value of the `acs` key in a Standard Agent Specification "
-            "tool's `annotations`: a carrier of the tool binding record "
+            "The value of the `ai.synapti/acs` key in a Standard Agent "
+            "Specification tool's `annotations`: a carrier of the tool "
+            "binding record "
             "(schemas/interop/tool_binding.schema.json, Standard 1.2.0 "
             "section 5.18.1), with the Standard it cites. `layer` and the "
             "effective flags are informative copies, which a safety layer "

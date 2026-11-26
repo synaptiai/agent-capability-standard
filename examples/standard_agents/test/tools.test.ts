@@ -175,7 +175,7 @@ describe('the offered-tool checks', () => {
     const { checkpoint_config: _cp, ...withoutCheckpoint } = tools;
     expect(lintPromptTools('p', withoutCheckpoint).map((d) => d.code)).toEqual(['V102']);
     expect(lintPromptTools('p', withoutCheckpoint, { hostTakesCheckpoints: true })).toEqual([]);
-    const shell = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', classifier: 'shell' } } };
+    const shell = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', classifier: 'shell' } } };
     expect(lintPromptTools('p', { ...withoutCheckpoint, shell })).toEqual([]);
   });
 
@@ -183,6 +183,9 @@ describe('the offered-tool checks', () => {
     expect(lintPromptTools('p', { ...tools, plain: {} }).map((d) => [d.code, d.name, d.location.tool])).toEqual([
       ['W617', 'UNBOUND_TOOL', 'plain'],
     ]);
+    // A bare `acs` key is not this binding's key: the tool is unbound.
+    const bare = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve' } } };
+    expect(lintPromptTools('p', { ...tools, bare }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'bare']]);
     expect(KEYS.checkpoints).toBe('acs:checkpoints');
   });
 });

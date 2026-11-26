@@ -878,7 +878,7 @@ describe('evidence and audit trail', () => {
     const entry = (await readTrace(t.state)).at(-1);
     expect(entry).toMatchObject({ action: 'note', status: 'failed', code: 'R407' });
     // The layer's own failure names the layer too (§5.18.8).
-    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+    expect(entry?.recorded_by).toMatchObject({ name: '@synaptiai/standard-agents-binding' });
   });
 
   it.each([
@@ -901,7 +901,7 @@ describe('evidence and audit trail', () => {
     expect(await t.state.getValue(KEYS.pendingApprovals)).toBeNull();
     const entry = (await readTrace(t.state)).at(-1);
     expect(entry).toMatchObject({ action: 'write_config', capability: 'mutate', status: 'refused', code: 'F502' });
-    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+    expect(entry?.recorded_by).toMatchObject({ name: '@synaptiai/standard-agents-binding' });
     // The checkpoint is still there for a call with I-JSON arguments.
     expect((await readCheckpoints(t.state)).filter((c) => c.valid)).toHaveLength(1);
   });
@@ -1148,7 +1148,7 @@ describe('the agent definition', () => {
   it('reports an annotation with an unknown member, which does not load (security round 3)', () => {
     // A misspelt member was dropped, so the lint passed a send read as a
     // retrieve; the record is S303, so the tool is unbound (W617).
-    const lookup = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] } } };
+    const lookup = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] } } };
     expect(lintPromptTools('p', { lookup }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'lookup']]);
   });
 

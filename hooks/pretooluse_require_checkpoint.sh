@@ -1902,8 +1902,9 @@ if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
 fi
 
 # BEGIN link-count (tests/test_layer_records.py runs the hook without these blocks and expects the same verdicts)
-# The project's records, for every call this hook gates: another name lets
-# a command write them. Where git could not say which git directory is the
+# The project's records, for every call this hook does not let pass
+# outright (a gated call, a checkpoint put to a person, a restore): another
+# name lets a command write them. Where git could not say which git directory is the
 # project's, its records were not counted above, and the call is blocked, as
 # it is below where the call's paths are compared with the records.
 case "$records_git_status" in
@@ -1916,7 +1917,7 @@ for record in "${LAYER_RECORDS[@]}"; do
 done
 linked_status=0
 linked=$(records_linked "${record_roots[@]}") || linked_status=$?
-refuse_linked "$linked_status" "$linked" "a command could write the record" "every call this hook gates"
+refuse_linked "$linked_status" "$linked" "a command could write the record" "every call this hook does not let pass outright"
 # END link-count
 
 # Approval needs a person (§5.18.7): unless ACS_HOOK_APPROVAL is "off", a

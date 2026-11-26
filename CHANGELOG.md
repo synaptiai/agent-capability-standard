@@ -1559,7 +1559,7 @@ here and marked so.
 **Standard Agents binding and TypeScript package.**
 
 - TypeScript package and Standard Agents binding: `annotationRecord` reads
-  an `acs` annotation as the record in full (security round 3): every
+  an `ai.synapti/acs` annotation as the record in full (security round 3): every
   member but the copies (`tool`, `layer`, `risk`, `mutation`,
   `requires_checkpoint`, `requires_approval`) reaches the record, so a
   misspelt one (`aproval`, `flag`, `aditional_capabilities`) is S303 and
@@ -1585,7 +1585,7 @@ here and marked so.
   does only when `NPM_PUBLISH_ENABLED` and `NPM_TOKEN` are set), so a copy
   of the binding outside this repository builds the package from
   `packages/acs-core` or bundles it.
-- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
+- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `ai.synapti/acs`
   annotation carries the tool binding record (`tool`, declared `flags`,
   `additional_capabilities`, `invokes`, `approval`); the copies of the layer
   and flags are informative. `lintPromptTools` and `lintAgentBindings` report
@@ -1641,7 +1641,7 @@ here and marked so.
   bindings' (`joinApproval`), as in the Python loader.
 - Standard Agents binding, composites (Standard 1.2.0 §5.18.4):
   `groundedTool` throws (V107) for a composite that lists a tool with no
-  binding the layer loads (plain `defineTool` with no `acs` annotation, or
+  binding the layer loads (plain `defineTool` with no `ai.synapti/acs` annotation, or
   one that does not load on its own); before, it counted as the strictest
   case and its calls went unchecked and unrecorded. A listed tool defined
   with plain `defineTool` and a binding record is now checked by the
@@ -2036,7 +2036,7 @@ here and marked so.
     `UnsupportedDomainError`, `isDomainId`, `issuePath`; `CoreContext`'s
     `validate`, `start` and `restore` take `catalogs` and `agents`
     (`SetArgs`). Binding:
-    `deriveAgentManifest` (loads each `acs` annotation as a binding record,
+    `deriveAgentManifest` (loads each `ai.synapti/acs` annotation as a binding record,
     as the layer does, and follows `invokes`, with `invoked` for helper
     tools the prompts do not offer; refuses unannotated tools, annotations
     that do not load, invoked tools not given, declared flags stricter than
@@ -2244,7 +2244,17 @@ here and marked so.
   type-checks it against the published `@standardagents/spec` types and runs
   its tests.
 - `schemas/interop/standard_agents_annotation.schema.json`: the schema of
-  the `acs` annotation the binding puts on a tool.
+  the `ai.synapti/acs` annotation the binding puts on a tool.
+- Standard Agents binding: a tool's binding record is the value of the
+  annotation key `ai.synapti/acs` (`ANNOTATION_KEY`): a reverse-DNS prefix
+  of a domain the project controls, then a slash, as the Model Context
+  Protocol names `_meta` keys, so it cannot collide with the key of a
+  package that follows the same rule. JavaScript reads it with bracket
+  access, `tool.annotations?.['ai.synapti/acs']`. A reader reads this key
+  only: a tool whose annotations hold a bare `acs` key and no
+  `ai.synapti/acs` key is unbound. The layer name every record the binding
+  writes carries (`LAYER_NAME`, `recorded_by.name`) is
+  `@synaptiai/standard-agents-binding`.
 - `scripts/gen_standard_agents_binding.py` generates the TypeScript
   package's ontology table (`packages/acs-core/src/ontology.gen.ts`), the
   annotation schema and the approval digest vectors
@@ -2265,6 +2275,15 @@ here and marked so.
   section 8 arithmetic.
 - `spec/ROADMAP.md` lists the five version lines and where each is declared;
   `tests/test_version_lines.py` keeps them in agreement.
+- `spec/GOVERNANCE.md` defines the statuses of a Standard document
+  (Candidate Standard, Standard, Supported, Unsupported), the criteria for
+  releasing a Candidate Standard, what the `**Date:**` line gives for each
+  status, and the support window. Standard 1.1.0 is the released Standard,
+  1.0.0 is Supported and 1.2.0 is a Candidate Standard. The site states each
+  version's status from its own header. `tests/test_standard_statuses.py`
+  checks each header against GOVERNANCE, the Standard table and the
+  "Plugin X implements Standard Y" sentence of the roadmap, and the
+  specification changelog.
 - `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
   and kinds, tested against the core.
 - `grounded_agency/layer_records.py` gives the Claude Code settings that keep
@@ -2274,15 +2293,17 @@ here and marked so.
   absolute. `acs/` is named in the git directory git names for the project
   (a linked worktree's own) and in each other git directory of the
   repository: the main checkout's, linked worktrees' and submodules'. It
-  uses the standard library alone;
+  uses the standard library alone and the syntax of Python 3.9;
   `python3 -I grounded_agency/layer_records.py [PROJECT_DIR]` prints the
   settings as JSON.
 - Plugin hooks: the pre-tool-use hook refuses every call (`F504`) while a
   file under `acs/` has a name outside the records, and every call it does
   not let pass outright while one of the project's records has (a hard link
   made outside the sandbox, through which a command could read or write the
-  record past the deny rules). It counts links with perl, or with GNU or
-  BSD `stat` where perl is not installed. The deny rules are the boundary;
+  record past the deny rules). It counts links with perl, or, where perl
+  is not installed, with `find`, `awk` and GNU or BSD `stat`; without them
+  every call is blocked with `R407` while the git directory's `acs/`
+  exists, and every call the hook gates otherwise. The deny rules are the boundary;
   the hook's reading of a call's paths is an early refusal
   (`hooks/README.md`, `spec/SECURITY.md` §5.5).
 - Plugin hooks: the log hook reads an empty `audit.head` (a mount point the

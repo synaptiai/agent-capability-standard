@@ -235,7 +235,7 @@ describe('secrets (§6.7)', () => {
       expect(trace).toHaveLength(1);
       expect(trace[0]).toMatchObject({ action: name, capability, status: 'refused', code: 'R407' });
       expect(trace[0]?.args_digest).toMatch(/^[0-9a-f]{64}$/);
-      expect(trace[0]?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding', version: '1.2.0' });
+      expect(trace[0]?.recorded_by).toMatchObject({ name: '@synaptiai/standard-agents-binding', version: '1.2.0' });
       expect(trace[0]?.recorded_by?.config_sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(trace[0]?.error).toMatch(/secrets could not be read/);
       expect(JSON.stringify(trace)).not.toContain('vault-token-7f3a9c');
