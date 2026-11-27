@@ -753,6 +753,111 @@ describe("the flags a composite's profiles raise reach a nested call that takes 
   });
 });
 
+describe("a plain nested call under a composite that took no token is held to the outer composite's profiles (§5.18.4, §5.21.3)", () => {
+  // Security round 6: `outer`, whose profiles make persist need a person's
+  // approval (or a checkpoint), invokes `middle` with arguments the runtime
+  // validates, so `middle` takes no token and, needing neither itself, runs
+  // with no approval and no checkpoint; it then invoked the plain `store`,
+  // which ran with neither.
+  afterEach(() => resetLayer());
+  const passthrough = z.object({}).passthrough();
+
+  /** A core whose one profile makes persist need a person's approval (`person`) or a checkpoint (`checkpoint`). */
+  const raising = (what: 'person' | 'checkpoint'): ProfileCore => ({
+    checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+    profileFlags(_p: Json[], capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags {
+      const { flags } = effectiveFlags(capability, declared);
+      if (capability !== 'persist') return { ...flags, person: false };
+      return what === 'person'
+        ? { ...flags, requires_approval: true, person: true }
+        : { ...flags, requires_checkpoint: true, person: false };
+    },
+    profilePolicy: () => NO_RULES,
+  });
+
+  async function scenario(what: 'person' | 'checkpoint', validated: boolean) {
+    const profiles = bindingProfiles(raising(what), [{ domain: 'd', version: '1.0.0' }]);
+    let stored = 0;
+    const store = defineTool({
+      description: 'store',
+      args: passthrough,
+      annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'persist' } },
+      execute: async () => {
+        stored += 1;
+        return { status: 'success', result: JSON.stringify({ stored: true, evidence_anchors: [] }) };
+      },
+    });
+    const nested: ToolResult[] = [];
+    const middle = groundedTool({
+      name: 'middle',
+      capability: 'invoke',
+      invokes: { store } as never,
+      description: 'middle',
+      args: passthrough,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('store', { key: 'a' }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const outer = groundedTool({
+      name: 'outer',
+      capability: 'invoke',
+      invokes: { middle } as never,
+      description: 'outer',
+      args: passthrough,
+      profiles,
+      execute: async (state) => {
+        await state.invokeTool('middle', {});
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args: passthrough,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    const t = memoryThread();
+    t.tools.set('store', store as never);
+    // The runtime gives a tool its validated arguments (spec ToolDefinition).
+    t.tools.set(
+      'middle',
+      (validated ? { execute: (st: ThreadState, a: Record<string, unknown>) => middle.execute(st, { ...a, page: 1 }) } : middle) as never,
+    );
+    t.tools.set('outer', outer as never);
+    t.tools.set('save', save as never);
+    registerTools({ store, middle, outer, save });
+    if (what === 'person') {
+      const asked = await t.tools.get('outer')!.execute(t.state, {});
+      expect(asked.error_code).toBe('F502');
+      await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', 2);
+    } else {
+      expect((await t.tools.get('save')!.execute(t.state, {})).status).toBe('success');
+    }
+    const result = await t.tools.get('outer')!.execute(t.state, {});
+    return { result, nested, stored };
+  }
+
+  for (const [what, code] of [
+    ['person', 'F502'],
+    ['checkpoint', 'F501'],
+  ] as const) {
+    it(`refuses the plain call (${code}) when the profiles raise a ${what} requirement for it`, async () => {
+      const { result, nested, stored } = await scenario(what, true);
+      expect(result.status).toBe('success');
+      expect(nested.map((r) => r.error_code)).toEqual([code]);
+      expect(stored).toBe(0);
+    });
+
+    it(`covers the plain call when middle takes the token (${what}, control)`, async () => {
+      const { nested, stored } = await scenario(what, false);
+      expect(nested.map((r) => r.status)).toEqual(['success']);
+      expect(stored).toBe(1);
+    });
+  }
+});
+
 describe('the call vectors (tests/conformance/profiles/effective.json, §5.21.3)', () => {
   // Each applied profile raises for every capability the call performs, at
   // the call's effective risk: `additional_capabilities` do not escape it.

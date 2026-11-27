@@ -7,7 +7,7 @@
  */
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { digest, refsIn, type Json } from '@synaptiai/acs-core';
-import type { ToolResult } from '@standardagents/spec';
+import type { ThreadState, ToolResult } from '@standardagents/spec';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import checkpointConfig from '../agents/tools/checkpoint_config.js';
@@ -23,7 +23,7 @@ import {
 import { recordToolCall } from '../src/acs/audit.js';
 import { controlTool, groundedTool } from '../src/acs/grounded.js';
 import { configureLayer, resetLayer } from '../src/acs/layer.js';
-import { readTrace } from '../src/acs/records.js';
+import { KEYS, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH, fileAnchor, readSettings } from '../src/example/settings.js';
 import evidenceSchema from '../../../schemas/interop/evidence.schema.json' with { type: 'json' };
 import { memoryThread } from './memory_thread.js';
@@ -499,5 +499,66 @@ describe('what a grounded call returns holds no secret (security round 5, batch 
     const result = await tool.execute(t.state, {});
     expect(result.status).toBe('success');
     expect(JSON.parse(result.result as string)).toEqual({ data: { note: 'plain' }, confidence: 0.9, evidence_anchors: [] });
+  });
+});
+
+describe('the audit hook links a nested call only while its composite waits (security round 6)', () => {
+  // A nested call's entry waited for a tool call id as a top-level call's
+  // does. In a runtime that fires no `tool_call_done` hook for an
+  // invocation, the model's direct call of the same tool later in the step
+  // gave its id to the nested entry (covered by the composite, other
+  // arguments), and its own entry kept none.
+  const passthrough = z.object({}).passthrough();
+  const hookCall = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
+
+  /** `gather` (integrate) invokes `fetch` (retrieve); `hookForInvocation`: the runtime fires the hook for it; `validated`: it adds a key. */
+  async function scenario(hookForInvocation: boolean, validated = false) {
+    const fetch = groundedTool({
+      name: 'fetch',
+      capability: 'retrieve',
+      description: 'x',
+      args: passthrough,
+      execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
+    });
+    const gather = groundedTool({
+      name: 'gather',
+      capability: 'integrate',
+      invokes: { fetch } as never,
+      description: 'x',
+      args: passthrough,
+      execute: async (s) => {
+        const r = await s.invokeTool('fetch', { n: 1 });
+        if (hookForInvocation) await recordToolCall(s, hookCall('n1', 'fetch'), { status: r.status }, 1);
+        return { merged: true, confidence: 1, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    t.tools.set('fetch', (validated ? { execute: (s: ThreadState, a: Record<string, unknown>) => fetch.execute(s, { ...a, page: 1 }) } : fetch) as never);
+    t.tools.set('gather', gather as never);
+    expect((await t.tools.get('gather')!.execute(t.state, {})).status).toBe('success');
+    await recordToolCall(t.state, hookCall('c1', 'gather'), { status: 'success' }, 2);
+    expect((await t.tools.get('fetch')!.execute(t.state, { n: 2 })).status).toBe('success');
+    await recordToolCall(t.state, hookCall('c2', 'fetch'), { status: 'success' }, 3);
+    const trace = await readTrace(t.state);
+    const id = (pred: (e: (typeof trace)[number]) => boolean) => trace.find(pred)?.tool_call_id ?? null;
+    return {
+      composite: id((e) => e.action === 'gather'),
+      nested: id((e) => e.action === 'fetch' && e.seq === 2),
+      direct: id((e) => e.action === 'fetch' && e.seq === 3),
+      unlinked: await t.state.getValue<unknown[]>(KEYS.unlinked),
+      entries: trace.length,
+    };
+  }
+
+  it("gives the model's direct call its own entry when the runtime fires no hook for the invocation", async () => {
+    expect(await scenario(false)).toEqual({ composite: 'c1', nested: null, direct: 'c2', unlinked: [], entries: 3 });
+  });
+
+  it('does so for a nested call that took no token (its arguments validated by the runtime)', async () => {
+    expect(await scenario(false, true)).toEqual({ composite: 'c1', nested: null, direct: 'c2', unlinked: [], entries: 3 });
+  });
+
+  it("links the nested call's entry to the hook a runtime fires for the invocation (control)", async () => {
+    expect(await scenario(true)).toEqual({ composite: 'c1', nested: 'n1', direct: 'c2', unlinked: [], entries: 3 });
   });
 });

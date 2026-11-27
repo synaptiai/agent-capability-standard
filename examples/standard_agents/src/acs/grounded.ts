@@ -637,6 +637,15 @@ function findToken(thread: string, flow: string | null, tool: string, argsDigest
   );
 }
 
+/**
+ * The composite call whose state this call of `tool` may have been made
+ * through: the composite of a pending invocation of the tool in this
+ * execution, if any (`under` of the call's waiting entry, records.ts).
+ */
+function pendingUnder(thread: string, flow: string | null, tool: string, definition: object): number | undefined {
+  return (TOKENS.get(thread) ?? []).find((t) => t.flow === flow && (t.tool === tool || t.listed === definition))?.seq;
+}
+
 /** The rules enclosing composites put on a call (§4.4.2, §5.20, §5.21.3). */
 interface EnclosingRules {
   destinations: readonly (readonly string[])[];
@@ -814,6 +823,9 @@ function nestingState(
           error: result.error ?? code,
         },
         composite.secrets,
+        // Made through the composite's state, never by the model: its entry
+        // waits for no hook once the composite's own has come (records.ts).
+        composite.seq,
       ),
     ).catch(() => undefined);
   };
@@ -976,7 +988,12 @@ function nestingState(
     const refuseNested = async (code: RefusalCode, message: string, suggestion: string): Promise<ToolResult> => {
       const result = refuse(code, tool, capability, message, suggestion);
       await write(() =>
-        appendTrace(state, { ...base, at: composite.now(), status: 'refused', code, error: result.error ?? code }, composite.secrets),
+        appendTrace(
+          state,
+          { ...base, at: composite.now(), status: 'refused', code, error: result.error ?? code },
+          composite.secrets,
+          composite.seq,
+        ),
       ).catch(() => undefined);
       return result;
     };
@@ -1079,7 +1096,9 @@ function nestingState(
     }
     let started: TraceEntry;
     try {
-      started = await write(() => appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets));
+      started = await write(() =>
+        appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets, composite.seq),
+      );
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       return refuse('R407', tool, capability, `The nested call could not be recorded: ${message}.`, 'The call did not run.');
@@ -1550,6 +1569,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     // requirement for what it performs, as they raised the composites' own
     // (§5.21.3), whether or not the call takes a token.
     const rules = pendingRules(state.threadId, name, definition);
+    // The composite whose state this call may have been made through: its
+    // entries wait for a hook only while that composite's does (records.ts).
+    let under = pendingUnder(state.threadId, flow, name, definition);
     try {
       const recorded_by = await recordedBy();
       layerRecord = recorded_by;
@@ -1583,6 +1605,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
             error: result.error ?? code,
           },
           secrets,
+          under,
         );
         return { outcome: result };
       };
@@ -1677,7 +1700,10 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // Otherwise it is checked as a call of its own. Each invocation covers
       // at most one call: the token is taken here, synchronously after it was
       // found.
-      if (token !== undefined) token.used = true;
+      if (token !== undefined) {
+        token.used = true;
+        under = token.seq;
+      }
       const covered =
         token !== undefined &&
         (token.person || !needPerson) &&
@@ -1851,7 +1877,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // 4. Record that the call is starting. The entry is written before the
       // tool's own code runs, so that a call cut off while it runs still
       // leaves a record of what it used.
-      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' }, secrets);
+      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' }, secrets, under);
       return {
         started,
         flow,
@@ -1889,6 +1915,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
           error: message,
         },
         secrets,
+        under,
       ).catch(() => undefined);
       return {
         outcome: refusal(
@@ -1936,6 +1963,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
             error: result.error ?? 'R407',
           },
           layerSecrets(),
+          pendingUnder(state.threadId, flowOf(state), name, definition),
         );
       }).catch(() => undefined);
       return result;

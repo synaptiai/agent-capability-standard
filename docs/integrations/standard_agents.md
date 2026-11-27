@@ -800,7 +800,11 @@ Two SA limits shape this part:
   matches by tool name among the entries of its own execution and model step,
   oldest first. An entry of an earlier step or execution, whose hook did not
   run, keeps no id; within one step, the next call of the same tool gives its
-  id to such an entry.
+  id to such an entry. An entry of a call a composite made through its state
+  waits for an id only while the composite's own entry does: whether a
+  runtime fires `tool_call_done` for `invokeTool` is not stated, and once
+  the composite's hook has come, a later call of the same tool takes its own
+  entry, not the nested one.
 - **A tool result has no metadata slot.** `HookToolResult` is `status`,
   `result`, `error`, `stack` and `attachments`. Evidence has to travel inside
   `result`, as text the model also reads.
