@@ -2380,8 +2380,9 @@ here and marked so.
   stops the run when `${rollback_out.restored}` is false (§12.5, Checked
   Rollback), and the `delegate` step of `multi_agent_orchestration`
   delegates to the literal agent `subtask-worker` in place of
-  `${task.agent_pool[0]}` (§5.15.2). The skill-bundled copies are
-  regenerated.
+  `${task.agent_pool[0]}` (§5.15.2); its `synchronize` step coordinates
+  state with that agent, and the workflow no longer takes an `agent_pool`
+  input. The skill-bundled copies are regenerated.
 - `examples/digital_twin_sync_loop.workflow_catalog.yaml` is a catalog of
   its own, `acs.examples.twin`, whose workflow `plant_twin_bootstrap`
   invokes `acs.reference/world_model_build` and

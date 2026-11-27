@@ -1673,12 +1673,13 @@ multi_agent_orchestration:
   description: |
     Multi-agent orchestration workflow inspired by OASF Category 10 (Agent Orchestration).
     Decomposes a complex task into subtasks, creates an execution plan with
-    dependencies, delegates subtasks to appropriate agents, coordinates shared
-    state, validates results, merges outputs, and records orchestration decisions.
+    dependencies, delegates the planned subtasks to the subtask-worker agent,
+    coordinates shared state with it, validates results, merges outputs, and
+    records orchestration decisions.
   success:
   - Task decomposed into manageable subtasks
-  - Subtasks delegated to appropriate agents
-  - Shared state coordinated across agents
+  - Subtasks delegated to the subtask worker
+  - Shared state coordinated with the subtask worker
   - Results validated and integrated
   - Orchestration decisions audited
   steps:
@@ -1719,12 +1720,12 @@ multi_agent_orchestration:
       task: "${plan_out.dependencies: object}"
       agent: subtask-worker
     failure_modes:
-    - condition: No suitable agent available for subtask
+    - condition: The subtask worker did not accept the subtasks
       when: ${delegate_out.accepted} == false
       action: request_more_context
-      recovery: Queue subtask or request manual agent assignment.
+      recovery: Queue the subtasks until the subtask worker accepts them, or ask a person to complete them.
   - capability: synchronize
-    purpose: Coordinate shared state across delegated agents.
+    purpose: Coordinate shared state with the subtask worker.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1735,7 +1736,8 @@ multi_agent_orchestration:
       backoff: exponential
     store_as: synchronize_out
     input_bindings:
-      agents: "${task.agent_pool: array<string>}"
+      agents:
+      - subtask-worker
       state: "${delegate_out: object}"
     failure_modes:
     - condition: State synchronization timeout
@@ -1762,9 +1764,9 @@ multi_agent_orchestration:
     - condition: Subtask result fails validation
       when: ${verify_out.passed} == false
       action: request_more_context
-      recovery: The failed results are not merged, and the audit step does not run (the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure); the run ends R402 (failure mode fired), and the subtasks can be returned to their agents with the verdict's details before the workflow is run again.
+      recovery: The failed results are not merged, and the audit step does not run (the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure); the run ends R402 (failure mode fired), and the subtasks can be returned to the subtask worker with the verdict's details before the workflow is run again.
   - capability: integrate
-    purpose: Merge results from multiple agents into unified output.
+    purpose: Merge the delegated results with the synchronized state into a unified output.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1804,13 +1806,11 @@ multi_agent_orchestration:
     task:
       type: object
       required: true
-      description: The complex task to orchestrate across multiple agents
+      description: The complex task to orchestrate through the subtask worker agent
       properties:
         goal:
           type: string
         subtask_hints:
-          type: array
-        agent_pool:
           type: array
 
 data_quality_pipeline:
