@@ -7714,8 +7714,15 @@ profile given to a composite govern the calls its approval covers.
   state, carries the profiles the composite applies (its own and the
   layer's) and those of the composites enclosing it. `pendingRules`
   returns them with the other rules, and `check` raises the call's flags
-  and person requirement with them (`raisedBy`) before coverage, approval
-  and the checkpoint are decided, whether or not the call takes the token.
+  and person requirement with them (`raisedFor`) before coverage, approval
+  and the checkpoint are decided, whether or not the call takes the token:
+  for what the call performs and for what its own nested calls perform, as
+  the tool's own profiles raise them. A nested composite that takes no
+  token so asks the raised approval (a person's where they require one)
+  and uses the raised checkpoint itself, and its decisions then cover its
+  nested calls. Every entry of such a call carries `person_required`
+  where only the enclosing profiles require a person, the R407 entries of
+  a check it cannot complete and of secrets it cannot read included.
   `invokePlain` raises a plain tool's flags the same way: a raised approval
   is covered only by the composite's decisions that still meet it
   (`decisionsCover`), a raised person requirement only by a composite
@@ -7730,14 +7737,19 @@ profile given to a composite govern the calls its approval covers.
   each refused after the lapse and covered while the approval is valid)
   and "the flags a composite's profiles raise reach a nested call that
   takes no token" (a person is asked; control: the unchanged arguments
-  are covered), and "a plain nested call under a composite that took no
-  token is held to the outer composite's profiles" (`outer`, with the
+  are covered), and "a composite that took no token is held, for its plain
+  nested call, to the outer composite's profiles" (`outer`, with the
   profiles, invokes `middle`, whose arguments the runtime validates, which
-  invokes the plain `store`: refused F502 when the profiles require a
-  person's approval and F501 when they require a checkpoint; controls:
-  `middle` takes the token). On 8ec818c2's `grounded.ts` 8 of the 20 tests
-  fail; the controls and the two placements that were already checked
-  pass.
+  invokes the plain `store`: `middle` is refused F502 when the profiles
+  require a person's approval and F501 when they require a checkpoint, and
+  `store` runs, covered by `middle`, once a person approves `middle` or a
+  checkpoint is taken for it; `store` is refused F502 when `middle`'s own
+  approval lapsed before it; the R407 entries of a nested grounded call
+  whose secrets cannot be read or whose checks cannot complete carry
+  `person_required`; controls: `middle` takes the token, and `middle`'s
+  approval is still valid). Two composites deep, the lapse refuses the
+  middle composite itself. On the round's first fix (head 6a928cf6) 8 of
+  the 47 tests of `profiles.test.ts` fail; with the fix all pass.
 
 ### 2. A control tool's thrown error reached the runtime unredacted (medium)
 
@@ -7844,9 +7856,11 @@ none (§6.4: a record names the call that produced it).
 The Standard Agents guide (the secrets bullet: a control tool's thrown
 error; "Rules that reach a nested call without a token": the raised flags
 and person requirement; "A tool is not told which call it is serving":
-a nested call's entry), and the `profiles` option's comment in
-`grounded.ts`. `spec/SECURITY.md` §5.5 and `CHANGELOG.md` are edited by
-open pull requests and are left to the wave-2 pass that edits §5.5 once.
+a nested call's entry), the `profiles` option's comment in
+`grounded.ts`, `CHANGELOG.md` (the binding's entries for each defect), and
+`spec/SECURITY.md` (§1.5: a control tool's thrown error; §5.5: the raised
+flags of a nested call). The §5.5 sentence on the loop's convergence is
+left to the wave-2 pass that edits §5.5 and `CLAUDE.md` once.
 
 ### Checks after the batch
 

@@ -741,11 +741,13 @@ export default groundedTool({
   running outside an execution (an endpoint, an effect) issues tokens that
   cover nothing. Such a call asks its own approval and checkpoint, and its
   send and output are still checked against those rules. Those profiles
-  also raise the call's flags and person requirement for what it performs,
-  as they raised the composite's: a call they make need approval is
-  covered only by decisions the composite's call counted that still meet
-  it when the call runs (a plain tool's included), and one that takes no
-  token asks its own approval, of a person where they require one. The binding
+  also raise the call's flags and person requirement for what it performs
+  and for what its own nested calls perform, as they raised the
+  composite's: a call they make need approval is covered only by decisions
+  the composite's call counted that still meet it when the call runs (a
+  plain tool's included), and one that takes no token asks its own
+  approval, of a person where they require one, and uses its own
+  checkpoint, so its own decisions then cover its nested calls. The binding
   cannot tell it from another call of the tool made at that moment (a
   parallel call, an endpoint's), so that call is checked against them too.
 

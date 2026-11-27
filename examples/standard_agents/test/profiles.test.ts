@@ -13,7 +13,7 @@ import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { effectiveFlags, type CapabilityId, type DeclaredFlags, type Risk } from '../src/acs/ontology.js';
 import { configureLayer, registerTools, resetLayer } from '../src/acs/layer.js';
 import { bindingProfiles, confidenceFailure, type ProfileCore } from '../src/acs/profiles.js';
-import { actionRecord, readTrace } from '../src/acs/records.js';
+import { KEYS, actionRecord, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 import effective from '../../../tests/conformance/profiles/effective.json' with { type: 'json' };
 
@@ -587,6 +587,8 @@ describe("a nested call needs the composite's decisions valid when the profiles 
    * profiles given to `batch` or put in force by the layer; with `deep`,
    * `batch` reaches `store` through `inner` (invoke, no profiles of its
    * own). A person approves `batch` at T0, and `batch` runs at T0 + 55 s.
+   * The profiles raise `inner`'s approval for what `store` performs, as they
+   * raise `batch`'s, so two composites deep it is `inner` the lapse stops.
    */
   async function scenario(kind: Kind, where: Where, deep: boolean, work: number) {
     let T = 1_000_000;
@@ -619,6 +621,7 @@ describe("a nested call needs the composite's decisions valid when the profiles 
             },
           });
     const nested: ToolResult[] = [];
+    const inners: ToolResult[] = [];
     const inner = groundedTool({
       name: 'inner',
       capability: 'invoke',
@@ -642,7 +645,7 @@ describe("a nested call needs the composite's decisions valid when the profiles 
       approval: { expires_ms: 60_000 },
       execute: async (state) => {
         T += work;
-        if (deep) await state.invokeTool('inner', {});
+        if (deep) inners.push(await state.invokeTool('inner', {}));
         else nested.push(await state.invokeTool('store', { key: 'a' }));
         return { result: true, evidence_anchors: [] } as never;
       },
@@ -655,7 +658,7 @@ describe("a nested call needs the composite's decisions valid when the profiles 
     await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', T);
     T += 55_000;
     const result = await t.tools.get('batch')!.execute(t.state, {});
-    return { result, nested, stored, trace: await readTrace(t.state) };
+    return { result, nested, inners, stored, trace: await readTrace(t.state) };
   }
 
   const cases: [Kind, Where, boolean][] = [
@@ -670,9 +673,10 @@ describe("a nested call needs the composite's decisions valid when the profiles 
   for (const [kind, where, deep] of cases) {
     const label = `a ${kind} nested call${deep ? ' two composites deep' : ''}, the profiles the ${where}'s`;
     it(`refuses ${label}, made after the composite's approval lapsed`, async () => {
-      const { result, nested, stored, trace } = await scenario(kind, where, deep, 10_000);
+      const { result, nested, inners, stored, trace } = await scenario(kind, where, deep, 10_000);
       expect(result.status).toBe('success');
-      expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+      expect((deep ? inners : nested).map((r) => r.error_code)).toEqual(['F502']);
+      if (deep) expect(nested).toEqual([]);
       expect(stored).toBe(0);
       expect(trace.some((e) => e.action === 'store' && e.status === 'executed')).toBe(false);
     });
@@ -753,12 +757,14 @@ describe("the flags a composite's profiles raise reach a nested call that takes 
   });
 });
 
-describe("a plain nested call under a composite that took no token is held to the outer composite's profiles (§5.18.4, §5.21.3)", () => {
+describe("a composite that took no token is held, for its plain nested call, to the outer composite's profiles (§5.18.4, §5.21.3)", () => {
   // Security round 6: `outer`, whose profiles make persist need a person's
   // approval (or a checkpoint), invokes `middle` with arguments the runtime
-  // validates, so `middle` takes no token and, needing neither itself, runs
-  // with no approval and no checkpoint; it then invoked the plain `store`,
-  // which ran with neither.
+  // validates, so `middle` takes no token. The outer profiles raise
+  // `middle`'s own flags for what its nested `store` performs, as they raise
+  // `outer`'s, so `middle` asks for that approval (or uses a checkpoint)
+  // itself, and its decisions cover `store` while they still meet the raised
+  // requirement.
   afterEach(() => resetLayer());
   const passthrough = z.object({}).passthrough();
 
@@ -775,26 +781,38 @@ describe("a plain nested call under a composite that took no token is held to th
     profilePolicy: () => NO_RULES,
   });
 
-  async function scenario(what: 'person' | 'checkpoint', validated: boolean) {
+  /**
+   * `outer` (invoke, the profiles) invokes `middle` (invoke, its approval
+   * valid for a minute), which works `work` ms, then invokes the plain
+   * `store` (persist). With `validated`, the runtime gives `middle` its
+   * validated arguments, so it takes no token.
+   */
+  function setup(what: 'person' | 'checkpoint', validated: boolean, work = 0) {
+    let T = 1_000_000;
+    const now = () => T;
     const profiles = bindingProfiles(raising(what), [{ domain: 'd', version: '1.0.0' }]);
-    let stored = 0;
+    const counts = { stored: 0 };
     const store = defineTool({
       description: 'store',
       args: passthrough,
       annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'persist' } },
       execute: async () => {
-        stored += 1;
+        counts.stored += 1;
         return { status: 'success', result: JSON.stringify({ stored: true, evidence_anchors: [] }) };
       },
     });
     const nested: ToolResult[] = [];
+    const mids: ToolResult[] = [];
     const middle = groundedTool({
       name: 'middle',
       capability: 'invoke',
       invokes: { store } as never,
       description: 'middle',
       args: passthrough,
+      now,
+      approval: { expires_ms: 60_000 },
       execute: async (state) => {
+        T += work;
         nested.push(await state.invokeTool('store', { key: 'a' }));
         return { result: true, evidence_anchors: [] } as never;
       },
@@ -805,9 +823,10 @@ describe("a plain nested call under a composite that took no token is held to th
       invokes: { middle } as never,
       description: 'outer',
       args: passthrough,
+      now,
       profiles,
       execute: async (state) => {
-        await state.invokeTool('middle', {});
+        mids.push(await state.invokeTool('middle', {}));
         return { result: true, evidence_anchors: [] } as never;
       },
     });
@@ -816,6 +835,7 @@ describe("a plain nested call under a composite that took no token is held to th
       capability: 'checkpoint',
       description: 'save',
       args: passthrough,
+      now,
       execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
     });
     const t = memoryThread();
@@ -828,34 +848,131 @@ describe("a plain nested call under a composite that took no token is held to th
     t.tools.set('outer', outer as never);
     t.tools.set('save', save as never);
     registerTools({ store, middle, outer, save });
-    if (what === 'person') {
-      const asked = await t.tools.get('outer')!.execute(t.state, {});
-      expect(asked.error_code).toBe('F502');
-      await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', 2);
-    } else {
-      expect((await t.tools.get('save')!.execute(t.state, {})).status).toBe('success');
-    }
-    const result = await t.tools.get('outer')!.execute(t.state, {});
-    return { result, nested, stored };
+    const approve = async (digest: unknown) => {
+      await decideApproval(t.state, user('alice'), digest as string, 'approved', T);
+    };
+    /** Run `outer`, approving it first when it asks, or taking a checkpoint for it (and for `middle`). */
+    const runOuter = async (checkpoints = 1) => {
+      if (what === 'checkpoint') {
+        for (let i = 0; i < checkpoints; i += 1) expect((await t.tools.get('save')!.execute(t.state, {})).status).toBe('success');
+      } else {
+        const asked = await t.tools.get('outer')!.execute(t.state, {});
+        expect(asked.error_code).toBe('F502');
+        await approve(asked.error_data?.['digest']);
+      }
+      return t.tools.get('outer')!.execute(t.state, {});
+    };
+    const later = (ms: number) => {
+      T += ms;
+    };
+    return { t, nested, mids, counts, approve, runOuter, later };
   }
 
   for (const [what, code] of [
     ['person', 'F502'],
     ['checkpoint', 'F501'],
   ] as const) {
-    it(`refuses the plain call (${code}) when the profiles raise a ${what} requirement for it`, async () => {
-      const { result, nested, stored } = await scenario(what, true);
-      expect(result.status).toBe('success');
-      expect(nested.map((r) => r.error_code)).toEqual([code]);
-      expect(stored).toBe(0);
+    it(`refuses middle itself (${code}) when the profiles raise a ${what} requirement for what it invokes, then covers the plain call once middle has it`, async () => {
+      const s = setup(what, true);
+      expect((await s.runOuter()).status).toBe('success');
+      expect(s.mids.map((r) => r.error_code)).toEqual([code]);
+      if (what === 'person') expect(s.mids[0]?.error).toContain("person's approval");
+      expect(s.nested).toEqual([]);
+      expect(s.counts.stored).toBe(0);
+      if (what === 'person') await s.approve(s.mids[0]?.error_data?.['digest']);
+      expect((await s.runOuter(2)).status).toBe('success');
+      expect(s.mids.at(-1)?.status).toBe('success');
+      expect(s.nested.map((r) => r.status)).toEqual(['success']);
+      expect(s.counts.stored).toBe(1);
+      const trace = await readTrace(s.t.state);
+      const mid = trace.find((e) => e.action === 'middle' && e.status === 'executed')!;
+      expect(trace.find((e) => e.action === 'store')).toMatchObject({ status: 'executed', covered_by: mid.seq });
     });
 
     it(`covers the plain call when middle takes the token (${what}, control)`, async () => {
-      const { nested, stored } = await scenario(what, false);
-      expect(nested.map((r) => r.status)).toEqual(['success']);
-      expect(stored).toBe(1);
+      const s = setup(what, false);
+      expect((await s.runOuter()).status).toBe('success');
+      expect(s.nested.map((r) => r.status)).toEqual(['success']);
+      expect(s.counts.stored).toBe(1);
     });
   }
+
+  it("refuses the plain call made after middle's own approval lapsed", async () => {
+    const s = setup('person', true, 10_000);
+    await s.runOuter();
+    await s.approve(s.mids[0]?.error_data?.['digest']);
+    s.later(55_000);
+    expect((await s.runOuter()).status).toBe('success');
+    expect(s.mids.at(-1)?.status).toBe('success');
+    expect(s.nested.map((r) => r.error_code)).toEqual(['F502']);
+    expect(s.counts.stored).toBe(0);
+  });
+
+  for (const how of ['secrets', 'check'] as const) {
+    it(`marks the R407 entry of a nested call whose ${how === 'secrets' ? 'secrets could not be read' : 'checks could not be completed'} as requiring a person, when only the enclosing profiles require one`, async () => {
+      // `store` (grounded, persist) has no profiles of its own; `outer`'s
+      // make persist need a person, so every entry of the nested call
+      // carries `person_required`, the R407 ones too.
+      const profiles = bindingProfiles(raising('person'), [{ domain: 'd', version: '1.0.0' }]);
+      let failing = false;
+      const store = groundedTool({
+        name: 'store',
+        capability: 'persist',
+        description: 'store',
+        args: passthrough,
+        secrets: async () => {
+          if (failing && how === 'secrets') throw new Error('vault unreachable');
+          return [];
+        },
+        execute: async () => ({ stored: true, evidence_anchors: [] }),
+      });
+      const nested: ToolResult[] = [];
+      const outer = groundedTool({
+        name: 'outer',
+        capability: 'invoke',
+        invokes: { store } as never,
+        description: 'outer',
+        args: passthrough,
+        profiles,
+        execute: async (state) => {
+          failing = true;
+          try {
+            nested.push(await state.invokeTool('store', { key: 'a' }));
+          } finally {
+            failing = false;
+          }
+          return { result: true, evidence_anchors: [] } as never;
+        },
+      });
+      const t = memoryThread();
+      const getValue = t.state.getValue.bind(t.state);
+      // The store fails to read what has run while `store`'s checks run.
+      t.state.getValue = (async (key: string) => {
+        if (failing && how === 'check' && key === KEYS.executed) throw new Error('read failed');
+        return getValue(key);
+      }) as typeof t.state.getValue;
+      t.tools.set('store', store as never);
+      t.tools.set('outer', outer as never);
+      registerTools({ store, outer });
+      const asked = await t.tools.get('outer')!.execute(t.state, {});
+      expect(asked.error_code).toBe('F502');
+      await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', 2);
+      expect((await t.tools.get('outer')!.execute(t.state, {})).status).toBe('success');
+      expect(nested.map((r) => r.error_code)).toEqual(['R407']);
+      const entry = (await readTrace(t.state)).find((e) => e.action === 'store');
+      expect(entry).toMatchObject({ code: 'R407', status: how === 'secrets' ? 'refused' : 'failed', person_required: true });
+    });
+  }
+
+  it("covers the plain call made while middle's own approval is valid (control)", async () => {
+    const s = setup('person', true, 1_000);
+    await s.runOuter();
+    await s.approve(s.mids[0]?.error_data?.['digest']);
+    s.later(55_000);
+    expect((await s.runOuter()).status).toBe('success');
+    expect(s.nested.map((r) => r.status)).toEqual(['success']);
+    expect(s.counts.stored).toBe(1);
+  });
 });
 
 describe('the call vectors (tests/conformance/profiles/effective.json, §5.21.3)', () => {

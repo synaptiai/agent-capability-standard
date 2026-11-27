@@ -1537,6 +1537,36 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       config_sha256,
     })));
 
+  /**
+   * The flags and person requirement the profiles of the composites
+   * enclosing a call raise (§5.21.3): for each capability it performs, at
+   * its effective risk, and for what its nested calls perform, at their own,
+   * as the tool's own profiles raise them (`applied` above). A composite
+   * that takes no token is so held to them for its nested calls too.
+   */
+  const raisedFor = (profiles: readonly BindingProfiles[]): { flags: SafetyFlags; person: boolean } => {
+    let joined = raisedBy(profiles, capabilities, { ...options.flags, risk });
+    for (const performed of nested) {
+      const more = raisedBy(profiles, [performed.capability], { risk: performed.risk });
+      joined = { flags: joinFlags(joined.flags, more.flags), person: joined.person || more.person };
+    }
+    return joined;
+  };
+
+  /**
+   * Whether a call made now needs a person (§5.21.3): its own profiles', or
+   * those of the composites whose invocation of the tool is pending. For an
+   * entry written when the checks could not complete; if the profiles
+   * cannot be read either, the tool's own requirement.
+   */
+  const personNow = (profiles: readonly BindingProfiles[]): boolean => {
+    try {
+      return person || raisedFor(profiles).person;
+    } catch {
+      return person;
+    }
+  };
+
   /** What every entry of this tool's call names: the tool, its capability and where the call was made. */
   const identityOf = (state: ThreadState) => {
     const flow = flowOf(state);
@@ -1566,18 +1596,21 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     let layerRecord: RecordedBy | undefined;
     // The rules of every composite whose invocation of this tool is pending
     // (`pendingRules`): their profiles raise this call's flags and person
-    // requirement for what it performs, as they raised the composites' own
-    // (§5.21.3), whether or not the call takes a token.
+    // requirement for what it performs and what its own nested calls
+    // perform (`raisedFor`), as they raised the composites' own (§5.21.3),
+    // whether or not the call takes a token.
     const rules = pendingRules(state.threadId, name, definition);
     // The composite whose state this call may have been made through: its
     // entries wait for a hook only while that composite's does (records.ts).
     let under = pendingUnder(state.threadId, flow, name, definition);
+    // Whether the call needs a person, once the profiles are read.
+    let needPerson: boolean | undefined;
     try {
       const recorded_by = await recordedBy();
       layerRecord = recorded_by;
-      const raised = raisedBy(rules.profiles, capabilities, { ...options.flags, risk });
+      const raised = raisedFor(rules.profiles);
       const need = joinFlags(flags, raised.flags);
-      const needPerson = person || raised.person;
+      needPerson = person || raised.person;
       // §5.18.7: no decision can bind to arguments that are not I-JSON
       // (§5.14), so a call that needs approval with such arguments is
       // refused with F502, not left to fail as the layer's own error.
@@ -1903,10 +1936,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // no approval or checkpoint is spent without a trace entry; if the
       // store refuses that too, there is nothing more to do.
       const message = cause instanceof Error ? cause.message : String(cause);
+      const personRequired = needPerson ?? personNow(rules.profiles);
       await appendTrace(
         state,
         {
           ...identity,
+          ...(personRequired ? { person_required: true as const } : {}),
           ...used,
           ...(layerRecord !== undefined ? { recorded_by: layerRecord } : {}),
           at: now(),
@@ -1951,10 +1986,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       await serially(state.threadId, async () => {
         const recorded_by = await recordedBy().catch(() => undefined);
         const args_digest = await digestOf(args as Json).catch(() => undefined);
+        const personRequired = personNow(pendingRules(state.threadId, name, definition).profiles);
         await appendTrace(
           state,
           {
             ...identityOf(state),
+            ...(personRequired ? { person_required: true as const } : {}),
             ...(args_digest !== undefined ? { args_digest } : {}),
             ...(recorded_by !== undefined ? { recorded_by } : {}),
             at: now(),
