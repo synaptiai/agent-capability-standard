@@ -1907,7 +1907,7 @@ here and marked so.
 
 ### Added
 - Standard 1.2.0 (Candidate Standard), `spec/STANDARD-v1.2.0.md`, with
-  capability ontology 2.2.0, accepted by RFC-0005 to RFC-0010 (RFC-0002
+  capability ontology 2.2.0, accepted by RFC-0005 to RFC-0011 (RFC-0002
   stays a Draft). Appendix D lists every change from 1.1.0 and
   `spec/CHANGELOG.md` summarises them; the entries below follow the RFCs.
   Ontology 2.2.0 is additive (§11.6, which now says how the ontology is

@@ -575,7 +575,7 @@ its shell-like tools the worst case and takes checkpoints by another route.
    false`) and `filesystem.allowWrite` each took effect over the user's
    strict sandbox; `allowUnsandboxedCommands: true`, `strictAllowlist:
    false`, an `allowedDomains` entry and an `Edit` allow rule over a deny
-   rule had no effect. Only managed settings rank above a project's file.
+   rule had no effect. Only managed settings can stop the three overrides.
    So a layer's setup writes the settings to the user's file
    (`/grounded-setup`, #179), and a layer reads the project's and the local
    files as well, to detect the three overrides (#180, and the adapter's
@@ -605,11 +605,13 @@ its shell-like tools the worst case and takes checkpoints by another route.
 5. **Linux and other permission modes.** **Partly answered.** The sandbox
    runtime that Claude Code uses on Linux (srt 0.0.82, bubblewrap) refused
    every write, credential and network route of the boundary tests, in
-   containers and in CI on `ubuntu-latest` on 2026-11-27, except a hard
-   link made before a command starts, which both Seatbelt and bubblewrap
-   let through and the layers refuse instead. Under Claude Code 2.1.332 on
-   macOS the routes Claude Code decides itself (the escape argument,
-   excluded commands, the precedence of settings files, the network
-   callback) were tested in the default, `acceptEdits` and
-   `bypassPermissions` modes. Claude Code itself has not been run on Linux,
-   and `plan` mode has not been tested. Open: #186.
+   containers and in CI on `ubuntu-latest` on 2026-11-27 (601 passed, 2
+   expected failures), except a hard link made before a command starts,
+   which both Seatbelt and bubblewrap let through and the layers refuse
+   instead. Under Claude Code 2.1.332 on macOS, the routes Claude Code
+   decides itself were tested with the setup's settings given at start in
+   the default, `acceptEdits` and `bypassPermissions` modes (the escape
+   argument, excluded commands, the network allowlist), and with them in
+   the user's settings in `bypassPermissions` mode only (the precedence of
+   settings files). Claude Code itself has not been run on Linux, and
+   `plan` mode has not been tested. Open: #186.
