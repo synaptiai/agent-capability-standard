@@ -791,11 +791,14 @@ Unless anonymity is requested.
 - [ ] Trust model is configured appropriately
 - [ ] Approval workflows are defined for high-risk actions
 
-Encryption of the audit log and the other records at rest is the
-operator's storage choice. The records hold no secrets
+Encryption at rest of the audit log and the other records is the
+operator's storage choice. Audit and evidence records hold no secret the
+layer recognises
 ([STANDARD 1.2.0 §6.7](STANDARD-v1.2.0.md#67-secrets-in-records)), and
 the plugin's log keeps a SHA-256 digest of each tool input in place of the
-input (§5.2). Who may read the audit files is tracked in
+input (§5.2). Checkpoints copy the files in their scope, so where those
+files hold confidential data, the operator keeps the checkpoint store on
+storage they protect. Who may read the audit files is tracked in
 [#173](https://github.com/synaptiai/agent-capability-standard/issues/173).
 
 ---
@@ -809,8 +812,9 @@ Shipped in part:
 - **Keyed checkpoint records.** The plugin enters each checkpoint's commit
   with the HMAC-SHA-256 of the commit under a per-project key, and a
   rollback accepts only such an entry (§5.1). The SDK's snapshot store
-  keeps a SHA-256 digest of each checkpoint's files in its manifest, with
-  no key. An executor's saved run is refused when its MAC under the key the
+  keeps a SHA-256 digest of each checkpoint's files in its manifest;
+  neither the manifest nor the checkpoint tracker's state is keyed, and
+  the tracker's state holds no digest. An executor's saved run is refused when its MAC under the key the
   host gives does not verify (HMAC-SHA-256 in the reference executor,
   [STANDARD 1.2.0 §5.19.4](STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)).
   Not provided: a signature that a party without the key can verify.

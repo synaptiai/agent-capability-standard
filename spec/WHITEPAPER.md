@@ -801,13 +801,13 @@ The `capability_gap_analysis` workflow:
 
 **Semantic Validation**: We validate structural correctness, not semantic correctness. A syntactically valid workflow can still do the wrong thing.
 
-**Prompt Injection**: The standard provides structure but not content filtering. Prompt injection defense requires additional runtime measures.
+**Prompt Injection**: The layers that implement Standard 1.2.0 enforce person-only approval of tool calls, destination policies and the always-ask mark, but no rule yet stops content a step reads from steering the model within what those checks allow; see [SECURITY.md §2.2.1](SECURITY.md#221-prompt-injection).
 
 ### 10.2 Future Directions
 
 The security roadmap is kept in [SECURITY.md §9.1](SECURITY.md#91-planned-enhancements), which says for each item what ships and what is planned. In summary:
 
-- **Checkpoint integrity**: shipped in part. The plugin's checkpoint records and an executor's saved runs are keyed with HMAC-SHA-256; a signature that a party without the key can verify is planned.
+- **Checkpoint integrity**: shipped in part. The plugin's checkpoint records are keyed with HMAC-SHA-256, and an executor refuses a saved run whose MAC does not verify under a key the host gives; a signature that a party without the key can verify is planned.
 - **Multi-party approval**: shipped in part. `min_approvers` and an approver `role` are part of Standard 1.1.0 and 1.2.0, and the reference executor and the Standard Agents binding count distinct approvers. The SDK adapter and the plugin's hooks decide through the host's permission prompt, one person per call.
 - **Allowed capabilities per deployment**: planned. An approval `role` restricts who decides, but no layer yet refuses a call because its capability is outside a deployment's allowed set.
 - **Anomaly detection**: planned, over the audit records the layers already write.
