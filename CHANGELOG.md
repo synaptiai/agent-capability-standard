@@ -2409,7 +2409,12 @@ here and marked so.
   only, Python 3.9 or later, run as `/usr/bin/env -i /usr/bin/python3 -I`
   so that a project's settings cannot choose the interpreter),
   which also prints the settings alone for managed settings
-  (`hooks/README.md`, "Setting up the sandbox").
+  (`hooks/README.md`, "Setting up the sandbox"). The write runs from a
+  terminal outside Claude Code: before the strict sandbox is on, the
+  pre-tool-use hook refuses every Bash call, so the command gives the
+  script's `apply` line to run there, and once it is on, the sandbox
+  keeps commands from writing the user configuration directory. Claude
+  Code is started again after the write.
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only

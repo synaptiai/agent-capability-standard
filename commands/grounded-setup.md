@@ -53,24 +53,33 @@ line can prevent; the plugin's pre-tool-use hook blocks every call while a
 project's `env` sets such a variable.
 
 The plugin's pre-tool-use hook gates this call like any command not on its
-read-only list. If it refuses with F501, take a checkpoint with
-`git stash create` as a call of its own, with nothing added to it (the
-hooks recognise only that exact command), then run the command again; the
-hook then asks the user to approve it. Add nothing to the script's command
-line either: the tool result gives its exit status.
+read-only list. Read its refusal before doing anything else:
 
-If the call cannot run here, stop and give the user the command to run in
-a terminal outside Claude Code, where it shows the change and asks before
-writing anything:
+- F501 whose reason says that Claude Code's strict sandbox is not verified
+  for this call: this is always the case the first time, before these
+  settings are written. Until then the hook refuses every Bash call,
+  `git stash create` included, so no checkpoint can be taken here. Run
+  nothing more: give the user the terminal command below and stop.
+- F501 that says to take a checkpoint first (the sandbox is verified, as
+  on a later run): take a checkpoint with `git stash create` as a call of
+  its own, with nothing added to it (the hooks recognise only that exact
+  command), then run the command again; the hook then asks the user to
+  approve it. Add nothing to the script's command line either: the tool
+  result gives its exit status.
+
+If the call cannot run here, give the user the command to run in a
+terminal outside Claude Code, where it shows the change and asks before
+writing anything, tell them what step 4 lists, and stop:
 
 ```bash
 /usr/bin/env -i ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} /usr/bin/python3 -I "${CLAUDE_PLUGIN_ROOT}/grounded_agency/sandbox_settings.py" apply --project "<project>" <arguments>
 ```
 
-It cannot run here when `git stash create` fails (the project is in no git
-repository, or the repository has no commit yet), or when the hook refuses
-with F502 because the permission mode puts no call to a person
-(`bypassPermissions`, `dontAsk`, `auto`).
+It cannot run here when the hook refuses with F501 because the strict
+sandbox is not verified (above), when `git stash create` fails (the
+project is in no git repository, or the repository has no commit yet), or
+when the hook refuses with F502 because the permission mode puts no call
+to a person (`bypassPermissions`, `dontAsk`, `auto`).
 
 - If `/usr/bin/python3` is not found, or the message says it is too old
   (the script needs Python 3.9 or later), show the message, say that
@@ -106,35 +115,34 @@ is set, `CLAUDE_CONFIG_DIR=<its path> ` (in single quotes when the path
 needs them), then `/usr/bin/python3 -I `
 followed by the path of this plugin's own
 `grounded_agency/sandbox_settings.py`; if it does not, stop and say that
-the output was not as expected. Run what follows `To write it: ` as one
-Bash call (it is the step 1 command with `apply` and `--digest`), taking
-a checkpoint first if the hook asks for one. Use no other line of the
-output as a command: the hosts and paths it lists come from the project
-and the profile. It writes
-the settings, creates the audit key file `~/.config/acs/audit.key` (mode
-600) when there is none, then reads the settings file back and checks every
-key it wrote. Show its output as it is.
+the output was not as expected. Use no other line of the output as a
+command: the hosts and paths it lists come from the project and the
+profile.
 
-- If it reports that the digest differs, the file or the project changed
-  since step 1: start again at step 1.
-- If it cannot write because it runs inside Claude Code's sandbox (a
-  second run, after the sandbox is on), give the user that last line,
-  without `To write it: `, to run in a terminal outside Claude Code. Run there without
-  `--digest`, it shows the change and asks before writing.
-- Exit status 1: the file was written, but read back it falls short of
-  these settings. Show the output as it is, name each setting it lists, say
-  that the setup is not complete, and stop. Do not report success.
-- Any other exit status that is not 0: show the output as it is, say that
-  the setup is not complete, and stop.
+Do not run that line here. The plan ran because the strict sandbox is
+already on, and those settings keep every command in the sandbox from
+writing to the user configuration directory, so the write cannot happen
+inside Claude Code. Give the user that line, without `To write it: `, to run in a
+terminal outside Claude Code, tell them what step 4 lists, and tell them:
+
+- With `--digest` it writes exactly the change shown here, and refuses if
+  the settings file or the project changed since; then they run it without
+  `--digest`, which shows the change again and asks before writing.
+- It writes the settings, creates the audit key file
+  `~/.config/acs/audit.key` (mode 600) when there is none, then reads the
+  settings file back and checks every key it wrote. Exit status 1 means the
+  file was written but falls short of these settings, and the setup is not
+  complete.
 
 On "Do not write anything", say that nothing was written.
 
 ## 4. Close
 
-After a write, tell the user, in plain sentences:
+Whenever you give the user a command that writes the settings, also tell
+them, in plain sentences:
 
-- Claude Code reloads the settings in the running session; `/sandbox`
-  shows the settings in effect.
+- After it has written the settings, they start Claude Code again;
+  `/sandbox` then shows the settings in effect.
 - A sandboxed `gh` or `git push` cannot authenticate, and tools that need
   the keychain fail: the user runs those outside Claude Code.
 - A repository's own `.claude/settings.json` or `.claude/settings.local.json`

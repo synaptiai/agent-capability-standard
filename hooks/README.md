@@ -724,9 +724,10 @@ approval. Without the strict sandbox no checkpoint can be taken through
 Bash, so every gated call is refused with `F501 CHECKPOINT_REQUIRED:`,
 whose reason lists why the sandbox is not verified (up to six reasons).
 The hook also refuses the agent's own edits to the settings files, so the
-person adds the settings below to their user settings file, with the
-`/grounded-setup` command (below) or by hand, and starts Claude Code
-again.
+person adds the settings below to their user settings file outside the
+session, with the setup script run from a terminal (Setting up the sandbox,
+below; `/grounded-setup` prints the command) or by hand, and starts Claude
+Code again.
 
 The hook reads the settings files Claude Code reads, with `jq`:
 
@@ -915,7 +916,9 @@ What the hook cannot see, so cannot detect:
 A plugin cannot change your settings itself. The `/grounded-setup` command
 turns on Claude Code's sandbox as the boundary the hooks rely on, in your
 user settings (`~/.claude/settings.json`, or `settings.json` in the
-directory `CLAUDE_CONFIG_DIR` names). Run it in Claude Code, in the project:
+directory `CLAUDE_CONFIG_DIR` names). Run it in Claude Code, in the
+project; the first time, it gives you a command to run in a terminal
+(below):
 
 ```text
 /grounded-setup [--profile <domain profile file>] [--allow-domain <host>]...
@@ -973,12 +976,18 @@ denied.
 - `settings` prints the computed settings alone, as JSON, for managed
   settings or `--settings`.
 
-Within Claude Code, each run of the script is a Bash call the pre-tool-use
-hook gates: it needs a checkpoint (`git stash create`) and your approval.
-Where neither can be had (a project in no git repository or with no commit
-yet, or a permission mode that puts no call to a person, such as
-`bypassPermissions`), the command gives you the `apply` line to run in a
-terminal instead; there, without `--digest`, it shows the change and asks.
+The first setup runs from a terminal. Until the strict sandbox is on, the
+pre-tool-use hook refuses every Bash call, `git stash create` included
+(The strict sandbox, above), so the command can run nothing and gives you
+the `apply` line to run in a terminal outside Claude Code; there, without
+`--digest`, it shows the change and asks. On a later run, with the sandbox
+on, the plan is a Bash call the hook gates: it needs a checkpoint
+(`git stash create`) and your approval, and where neither can be had (a
+project in no git repository or with no commit yet, or a permission mode
+that puts no call to a person, such as `bypassPermissions`) the command
+gives you the `apply` line instead. The write itself always runs in a
+terminal: the sandbox keeps every command in it from writing to the user
+configuration directory. Start Claude Code again after a write.
 
 ### What it writes
 

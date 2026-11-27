@@ -190,8 +190,11 @@ This gives you:
 - `/grounded-setup`, which turns on Claude Code's strict sandbox in your user settings
 
 Then run `/grounded-setup` in Claude Code, in each project you use the
-plugin in. It shows the settings it would add to `~/.claude/settings.json`
-as a diff and writes them only when you agree: the sandbox on with no way
+plugin in. Until the sandbox is on, the hooks refuse every Bash call, so
+the first time it gives you a command to run in a terminal outside Claude
+Code, and the write always happens there; start Claude Code again after
+it. That command shows the settings it would add to
+`~/.claude/settings.json` as a diff and writes them only when you agree: the sandbox on with no way
 around it, a network allowlist (the hosts your domain profile's
 `allowed_destinations` name, given with `--profile`, and the package
 registries your project uses), deny rules that keep the agent's commands
