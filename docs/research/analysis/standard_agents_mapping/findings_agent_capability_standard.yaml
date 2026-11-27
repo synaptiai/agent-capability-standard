@@ -3084,6 +3084,10 @@ questions:
   - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 839-844)
   - docs/guides/ORCHESTRATION_EXTENSIONS.md 'Triggers (`triggers@1`)' (lines 68-69)
   - grounded_agency/workflows/runner.py start() (line 240)
+  - spec/STANDARD-v1.2.0.md §5.10.2 Evaluating Triggers (lines 1289-1291)
+  - spec/STANDARD-v1.2.0.md §5.14 Approval, Attendance (lines 1701-1708)
+  - docs/guides/ORCHESTRATION_EXTENSIONS.md 'Triggers (`triggers@1`)' (lines 84-101)
+  - grounded_agency/workflows/runner.py start() (line 805), resume() (line 926)
   depends: Whether a guard asks a `human` approver and waits, or applies `when_unattended` at once (F502
     by default). On Standard Agents a human-backed side shows that someone can answer, not that someone
     is there.

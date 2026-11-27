@@ -30,7 +30,10 @@ meta:
       side, no file under content/ changed between the commit above and this one, and the passages the rows
       quote from the published types are unchanged in 0.45.13. Outside content/, AGENTS.md, package.json,
       public/_redirects and tests/ changed in ways no row relies on; their line numbers in the rows refer
-      to the commit above.'
+      to the commit above. The two findings files are kept as the same record: their refs cite the versions
+      and commits above. An `answer` or `outcome` added later cites Standard 1.2.0 or the texts under
+      tasks/standard-agents-upstream/, and a question answered later lists the 1.2.0 locations of its answer
+      after its original refs.'
   relations:
     same: The two concepts mean the same thing.
     partial: One covers part of the other.

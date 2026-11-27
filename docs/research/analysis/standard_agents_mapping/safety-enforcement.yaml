@@ -28,7 +28,10 @@ changes_in_1_2_0:
 - row: appr-02
   sections: '§5.14, §5.10.2, §5.14.1'
   effect: 'A human approver is never asked in an unattended run in either mode, the host gives the
-    attendance of a run no trigger started, and a deferred run can be resumed.'
+    attendance of a run no trigger started, and a deferred run can be resumed. For a run no trigger started,
+    the guidance that answers ACS-Q10 replaces the row''s default to unattended: the host starts the run
+    attended when a person can answer within `expires` through a human-backed side or the authenticated
+    approval endpoint, and an approval given later through the endpoint is then an attended answer.'
 - row: appr-03
   sections: '§5.17'
   effect: 'With `identity@1`, approvers are counted by principal and checked against the requested kind
