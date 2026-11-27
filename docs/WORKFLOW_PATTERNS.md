@@ -467,9 +467,10 @@ tainted_input_gate:
     8. audit(flagged, allowed, sent, confirmed) → record
 ```
 
-The structure enforces some of the pattern's checks, and a model judges the others:
+The workflow's author makes one of the pattern's choices, the structure enforces some of its checks, and a model judges the others:
 
-- **Enforced.** The destination is bound from the workflow's inputs, never from a reference to the retrieved content. The payload is derived from the content, which is why the second `constrain` step checks it. The send needs a checkpoint and an approval that shows the destination and the payload; a step with no `approval` field, as in the example, is asked of a person ([STANDARD 1.2.0 §5.14](../spec/STANDARD-v1.2.0.md#514-approval)); on a tool-calling host only a person decides ([§5.18.7](../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)). With a destination policy in force, a send to a destination it does not allow fails with F504 before anyone is asked ([§4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)). The gate on the send stops the run unless the second `constrain` step reported `compliant: true`.
+- **Authored.** The workflow binds the destination from its inputs, never from a reference to the retrieved content. No layer checks where a binding comes from: a destination policy ([STANDARD 1.2.0 §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)) limits where a send may go, whatever the binding. The payload is derived from the content, which is why the second `constrain` step checks it.
+- **Enforced.** The send needs a checkpoint and an approval that shows the destination and the payload; a step with no `approval` field, as in the example, is asked of a person ([STANDARD 1.2.0 §5.14](../spec/STANDARD-v1.2.0.md#514-approval)); on a tool-calling host only a person decides ([§5.18.7](../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)). With a destination policy in force, a send to a destination it does not allow fails with F504 before anyone is asked ([§4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)). The gate on the send stops the run unless the second `constrain` step reported `compliant: true`.
 - **Judged.** Both `constrain` steps are checks a model makes, and the first one reads the untrusted content itself, so injected text can mislead it. They lower the chance that injected text reaches the output. They do not replace the enforced checks.
 
 ```mermaid
@@ -477,14 +478,18 @@ The structure enforces some of the pattern's checks, and a model judges the othe
 title: Tainted input gate
 ---
 flowchart TB
-  accDescr: Retrieved content is checked by constrain and used only as data by generate; a second constrain checks the output and the destination the person gave; the send needs a checkpoint and a person's approval and does not run when the check failed; verify checks the effect and audit records it.
+  accDescr: Retrieved content goes to generate as data, with the text a first constrain step flagged; the person's purpose goes to generate and the person's destination goes to the second constrain step and to the send; the second constrain checks the output and the destination; the checkpoint is taken either way; the gate on the send stops the run when the check failed, and otherwise the send runs after a person's approval; verify checks the effect and audit records it.
   src["retrieve: untrusted content"] -->|data| c1["constrain: flag text addressed to the agent"]
-  c1 --> gen["generate: output"]
-  person["Person: purpose, destination"] --> gen
-  gen --> c2{"constrain: output and destination"}
-  c2 -->|not compliant| stop["Stop: nothing is sent"]
-  c2 -->|compliant| cp["checkpoint"]
-  cp --> act["send, after approval"]
+  src -->|data| gen["generate: output"]
+  c1 -->|flagged| gen
+  purpose["Person: purpose"] --> gen
+  gen --> c2["constrain: output and destination"]
+  dest["Person: destination"] --> c2
+  c2 --> cp["checkpoint"]
+  cp --> g{"gate on send: compliant?"}
+  g -->|no| stop["Stop: nothing is sent"]
+  g -->|yes| act["send, after approval"]
+  dest --> act
   act --> ver["verify, audit"]
 ```
 
