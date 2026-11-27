@@ -25,16 +25,82 @@ the Python SDK, the plugin, the Standard Agents binding or the TypeScript
 package, by component. A change described under Changed or Fixed is named
 here and marked so.
 
+**Before you upgrade.** The changes most likely to stop or change a setup
+that works with v2.0.0, each linked to its entry below.
+
+- Python 3.14 or newer is required, and Rust 1.88 or newer to build from
+  source ([requirements](#upgrade-requirements)).
+- The slash commands `/gap-analysis-workflow` and
+  `/digital-twin-sync-workflow` are now `/capability-gap-analysis` and
+  `/digital-twin-sync-loop` ([renamed skills](#upgrade-renamed-skills)).
+- The plugin's PreToolUse hook runs for every tool. `Skill`, `Agent`, `Task`
+  and every tool the SDK mapper does not map (MCP tools, `Monitor`,
+  `PowerShell`, `ExitWorktree`, ...) are a gated `mutate`: each call uses up
+  its own checkpoint marker (F501 without one) and is asked for approval
+  (F502) in the permission modes default, acceptEdits and plan, and blocked
+  with F502 in the others unless `ACS_HOOK_APPROVAL=off`
+  ([every tool](#upgrade-every-tool), [one marker per call](#upgrade-jq-marker)).
+- Without Claude Code's strict sandbox, every Bash call is a gated `mutate`,
+  read-only commands and `git stash create` included, so no checkpoint
+  marker can be taken and every gated call is refused with F501. Add the
+  settings `hooks/README.md` lists under "The strict sandbox" to
+  `~/.claude/settings.json` outside Claude Code, then start it again
+  ([strict sandbox](#upgrade-strict-sandbox)).
+- While the project's `.claude/settings.json` or
+  `.claude/settings.local.json` sets in `env` a hook setting or any variable
+  other than Claude Code's own (for example `NODE_ENV` or `PATH`), or cannot
+  be read, every call is blocked with R407. Move such an entry to
+  `~/.claude/settings.json`, managed settings or the environment
+  ([project settings](#upgrade-project-env)).
+- While a file under the git directory's `acs/` has a hard link outside the
+  records, the hook blocks every call with F504; while another of the
+  project's records has one, it blocks every call it does not let pass
+  outright. Remove the link outside the session. Counting links needs perl,
+  or `find`, `awk` and a GNU or BSD `stat` (R407 without them)
+  ([hard links](#upgrade-record-links)).
+- The hooks need `jq` (R407 without it). Without `openssl` the take hook
+  writes no checkpoint marker, so every gated call is refused with F501, and
+  the log hook writes its lines unsigned ([jq](#upgrade-jq-marker),
+  [checkpoint entries](#upgrade-earlier-checkpoints),
+  [audit key](#upgrade-audit-key)).
+- Checkpoints taken before the upgrade restore only as a gated `mutate`
+  ([earlier checkpoints](#upgrade-earlier-checkpoints)).
+- The log hook signs with the key in `~/.config/acs/audit.key`, else
+  `AUDIT_HMAC_KEY`, and derives no key from the host name: with neither, it
+  writes its lines unsigned. A log v2.0.0 wrote has no head and is signed
+  with `AUDIT_HMAC_KEY` or the host-name key: outside Claude Code, move
+  `.claude/audit.log` aside and verify it with `tools/verify_audit_log.py
+  --no-head --hmac-key` and that key. The audit skill's
+  `.claude/audit/records.jsonl` verifies with `--no-head --hmac-key
+  "$AUDIT_HMAC_KEY"`; lines v2.0.0 wrote there carry no chain
+  ([audit key](#upgrade-audit-key), [audit head](#upgrade-audit-head),
+  [audit skill](#upgrade-audit-records)).
+- Python SDK: a tool the mapper does not know is the strictest case (a
+  checkpoint and approval), and `GroundedAgentConfig.approval` defaults to
+  `"ask"`. Register an MCP tool with its real capability, and set
+  `approval="off"` for the earlier approval behaviour
+  ([Python SDK tools](#upgrade-sdk-tools)).
+- Runs of 1.1 workflows can end differently. An approved step that fails has
+  a `failed` record, with its code, from the moment it fails, also when its
+  failure mode's rollback or checkpoint then fails (F503, F501) or finds no
+  checkpoint to roll back to, where v2.0.0 left the record `approved`. The
+  1.1 runtime fixtures `records_failure_rollback_fails` and
+  `records_failure_nothing_to_roll_back` show it: on the v2.0.0 executor
+  both end with F503 and the step's record `approved`; now that record is
+  `failed` with code R402. A version-1 snapshot of a run in progress
+  restores with the record members 1.2 adds
+  ([failed record](#upgrade-failed-record), [snapshots](#upgrade-snapshots)).
+
 **Requirements.**
 
-- Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
+- <a id="upgrade-requirements"></a>Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
   are no longer supported. The extension's stable-ABI floor is 3.14.
 - Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
   0.11 requires it.
 
 **Python SDK: tool calls and the adapter (Standard 1.2.0 §5.18).**
 
-- Python SDK: a tool the mapper does not know is now the strictest case (a
+- <a id="upgrade-sdk-tools"></a>Python SDK: a tool the mapper does not know is now the strictest case (a
   high-risk mutation that needs a checkpoint and approval), not `observe`;
   register an MCP tool with its real capability. `GroundedAgentConfig.approval`
   defaults to `"ask"`, so a call whose capability requires approval (Write,
@@ -911,7 +977,7 @@ here and marked so.
   a state with deferrals that an earlier version saved still restores, but
   cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
   new one. The state of a run that never deferred holds neither.
-- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
+- <a id="upgrade-snapshots"></a>Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
   version 2. The terminal action is derived from the state rather than
   stored with copies of the records and outputs, every action carries
   `run_id`, and the state may hold the record mode and the chain heads of
@@ -932,7 +998,7 @@ here and marked so.
   one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
   `header`, `records`, `profiles`, `grounding` and `destinations`, which
   every construction names. `WorkflowRunner` states the header itself.
-- Reference executor: an approved step that fails now has a `failed` record,
+- <a id="upgrade-failed-record"></a>Reference executor: an approved step that fails now has a `failed` record,
   with the step's code, from the moment it fails, before its failure modes
   run, and also when its failure mode's rollback or checkpoint then fails
   (F503, F501) or finds no checkpoint to roll back to; 1.1 left that record
@@ -941,7 +1007,11 @@ here and marked so.
   `take_records` for the rest of the run. A host that reads the records
   while a failure mode's checkpoint or rollback is pending sees `failed`
   where it saw `approved`. A record a resumed run reuses no longer keeps the
-  `checkpoint_id` of an earlier pass.
+  `checkpoint_id` of an earlier pass. The 1.1 runtime fixtures
+  `records_failure_rollback_fails` and `records_failure_nothing_to_roll_back`
+  end this way: on the v2.0.0 executor both end with F503 and the step's
+  record `approved`, without a code; now that record is `failed` with code
+  R402.
 - Validator: an `audit` step's literal `retention` outside the duration
   grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
   1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
@@ -993,14 +1063,14 @@ here and marked so.
 
 **Plugin: hooks and skills (released with plugin 3.0.0).**
 
-- **Breaking (plugin):** two composed skills take their directory names
+- <a id="upgrade-renamed-skills"></a>**Breaking (plugin):** two composed skills take their directory names
   (Agent Skills requires `name` to equal the directory): the slash commands
   `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
   `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
   release that carries this is a MAJOR version (3.0.0). No workflow,
   ontology or schema changes. The `layer` frontmatter key is removed from
   the 13 skills that had it (the ontology gives a capability's layer).
-- Plugin hooks (released with plugin 3.0.0, Changed): without Claude
+- <a id="upgrade-strict-sandbox"></a>Plugin hooks (released with plugin 3.0.0, Changed): without Claude
   Code's strict sandbox, every Bash call needs a checkpoint and approval,
   read-only commands included, and `git stash create` and a restore are
   gated calls too, so no checkpoint can be taken through Bash and every
@@ -1013,14 +1083,14 @@ here and marked so.
   local file that turns the sandbox off, excludes a command, widens what it
   can write or read, or names a command that runs outside it turns the
   relaxation off.
-- Plugin hooks (released with plugin 3.0.0, Added): while a file under the
+- <a id="upgrade-record-links"></a>Plugin hooks (released with plugin 3.0.0, Added): while a file under the
   git directory's `acs/` has a hard link outside the records, the
   PreToolUse hook blocks every call with F504, reads included; while a file
   of the project's records has one, it blocks every call it does not let
   pass outright. Remove the other link outside the session. The hook needs
   perl, or `find`, `awk` and a GNU or BSD `stat`, to count the links (R407
   without them, or when a directory of the records cannot be read).
-- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
+- <a id="upgrade-jq-marker"></a>Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
   gated call it authorises, so each such call needs its own; a successful
@@ -1066,7 +1136,7 @@ here and marked so.
   unique-local literals, and an IPv4 host in another form (`127.1`,
   `2130706433`, `0x7f000001`).
 - Plugin hooks, fail-closed fixes (released with plugin 3.0.0):
-  - The PreToolUse hook is registered for every tool (matcher `*`), with
+  - <a id="upgrade-every-tool"></a>The PreToolUse hook is registered for every tool (matcher `*`), with
     `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
     cannot start or times out blocks the call where Claude Code supports
     that setting. A tool the SDK mapper maps to a capability that needs
@@ -1082,7 +1152,7 @@ here and marked so.
   - A Bash command over 4096 bytes is gated before it is trimmed or read: a
     command padded with blanks (50,000 trailing ones took 44 seconds to
     trim) can no longer hold the hook past its time limit.
-  - The commits a rollback may restore are entered in the project's git
+  - <a id="upgrade-earlier-checkpoints"></a>The commits a rollback may restore are entered in the project's git
     directory (`<git dir>/acs/checkpoints/commits/`), outside the work tree,
     and a restore must run in the project's repository: an entry or a
     marker a cloned repository ships no longer lets `git stash apply` run
@@ -1338,7 +1408,7 @@ here and marked so.
     gets these prompts; set it in the global configuration instead. The
     take hook's clean-tree check turns the repository's own filters off. A
     Bash `printf` with an option (`printf -v NAME`) is a gated `mutate`.
-  - The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
+  - <a id="upgrade-project-env"></a>The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
     `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`,
     managed settings or the environment Claude Code starts in. While the
     project's `.claude/settings.json` or `.claude/settings.local.json` names
@@ -1457,7 +1527,7 @@ here and marked so.
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
-- Plugin audit log, its end: the chain shows a changed or removed entry by
+- <a id="upgrade-audit-head"></a>Plugin audit log, its end: the chain shows a changed or removed entry by
   the link of the entry after it, but not the removal of the last entries
   or of the whole log, which the hook's comment claimed it did. The hook now
   keeps the chain's end in `.claude/audit.head` (the number of entries and
@@ -1484,7 +1554,7 @@ here and marked so.
   neither can write back an earlier head, or sign a new one); the verifier
   gains `--witness PATH` (repeatable), a copy of the head kept where the
   agent cannot write it, which shows such a cut.
-- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
+- <a id="upgrade-audit-records"></a>Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`
   under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (the
@@ -1498,7 +1568,7 @@ here and marked so.
   move an existing file aside and let the skill start a new one (it does so
   itself when the last line has no `hmac`), and read the old members under
   `details` in new lines.
-- Plugin audit log, its key: the log hook and `tools/verify_audit_log.py`
+- <a id="upgrade-audit-key"></a>Plugin audit log, its key: the log hook and `tools/verify_audit_log.py`
   read the HMAC key from `~/.config/acs/audit.key` when that file exists,
   else from `AUDIT_HMAC_KEY`, so the file wins when both are set. No key is
   derived from the host name. The file is used only when it is a regular
@@ -3011,6 +3081,9 @@ from this plugin release.
 
 ## [v1.2.0] — 2026-02-04
 
+The tag `v1.2.0` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; `main` reports 1.2.0 from commit 2cf4986, after the tag.
+
 The full list is in the
 [v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0).
 
@@ -3044,12 +3117,18 @@ The full list is in the
 
 ## [v1.1.1] — 2026-01-27
 
+The tag `v1.1.1` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; no commit set it to 1.1.1.
+
 ### Changed
 - Migrated capability ontology from JSON to YAML format
 - Updated capability count references from 35 to 36
 - Expanded the FAQ with the rationale for rejected layer proposals
 
 ## [v1.1.0] — 2026-01-27
+
+The tag `v1.1.0` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; no commit set it to 1.1.0.
 
 ### Added
 - Domain-specific workflow templates and default profiles (#12, #17)
