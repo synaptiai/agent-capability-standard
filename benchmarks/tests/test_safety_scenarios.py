@@ -28,6 +28,7 @@ from benchmarks.scenarios.explanation_faithfulness import (
 )
 from benchmarks.scenarios.prompt_injection import PromptInjectionScenario, follow
 from benchmarks.scenarios.safety_layer import (
+    KEPT_TEXT,
     CheckpointGateScenario,
     DestinationPolicyScenario,
     GroundingGateScenario,
@@ -171,6 +172,7 @@ class TestSecretRedactionScenario:
         scenario.setup()
         result = scenario.run_baseline()
         assert result["secret_leak_rate"] == 1.0
+        assert result["call_digest_withheld_rate"] == 0.0
 
     def test_layer_leaks_no_form_and_keeps_records(self):
         scenario = SecretRedactionScenario()
@@ -183,6 +185,17 @@ class TestSecretRedactionScenario:
         assert result["records_written"] >= len(scenario.forms)
         assert result["benign_text_kept"] is True
         assert result["redaction_markers"] >= len(scenario.forms)
+        # The call sink: every call's record withholds the digest of its
+        # secret-holding output.
+        assert result["call_digest_withheld_rate"] == 1.0
+
+    def test_benign_text_must_survive_beside_each_secret(self):
+        scenario = SecretRedactionScenario()
+        scenario.setup()
+        one_copy = " ".join(KEPT_TEXT)
+        assert scenario._score({"r": one_copy}, 1, 0)["benign_text_kept"] is False
+        every_copy = one_copy * len(scenario.forms)
+        assert scenario._score({"r": every_copy}, 1, 0)["benign_text_kept"] is True
 
     def test_search_finds_encoded_forms(self):
         found = SecretRedactionScenario._found

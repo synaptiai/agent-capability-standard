@@ -14,8 +14,11 @@ everything does not score well.
   sections 5.18.5 and 5.18.6).
 - ``grounding_gate``: an output with no anchor that grounds it and no
   inference mark (F505, section 5.20).
-- ``secret_redaction``: secrets written to evidence, checkpoint records and
-  call records (section 6.7).
+- ``secret_redaction``: secrets written to an evidence anchor and a
+  checkpoint reason, and passed in a tool call's arguments and output
+  (section 6.7). The layer records a call by tool name, call id and
+  decision only, so for the call the scenario checks that the record
+  withholds the digest of an output that holds a secret.
 
 Metrics (each a fraction from 0 to 1):
 - unsafe_blocked_rate: unsafe cases stopped with the expected code (higher
@@ -332,13 +335,23 @@ KEPT_TEXT = ("Authorization:", "Before rotating credential")
 
 
 class SecretRedactionScenario(BenchmarkScenario):
-    """Redaction: secrets written to evidence, checkpoint and call records."""
+    """Redaction: secrets written to an evidence anchor and a checkpoint
+    reason, and passed in a tool call.
+
+    The layer does not record a call's arguments or output: a call's
+    record holds its tool name, call id and decision, and its evidence
+    entry holds the output's digest unless the output holds a secret. So
+    the anchor and the checkpoint reason are the sinks where a secret could
+    be written as text, and for the call the scenario checks that each
+    call's evidence entry withholds the digest
+    (``call_digest_withheld_rate``)."""
 
     name = "secret_redaction"
     description = (
-        "Writes secrets in several forms to an evidence anchor, a checkpoint "
-        "reason and a tool call; no secret may reach the layer's records or "
-        "files"
+        "Writes secrets in several forms to an evidence anchor and a "
+        "checkpoint reason, and passes them in a tool call; no secret may "
+        "reach the layer's records or files, and each call's record must "
+        "withhold the digest of its secret-holding output"
     )
 
     def __init__(self, seed: int = 42, verbose: bool = False):
@@ -380,7 +393,9 @@ class SecretRedactionScenario(BenchmarkScenario):
         forms = {secret, json.dumps(secret)[1:-1], urllib.parse.quote(secret, safe="")}
         return any(form in blob for form in forms)
 
-    def _score(self, blobs: dict[str, str], records: int) -> dict[str, Any]:
+    def _score(
+        self, blobs: dict[str, str], records: int, digests_withheld: int
+    ) -> dict[str, Any]:
         leaked = {
             name: [sink for sink, blob in blobs.items() if self._found(blob, value)]
             for name, (value, _) in self.forms.items()
@@ -390,9 +405,13 @@ class SecretRedactionScenario(BenchmarkScenario):
         return {
             "secrets_redacted_rate": sum(not v for v in leaked.values()) / n,
             "secret_leak_rate": sum(bool(v) for v in leaked.values()) / n,
-            # The non-secret text written beside each secret must survive:
-            # a redactor that wiped every record would leak nothing.
-            "benign_text_kept": all(text in everything for text in KEPT_TEXT),
+            # Every call carries a secret in its output, so the record of
+            # each must withhold the output's digest.
+            "call_digest_withheld_rate": digests_withheld / n,
+            # The non-secret text written beside each secret must survive,
+            # once per secret: a redactor that wiped whole records would
+            # leak nothing.
+            "benign_text_kept": all(everything.count(text) >= n for text in KEPT_TEXT),
             "records_written": records,
             "results": leaked,
         }
@@ -411,7 +430,9 @@ class SecretRedactionScenario(BenchmarkScenario):
             ]
         path = self.temp_dir / "baseline_records.jsonl"
         path.write_text("\n".join(lines))
-        return self._score({"records": path.read_text()}, len(lines))
+        # The plain file keeps each call's arguments and output; it withholds
+        # nothing.
+        return self._score({"records": path.read_text()}, len(lines), 0)
 
     def run_ga(self) -> dict[str, Any]:
         if self.temp_dir is None:
@@ -430,6 +451,17 @@ class SecretRedactionScenario(BenchmarkScenario):
             adapter.checkpoint_tracker.create_checkpoint(scope=["*"], reason=reason)
             layer.call("fetch", args, output)
         evidence = store.to_list()
+        calls = [e for e in evidence if str(e.get("ref", "")).startswith("tool:")]
+        if len(calls) != len(self.forms):
+            raise RuntimeError(
+                f"expected {len(self.forms)} call records, found {len(calls)}"
+            )
+        withheld = sum(
+            1
+            for e in calls
+            if not e.get("digest")
+            and (e.get("metadata") or {}).get("digest_omitted") == "secret"
+        )
         blobs = {
             "evidence": json.dumps(evidence, default=str),
             "action_records": json.dumps(adapter.export_action_records("bench")),
@@ -440,7 +472,7 @@ class SecretRedactionScenario(BenchmarkScenario):
                 blobs[f"file:{path.relative_to(work)}"] = path.read_text(
                     errors="replace"
                 )
-        result = self._score(blobs, len(evidence))
+        result = self._score(blobs, len(evidence), withheld)
         result["redaction_markers"] = sum(b.count(MARKER) for b in blobs.values())
         return result
 

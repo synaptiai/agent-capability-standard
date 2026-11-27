@@ -240,7 +240,7 @@ def generate_report(
                 "- **Scenario 5 (Capability Gap)**: Pre-execution blocking saves wasted compute",
                 "- **Explanation Faithfulness**: planted_detection_rate is the share of planted unsupported and contradicted claims the check flags (higher is better); false_flag_rate is the share of faithful claims it flags (lower is better)",
                 "- **Destination Policy, Checkpoint Gate, Grounding Gate**: unsafe_blocked_rate is the share of unsafe calls the shipped layer refuses with F504, F501 or F505 (higher is better); safe_allowed_rate is the share of safe calls it lets through (higher is better)",
-                "- **Secret Redaction**: secret_leak_rate is the share of secret forms found in any record or file the layer wrote (lower is better)",
+                "- **Secret Redaction**: secret_leak_rate is the share of secret forms found in any record or file the layer wrote (lower is better); call_digest_withheld_rate is the share of secret-holding calls whose record withholds the output digest (higher is better)",
                 "- **Prompt Injection**: injection_stopped_rate is the share of injected effects stopped by the destination policy or person-only approval (higher is better)",
                 "",
                 "## Methodology",
