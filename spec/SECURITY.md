@@ -751,17 +751,58 @@ Unless anonymity is requested.
 - [ ] Trust model is configured appropriately
 - [ ] Approval workflows are defined for high-risk actions
 
+Encryption of the audit log and the other records at rest is the
+operator's storage choice. The records hold no secrets
+([STANDARD 1.2.0 §6.7](STANDARD-v1.2.0.md#67-secrets-in-records)), and
+the plugin's log keeps a SHA-256 digest of each tool input in place of the
+input (§5.2). Who may read the audit files is tracked in
+[#173](https://github.com/synaptiai/agent-capability-standard/issues/173).
+
 ---
 
 ## 9. Future Security Considerations
 
 ### 9.1 Planned Enhancements
 
-- Cryptographic signing of checkpoints
-- Role-based capability authorization
-- Encrypted audit log storage
-- Automated anomaly detection
-- Multi-party approval workflows
+Shipped in part:
+
+- **Keyed checkpoint records.** The plugin enters each checkpoint's commit
+  with the HMAC-SHA-256 of the commit under a per-project key, and a
+  rollback accepts only such an entry (§5.1). The SDK's snapshot store
+  keeps a SHA-256 digest of each checkpoint's files in its manifest, with
+  no key. An executor's saved run is refused when its MAC under the key the
+  host gives does not verify (HMAC-SHA-256 in the reference executor,
+  [STANDARD 1.2.0 §5.19.4](STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)).
+  Not provided: a signature that a party without the key can verify.
+- **Multi-party approval.** An approval step's `approver.min_approvers`
+  ([STANDARD 1.1.0 §5.14](STANDARD-v1.1.0.md#514-approval)) and a tool
+  binding's `approval.min_approvers` and `role`
+  ([STANDARD 1.2.0 §5.18.7](STANDARD-v1.2.0.md#5187-approval-for-calls)).
+  The reference executor and the Standard Agents binding count distinct
+  approvers, and the binding lets only a caller with the named role
+  decide. The SDK adapter decides through the host's permission prompt,
+  one person per call, and refuses with F502 a binding that needs more
+  than one approver or names a `role`. The plugin's hooks read no approval
+  policy and ask Claude Code's permission prompt for each gated call.
+
+Planned:
+
+- **Signatures a party without the key can verify**, for checkpoint
+  entries and the audit log's head, so that a verifier does not need the
+  key the agent's environment may hold.
+- **Allowed capabilities per deployment**
+  ([#168](https://github.com/synaptiai/agent-capability-standard/issues/168)).
+  Today an approval's `role` restricts who decides, and an agent manifest
+  lists the capabilities an agent may exercise and bounds a delegation's
+  safety flags
+  ([STANDARD 1.2.0 §5.15.1](STANDARD-v1.2.0.md#5151-agent-manifests)); no
+  layer refuses a call because its capability is outside a deployment's
+  allowed set.
+- **Anomaly detection over the audit records**: a monitor of the log's
+  invariants
+  ([#172](https://github.com/synaptiai/agent-capability-standard/issues/172))
+  and the anomaly rules and review procedure
+  ([#165](https://github.com/synaptiai/agent-capability-standard/issues/165)).
 
 ### 9.2 Open Research Questions
 

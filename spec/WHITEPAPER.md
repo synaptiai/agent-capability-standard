@@ -805,11 +805,13 @@ The `capability_gap_analysis` workflow:
 
 ### 10.2 Future Directions
 
-**Cryptographic Checkpoints**: Sign checkpoints for tamper detection
-**Role-Based Authorization**: Restrict capability access by role
-**Automated Anomaly Detection**: Learn normal patterns and flag deviations
-**Multi-Party Approval**: Require multiple approvals for high-risk actions
-**Cross-Agent Coordination**: Protocols for agent-to-agent workflows
+The security roadmap is kept in [SECURITY.md §9.1](SECURITY.md#91-planned-enhancements), which says for each item what ships and what is planned. In summary:
+
+- **Checkpoint integrity**: shipped in part. The plugin's checkpoint records and an executor's saved runs are keyed with HMAC-SHA-256; a signature that a party without the key can verify is planned.
+- **Multi-party approval**: shipped in part. `min_approvers` and an approver `role` are part of Standard 1.1.0 and 1.2.0, and the reference executor and the Standard Agents binding count distinct approvers. The SDK adapter and the plugin's hooks decide through the host's permission prompt, one person per call.
+- **Allowed capabilities per deployment**: planned. An approval `role` restricts who decides, but no layer yet refuses a call because its capability is outside a deployment's allowed set.
+- **Anomaly detection**: planned, over the audit records the layers already write.
+- **Cross-agent coordination**: shipped in part. Standard 1.2.0 defines delegation to other agents, agent manifests, quorum and sender identity ([§5.15](STANDARD-v1.2.0.md#515-delegation) to [§5.17](STANDARD-v1.2.0.md#517-sender-identity)); how a host obtains agent manifests and authenticates the parties is outside the standard.
 
 ---
 
