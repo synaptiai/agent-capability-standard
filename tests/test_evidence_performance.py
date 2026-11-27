@@ -544,12 +544,13 @@ class TestPerformance:
 
     def test_insert_evict_time_does_not_grow_with_the_store(self) -> None:
         """Benchmark: 10K insert+evict cycles with O(1) eviction take the
-        same time in a full store of 5000 anchors as in one of 20000.
-        Eviction that scanned the store would take about four times as
-        long in the store four times larger. The time limit is loose,
+        same time in a full store of 5000 anchors as in one of 40000.
+        Eviction that scanned the store grows with it: a scan added to
+        each eviction took 3.5 times as long in the store eight times
+        larger. The time limit is loose,
         because a busy CI runner (macOS in particular) can take more than
         a second for work that takes a fraction of one on an idle
-        machine."""
+        machine, and each size is timed three times."""
 
         def seconds_for(capacity: int) -> float:
             store = EvidenceStore(max_anchors=capacity)
@@ -570,8 +571,14 @@ class TestPerformance:
             assert len(store) == capacity
             return elapsed
 
-        small = seconds_for(5000)
-        large = seconds_for(20000)
+        # The fastest of three runs of each, taken in turn: a busy runner
+        # only ever adds time, and alternating spreads a slow stretch over
+        # both sizes instead of one
+        smalls, larges = [], []
+        for _ in range(3):
+            smalls.append(seconds_for(5000))
+            larges.append(seconds_for(40000))
+        small, large = min(smalls), min(larges)
         assert small < 5.0, f"10K insert+evict took {small:.3f}s, expected < 5.0s"
         assert large < 2 * max(small, 0.5), (small, large)
 
