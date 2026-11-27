@@ -2389,8 +2389,12 @@ here and marked so.
   `credentials` deny entries for them and for `GH_TOKEN`, `GITHUB_TOKEN`,
   `AUDIT_HMAC_KEY` and the registries' publish tokens; and write denials
   for the project's
-  `.claude/settings.json`, `.claude/settings.local.json` and
-  `.claude/hooks/` and the plugin's hook scripts. Every path is literal and
+  `.claude/settings.json`, `.claude/settings.local.json`,
+  `.claude/hooks/` and `.mcp.json`, the `.claude/settings.local.json` of
+  the repository's top level and of the main checkout's root, the
+  repository's `.mcp.json`, the plugin's hook scripts, the user
+  configuration directory and `~/.claude.json`: the paths the pre-tool-use
+  hook requires for the strict sandbox. Every path is literal and
   absolute. It creates the audit key file `~/.config/acs/audit.key` (mode
   600) when there is none, reads the settings file back and checks every
   key it wrote against Claude Code's documented settings, refuses a

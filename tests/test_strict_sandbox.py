@@ -1335,25 +1335,44 @@ def test_the_refusal_names_no_command_that_does_not_exist() -> None:
 
 
 @needs_sandbox_system
-def test_the_setup_commands_settings_verify(tmp_path: Path) -> None:
+@pytest.mark.parametrize("layout", ["top", "below-top", "worktree"])
+@pytest.mark.parametrize("config_dir", [False, True], ids=["home", "config-dir"])
+def test_the_setup_commands_settings_verify(
+    tmp_path: Path, layout: str, config_dir: bool
+) -> None:
     """The settings the setup command computes for a project make the hook
     relax a read-only command there (runs once that command is in the
-    package)."""
+    package): for a project at its repository's top level, below it, and in
+    a linked worktree, with and without CLAUDE_CONFIG_DIR."""
     setup_settings = pytest.importorskip("grounded_agency.sandbox_settings")
     project = _repo(tmp_path / "project")
+    if layout == "below-top":
+        project = project / "pkg"
+        project.mkdir()
+    elif layout == "worktree":
+        _git(project, "worktree", "add", "-q", str(tmp_path / "wt"))
+        project = tmp_path / "wt"
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
+    environ = {"HOME": str(home)}
+    settings_dir = home / ".claude"
+    if config_dir:
+        settings_dir = tmp_path / "config"
+        settings_dir.mkdir()
+        environ["CLAUDE_CONFIG_DIR"] = str(settings_dir)
     computed = setup_settings.compute_settings(
         str(project),
         str(home),
         sys.platform,
         str(ROOT),
         extra_domains=("example.com",),
+        environ=environ,
     )
-    _write(home / ".claude" / "settings.json", computed.settings)
-    env = {**os.environ, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project)}
+    _write(settings_dir / "settings.json", computed.settings)
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("AUDIT_HMAC_KEY", None)
+    env.update(environ)
     done = subprocess.run(
         ["bash", str(HOOK)],
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),

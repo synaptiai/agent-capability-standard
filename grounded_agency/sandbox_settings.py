@@ -21,7 +21,11 @@ The settings, every filesystem path literal and absolute:
 - ``permissions.deny`` rules for the layer's records (``layer_records.py``),
   for the audit key file and its directory, and against writes to the
   project's ``.claude/settings.json``, ``.claude/settings.local.json`` and
-  ``.claude/hooks/`` and to the plugin's hook scripts; the same paths in
+  ``.claude/hooks/`` and ``.mcp.json``, to the ``.claude/settings.local.json``
+  and ``.mcp.json`` of the repository's top level and the local settings of
+  the main checkout's root, to the plugin's hook scripts, to the user
+  configuration directory (``CLAUDE_CONFIG_DIR`` or ``~/.claude``) and,
+  without ``CLAUDE_CONFIG_DIR``, to ``~/.claude.json``; the same paths in
   ``sandbox.filesystem.denyWrite``;
 - ``sandbox.filesystem.denyRead`` and ``sandbox.credentials.files`` deny
   entries for the keychains (macOS), ``~/.ssh``, gh's ``hosts.yml``,
@@ -479,6 +483,47 @@ def user_settings_path(home: str, environ: dict[str, str] | None = None) -> str:
     return os.path.join(home, ".claude", "settings.json")
 
 
+def mcp_json_dirs(project: str) -> list[str]:
+    """The directories whose ``.mcp.json`` Claude Code reads for the
+    project: the project directory and the top level of its repository,
+    each as written and as resolved.
+
+    Raises:
+        SandboxSettingsError: git did not say which repository holds the
+            project.
+    """
+    top, _ = repository_dirs(project)
+    out = _spellings(project)
+    for d in _spellings(top) if top else []:
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def repository_dirs(project: str) -> tuple[str | None, str | None]:
+    """The top level of the repository that holds ``project``, and the main
+    checkout's root (where the common git directory is its ``.git``), as
+    git gives them; each None outside a repository. Claude Code reads a
+    ``.claude/settings.local.json`` in both.
+
+    Raises:
+        SandboxSettingsError: git did not say which repository holds the
+            project.
+    """
+    lr = _layer_records()
+    try:
+        top = lr._git_line(project, "--show-toplevel")
+        common = lr._git_line(project, "--git-common-dir") if top else None
+    except lr.LayerRecordsError as e:
+        raise SandboxSettingsError(str(e)) from e
+    main = None
+    if common:
+        common = os.path.realpath(os.path.join(os.path.realpath(project), common))
+        if os.path.basename(common) == ".git":
+            main = os.path.dirname(common)
+    return top, main
+
+
 def audit_key_path(home: str) -> str:
     """The audit key file the hooks read: ``~/.config/acs/audit.key``."""
     return os.path.join(home, ".config", "acs", "audit.key")
@@ -909,6 +954,7 @@ def compute_settings(
     profile_destinations: list[str] | None = None,
     extra_domains: tuple[str, ...] | list[str] = (),
     profile_given: bool = False,
+    environ: dict[str, str] | None = None,
 ) -> Computed:
     """The strict sandbox settings for ``project`` (see the module's
     description), every path literal and absolute.
@@ -925,6 +971,7 @@ def compute_settings(
         records = lr.deny_settings(project)
     except lr.LayerRecordsError as e:
         raise SandboxSettingsError(str(e)) from e
+    env = dict(os.environ) if environ is None else environ
 
     domains: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
@@ -978,8 +1025,27 @@ def compute_settings(
             (os.path.join(base, ".claude", "settings.local.json"), False),
             (os.path.join(base, ".claude", "hooks"), True),
         ]
+    # Claude Code reads a local settings file at the repository's top level
+    # and at the main checkout's root too.
+    for root in repository_dirs(project):
+        for base in _spellings(root) if root else []:
+            local = (os.path.join(base, ".claude", "settings.local.json"), False)
+            if local not in config_files:
+                config_files.append(local)
+    # A .mcp.json names tool servers that run outside the sandbox: no
+    # sandboxed command may create or change one for the next session.
+    for base in mcp_json_dirs(project):
+        config_files.append((os.path.join(base, ".mcp.json"), False))
     for hooks in _spellings(os.path.join(plugin_root, "hooks")):
         config_files.append((hooks, True))
+    # The user configuration directory (user settings, plugins, agents,
+    # commands, skills) and ~/.claude.json (the user's tool servers): a
+    # command that writes them changes what the next session runs.
+    for d in _spellings(os.path.dirname(user_settings_path(home, env))):
+        config_files.append((d, True))
+    if not env.get("CLAUDE_CONFIG_DIR"):
+        for p in _spellings(os.path.join(home, ".claude.json")):
+            config_files.append((p, False))
 
     def rule(kind: str, path: str, directory: bool) -> str:
         return f"{kind}(/{path}{'/**' if directory else ''})"
@@ -1301,6 +1367,14 @@ def verify_settings(settings: dict[str, Any], computed: dict[str, Any]) -> list[
 def _weakening(settings: dict[str, Any]) -> list[str]:
     """Settings left as they are that weaken what is written here."""
     out: list[str] = []
+    if settings.get("enableAllProjectMcpServers") is True or settings.get(
+        "enabledMcpjsonServers"
+    ):
+        out.append(
+            "enableAllProjectMcpServers or enabledMcpjsonServers is set: the tool "
+            "servers a project's .mcp.json names start with no prompt, outside "
+            "the sandbox, and the hooks then gate every Bash call"
+        )
     sb = settings.get("sandbox")
     if not isinstance(sb, dict):
         return out
@@ -1356,8 +1430,27 @@ def _project_weakening(project: str) -> list[str]:
     settings. Only key names are given: the values are the repository's.
     Three project keys are not reported, since from either file they had no
     effect under Claude Code 2.1.332: ``allowUnsandboxedCommands``,
-    ``network.strictAllowlist`` and ``network.allowedDomains``."""
+    ``network.strictAllowlist`` and ``network.allowedDomains``. A
+    ``.mcp.json`` in the project directory or at the repository's top
+    level is reported too: the hooks gate every Bash call while one is
+    there."""
     out: list[str] = []
+    try:
+        mcp_dirs = mcp_json_dirs(project)
+    except SandboxSettingsError:
+        mcp_dirs = _spellings(project)
+    seen: set[str] = set()
+    for base in mcp_dirs:
+        if os.path.realpath(base) in seen:
+            continue
+        seen.add(os.path.realpath(base))
+        path = os.path.join(base, ".mcp.json")
+        if os.path.lexists(path):
+            out.append(
+                f"{json.dumps(path)} exists: the tool servers it names run outside "
+                "the sandbox, and the hooks gate every Bash call until it is "
+                "removed or the directory that holds it is denied to writes"
+            )
     for name in ("settings.json", "settings.local.json"):
         where = f".claude/{name}"
         path = os.path.join(project, ".claude", name)
