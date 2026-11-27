@@ -556,7 +556,7 @@ def test_hooks_json_starts_each_hook_ignoring_the_shells_startup_variables() -> 
     BASHOPTS, CDPATH and GLOBIGNORE; the scripts re-start under it when
     run another way."""
     for script in sorted(HOOKS.glob("*.sh")):
-        if script.name == "secret_scan.sh":
+        if script.name in ("secret_scan.sh", "hmac_sha256.sh"):
             continue
         head = script.read_text(encoding="utf-8").splitlines()[:12]
         assert head[0] == "#!/bin/sh", script.name

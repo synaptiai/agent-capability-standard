@@ -284,7 +284,11 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   The credentials the plugin holds itself are refused too: `AUDIT_HMAC_KEY`'s
   value, and the project's checkpoint key, read from
   `<git dir>/acs/checkpoints/key` where git names the project's git
-  directory (a git that cannot say reads none).
+  directory (a git that cannot say reads none). The audit key file
+  (`~/.config/acs/audit.key`, below) is not read for this: it is kept out of
+  the agent's reach instead. The log hook, which reads that file to sign,
+  does count the key it read as a credential it holds: a tool name or skill
+  name that holds it is logged as `[REDACTED]`.
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
@@ -297,7 +301,11 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   and the hooks and MCP servers a subagent's definition names, run with no
   hook seeing them)`. Loading the checkpoint skill takes no checkpoint: run
   `git stash create` first.
-- `Bash`: a command over 4096 bytes is `mutate`, decided before anything
+- `Bash`: every call is `mutate` unless the hook verifies Claude Code's
+  strict sandbox for it ([The strict sandbox](#the-strict-sandbox), below);
+  without it, `git stash create` and a restore are `mutate` too, so no
+  checkpoint can be taken through Bash. Under it, the classes below apply.
+  A command over 4096 bytes is `mutate`, decided before anything
   else is done with it, so no reading runs into the hook's time limit (a
   command padded with 50,000 blanks once took 44 seconds to trim). A command
   with any of `` ; & | < > $ ` ( ) { } \ `` or a line
@@ -704,6 +712,204 @@ so no file a hook writes is outside the rules before it becomes a record.
 The `/grounded-setup` command (below) writes these rules, with the rest of
 the sandbox's settings, to your user settings.
 
+### The strict sandbox
+
+The pre-tool-use hook lets a Bash call run with less than the worst case
+(a read-only command with no checkpoint or approval, `git stash create` as
+a checkpoint, a restore of a recorded checkpoint as a rollback) only when
+Claude Code runs it under an operating-system boundary the hook has
+verified for that call (STANDARD 1.2.0 §5.18.3, as RFC-0011 proposes it).
+Otherwise the call is a gated `mutate`: it needs a checkpoint marker and
+approval. Without the strict sandbox no checkpoint can be taken through
+Bash, so every gated call is refused with `F501 CHECKPOINT_REQUIRED:`,
+whose reason lists why the sandbox is not verified (up to six reasons).
+The hook also refuses the agent's own edits to the settings files, so the
+person adds the settings below to their user settings file, with the
+`/grounded-setup` command (below) or by hand, and starts Claude Code
+again.
+
+The hook reads the settings files Claude Code reads, with `jq`:
+
+| Scope | Files |
+|-------|-------|
+| Managed | `managed-settings.json`, then `managed-settings.d/*.json` (not hidden, in name order), in `/Library/Application Support/ClaudeCode/` on macOS and `/etc/claude-code/` on Linux |
+| User | `settings.json` in `CLAUDE_CONFIG_DIR`, else in `~/.claude/` |
+| Project | `.claude/settings.json` in the project directory |
+| Local | `.claude/settings.local.json` in the project directory, at the repository's top level and at the main checkout's root (Claude Code reads it there in a git repository and a worktree) |
+
+A file that exists must be a regular file that parses as a JSON object;
+otherwise the sandbox is not verified. In a user or managed file, the
+`sandbox`, `permissions`, `env` and `hooks` keys must have the types Claude
+Code accepts (booleans, lists of strings, `credentials` lists of objects,
+port numbers, objects), since Claude Code ignores a whole file with a value
+of the wrong type. Where a managed source the hook does not read is
+present, the sandbox is not verified either: the macOS managed preferences
+domain `com.anthropic.claudecode` (in `/Library/Managed Preferences/`), the
+server-managed settings cache (`remote-settings.json` in the user settings
+directory), and, under WSL, the Windows policy chain. The system is decided
+from files only the system installs (`/System/Library/CoreServices` on
+macOS, `/proc/version` on Linux), and `OSTYPE` must agree with it, since
+bash takes `OSTYPE` from the environment. On a system other than macOS and
+Linux, Claude Code has no sandbox.
+
+The conditions count only from user and managed settings, merged as Claude
+Code merges them (managed over user, lists joined), so no repository file
+can make a call more relaxed:
+
+- `sandbox.enabled: true`, `sandbox.failIfUnavailable: true`,
+  `sandbox.allowUnsandboxedCommands: false` and
+  `sandbox.network.strictAllowlist: true`;
+- none of `sandbox.excludedCommands`, `sandbox.filesystem.disabled`,
+  `sandbox.filesystem.allowRead`, `sandbox.network.allowAllUnixSockets`,
+  `allowUnixSockets`, `allowLocalBinding`, `allowMachLookup`,
+  `httpProxyPort` or `socksProxyPort`, `sandbox.allowAppleEvents`,
+  `allowNestedUserNamespaces`, `enableWeakerNestedSandbox` or
+  `enableWeakerNetworkIsolation` (an empty list or `false` is fine): each
+  runs a command outside the sandbox, lets a sandboxed command reach a
+  process outside it, routes around the network allowlist, or (`allowRead`)
+  reopens a path that a deny closes;
+- every `sandbox.network.allowedDomains` entry a dotted DNS name in lower
+  case whose last label is alphabetic, optionally with `*.` before it and
+  `:port` after it, and not a loopback, link-local, metadata or local-use
+  name (`localhost`, `*.local`, `*.internal`, `metadata.goog`, ...): an IP
+  literal, a one-label name or `*` opens a route to a process outside the
+  boundary or to every host;
+- `sandbox.credentials.envVars` entries `{"name": ..., "mode": "deny"}` for
+  `GH_TOKEN` and `GITHUB_TOKEN`, and for `AUDIT_HMAC_KEY` while it is set;
+- a denial of each of these paths:
+  - writes to the records, and reads of the git directories' records, as
+    `grounded_agency/layer_records.py` gives them for the project (above);
+  - writes to the project's `.claude/settings.json` and every local
+    settings file in the table, the project's `.claude/hooks/`, the
+    plugin's hooks directory (where the running hook is, links resolved),
+    the user configuration directory (`CLAUDE_CONFIG_DIR` or `~/.claude`:
+    the user settings, plugins, agents, commands, skills and, with
+    `CLAUDE_CONFIG_DIR`, `.claude.json`) and, without `CLAUDE_CONFIG_DIR`,
+    `~/.claude.json` (the user's tool servers): a command that writes them
+    changes what the next session, hook or tool server runs;
+  - reads and writes of the audit key file, `~/.config/acs/audit.key`;
+  - reads of the user's credentials: `~/.ssh/`, `~/.config/gh/hosts.yml`,
+    `~/.git-credentials` and, on macOS, `~/Library/Keychains/` and
+    `/Library/Keychains/`;
+  - writes to the project directory, where it holds a `.mcp.json` (and to
+    the repository's top level, where that holds one): the tool servers it
+    names run outside the sandbox from code in the repository; where there
+    is none, writes to the `.mcp.json` path itself, so that no sandboxed
+    command can create one for the next session to start;
+- neither `enableAllProjectMcpServers: true` nor `enabledMcpjsonServers`:
+  either starts the tool servers a `.mcp.json` names with no prompt.
+
+A path is denied by a `permissions.deny` rule written `Tool(//<absolute
+path>)` for a file, or `Tool(//<directory>/**)` for a directory or for any
+directory that holds the path (`Edit` for writes, `Read` for reads), or by
+an entry of `sandbox.filesystem.denyWrite` (writes) or `denyRead` (reads)
+that is the absolute path or a directory that holds it, written literally.
+Home paths count under the home directory as written and as resolved;
+project paths under the project directory as written and as resolved, as
+for the records. The plugin's hooks directory changes with each plugin
+version, so a rule over a directory above it (the plugin cache) keeps
+covering it. A rule or entry written another way (`~/`, `./`, a relative
+path, another glob, a bare tool name) does not count. Under
+`allowManagedPermissionRulesOnly` in managed settings, only managed rules
+and entries count. A user `settings.json` that is a symbolic link means the
+sandbox is not verified: a rule on its path does not protect the file it
+leads to.
+
+The project's and the local settings can only weaken the sandbox, and the
+user-scope test showed that they do: a project's `sandbox.enabled: false`,
+`excludedCommands` (even under the user's `allowUnsandboxedCommands:
+false`) and `filesystem.allowWrite` each took effect over a strict user
+sandbox, and so does an `Edit(...)` allow rule, which Claude Code merges
+into `filesystem.allowWrite`. So in a project or local file:
+
+- `sandbox` may hold only `enabled: true`, `failIfUnavailable: true`,
+  `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`, an empty
+  `excludedCommands`, `filesystem.denyWrite` and `denyRead`,
+  `network.deniedDomains`, `network.strictAllowlist: true`, and
+  `credentials.envVars` and `files` whose entries all have `"mode":
+  "deny"`;
+- `permissions` may hold no `additionalDirectories` and no `Edit` or `Read`
+  allow rule;
+- nothing may name a command or tool server that runs outside the sandbox:
+  `hooks` (other than an empty object), `statusLine`, `fileSuggestion`,
+  `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`,
+  `otelHeadersHelper`, `enableAllProjectMcpServers: true` or
+  `enabledMcpjsonServers`;
+- the local files outside the project directory may set in `env` only the
+  variables the check of the project's own env lets through (above): the
+  hooks and commands run with their env too.
+
+Anything else there (`enabled: false`, an excluded command, `allowWrite`,
+`allowRead`, an `allowedDomains` list) means the sandbox is not verified.
+Only managed settings keep a repository from changing the sandbox.
+
+A call whose input sets `dangerouslyDisableSandbox` to anything other than
+`false` is a gated `mutate` whatever the settings; under the strict sandbox
+its refusal says to run it without the parameter. The hook does not decide
+from a command's text whether it matches an excluded command: any
+`excludedCommands` entry means no Bash call is relaxed.
+
+The settings that meet these conditions for the project, with deny rules
+for its records, come from `grounded_agency/layer_records.py` (above) and
+the rules this section lists; written by hand, they look like this (paths
+absolute, for each project and plugin copy):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": {"allowedDomains": ["example.com"], "strictAllowlist": true},
+    "filesystem": {
+      "denyWrite": ["/Users/me/.claude", "/Users/me/.claude.json"],
+      "denyRead": ["/Users/me/.ssh", "/Users/me/.config/gh/hosts.yml",
+                   "/Users/me/.git-credentials", "/Users/me/Library/Keychains",
+                   "/Library/Keychains"]
+    },
+    "credentials": {"envVars": [{"name": "GH_TOKEN", "mode": "deny"},
+                                {"name": "GITHUB_TOKEN", "mode": "deny"},
+                                {"name": "AUDIT_HMAC_KEY", "mode": "deny"}]}
+  },
+  "permissions": {"deny": ["...the rules layer_records.py prints...",
+                           "Edit(//Users/me/project/.claude/settings.json)",
+                           "Edit(//Users/me/project/.claude/settings.local.json)",
+                           "Edit(//Users/me/project/.claude/hooks/**)",
+                           "Edit(//Users/me/project/.mcp.json)",
+                           "Edit(//<plugin hooks directory>/**)",
+                           "Read(//Users/me/.config/acs/audit.key)",
+                           "Edit(//Users/me/.config/acs/audit.key)"]}
+}
+```
+
+The check runs only for a call the classifier reads as other than
+`mutate`, and for the text of a refusal. The hooks run nothing from, and
+read nothing in, the directories the Linux sandbox runtime shares with the
+host (`/tmp/claude`, `~/.claude/debug`): every temporary file they make is
+in the records' directories.
+
+What the hook cannot see, so cannot detect:
+
+- settings given with `--settings` when Claude Code starts (they rank above
+  user, project and local settings), and sources left out with
+  `--setting-sources`. A person who starts Claude Code with weaker settings
+  that way is not detected;
+- that the sandbox is on: hooks run outside it, and Claude Code gives them
+  no environment variable that says so (sandboxed commands see
+  `SANDBOX_RUNTIME`, hooks do not);
+- a value of the wrong type outside the keys it type-checks, which makes
+  Claude Code skip the whole file, and a change since Claude Code loaded a
+  file;
+- whether the sandbox works on this system: `failIfUnavailable` makes
+  Claude Code refuse to start where it does not;
+- a program put on `PATH` by a local settings file at the repository's top
+  level or the main checkout's root: such a file means the sandbox is not
+  verified, but the hook's own programs (`jq`, `git`) are found on that
+  `PATH` before the hook reads the file, as for any variable Claude Code
+  sets before a hook runs;
+- credential files other than those listed above (registry tokens, cloud
+  credentials): deny them too, with `denyRead`.
+
 ## Setting up the sandbox
 
 A plugin cannot change your settings itself. The `/grounded-setup` command
@@ -994,7 +1200,7 @@ skill writes its own records, of the events a workflow reports.
 
 - Logs every tool call that ran, one JSON line per call (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
-- Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
+- Uses HMAC-SHA256 chaining for tamper detection (SEC-005), under the key in `~/.config/acs/audit.key`, else `AUDIT_HMAC_KEY` (below)
 - Each entry includes the HMAC of the previous entry, creating a hash chain: a changed or removed entry breaks the link of the entry after it
 - Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`), and the same head, its anchor, in the project's git directory (`<git dir>/acs/audit.head`; none outside a repository). Removing the last entries, or the whole log, breaks no link; the head shows it, and a command that removes `.claude` whole with the log and its head (`git clean -fdx`) leaves the anchor, which shows it. An earlier head written back with the cut, or one signed anew with the key, shows nothing: only a witness kept off the agent's reach does (below). Before it appends, the hook checks that the log still holds the entry the head and the anchor record, at its place: when it does not, or one is not a head this key signed, the hook says so, writes the line, and leaves both as they are, the evidence of the cut. The pre-tool-use hook refuses a call that names the head, `.claude` or the git directory's `acs/` (`F504`). To start a new log, move `audit.log`, `audit.head` and the anchor aside together
 - Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, with a warning, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
@@ -1003,8 +1209,10 @@ The log is a best-effort capture (STANDARD v1.2 §6.4): it can miss a call,
 but never silently. When it does not log a call, or logs it without a valid
 HMAC or chain link, the hook says why on standard error and exits 1, which
 Claude Code shows as a non-blocking hook error: no `jq`, a symlinked
-`audit.log` (refused, SEC-006), no `openssl` (no line is written: an unsigned
-one would make every later line fail verification), a line that could not
+`audit.log` (refused, SEC-006), no key or a key file it refuses, or no
+`openssl` (the line is written unsigned, with `hmac` empty, and the head and
+the anchor are left as they are; the verifier reports the line, and a signed
+line after it starts a new chain), a line that could not
 be built or written, a last line whose `hmac` cannot be read (the line is
 written and starts a new chain), an input digest that could not be computed
 (the line is written with `unavailable`), a log that no longer holds the
@@ -1111,13 +1319,111 @@ fails, and goes on failing as the log grows again.
 python tools/verify_audit_log.py --witness /mnt/audit-witness/project.head
 ```
 
-Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable, in
-`~/.claude/settings.json`, managed settings or the environment Claude Code
-starts in: while the project's settings files name it (or another of the
-hooks' settings), the hook writes no line (exit 1 with the reason), so no
-key the repository may know signs one. Claude Code passes the variable to
-every command too, so the key is evidence against a writer that is not
-the agent, not against the agent's own approved commands (above).
+### The audit key
+
+The hook signs with the key in `~/.config/acs/audit.key` (`$HOME/.config/acs/audit.key`)
+when that file exists, and with `AUDIT_HMAC_KEY` otherwise. When both are
+set, the file wins. The file is the way to keep the key: hooks run outside
+Claude Code's sandbox (as tested with Claude Code on macOS; Claude Code on
+Linux has not been tested) and can read a file that a deny rule keeps from
+the agent's commands and file tools, while every command the agent runs
+inherits `AUDIT_HMAC_KEY` unless the sandbox removes it.
+
+Create the key file once, from a terminal (`set -C` keeps a key that is
+already there):
+
+```bash
+mkdir -p ~/.config/acs && chmod 700 ~/.config/acs
+(umask 077; set -C; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > ~/.config/acs/audit.key)
+```
+
+The hook uses the file only when all of these hold, and refuses it
+otherwise:
+
+- it is a regular file, not a symbolic link;
+- it is owned by the user the hook runs as, and group and others have no
+  permission on it (mode 600 or 400);
+- it has one link: a second hard link, made where the agent's commands can
+  read, gives them the key past a deny rule on this path;
+- its directory is owned by the same user, is not a symbolic link, and
+  group and others cannot write to it;
+- its directory, as the system resolves it, is not inside the project
+  directory, which the agent's commands may write (so a session started in
+  the home directory signs nothing with the key file);
+- its first line, without the line break, is 32 to 4096 visible ASCII
+  characters. That line is the key.
+
+A refused file is not replaced by `AUDIT_HMAC_KEY`: the hook writes the line
+unsigned and says why the file was refused. With no file and no
+`AUDIT_HMAC_KEY`, the hook writes each line unsigned and says so (exit 1, a
+non-blocking error). No key is derived from anything else. The verifier
+reads the key by the same rules, except the one about the project
+directory, which it does not know (`--hmac-key` gives a key instead), reports each
+unsigned line, and with no key runs no check (exit 2). The hook computes
+the HMAC from SHA-256 with the key passed through pipes, so the key is on
+no command line, where any process of the user could read it. The
+checkpoint hooks and the rollback skill's hook compute the HMAC of a
+checkpoint's commit entry under the project's checkpoint key the same way.
+All four copy one implementation, `hmac_sha256.sh` in this directory, and
+`tests/test_hmac_sha256.py` keeps the copies equal.
+
+Keep the key out of the agent's reach with user settings that deny reading
+it and writing it. A key file the agent can replace gives no evidence
+against the agent: a key it chose signs whatever it writes. Give, with
+literal absolute paths and no other globs:
+
+- `permissions.deny`: `Read(//<absolute path of the key file>)`,
+  `Edit(//<absolute path of the key file>)` and
+  `Edit(//<absolute path of ~/.config/acs>/**)`. These cover the file tools
+  and Bash under the sandbox, links and renames included (tested with Claude
+  Code on macOS);
+- `sandbox.credentials.files`: a deny entry for the key file;
+- `sandbox.filesystem.denyWrite`: the directory, `<absolute path of
+  ~/.config/acs>` (the Linux sandbox runtime skips a glob in `denyWrite`;
+  Claude Code itself on Linux has not been tested);
+- where `AUDIT_HMAC_KEY` is set, a `sandbox.credentials.envVars` deny entry
+  for it, or every sandboxed command can read it.
+
+Set `AUDIT_HMAC_KEY`, where it is used, in `~/.claude/settings.json`,
+managed settings or the environment Claude Code starts in: while the
+project's settings files name it (or another of the hooks' settings), the
+hook writes no line (exit 1 with the reason), so no key the repository may
+know signs one. A key the agent's commands can read is evidence against a
+writer that is not the agent, not against the agent's own approved
+commands (above).
+
+A log signed with an earlier key (the one derived from the host name, or
+an `AUDIT_HMAC_KEY` the key file now replaces) verifies only with that key,
+and the hook reports its head, which that key signed, on every call. Move
+`.claude/audit.log`, `.claude/audit.head` and the anchor
+(`<git dir>/acs/audit.head`) aside together, outside Claude Code (the
+pre-tool-use hook refuses a command that names them), and verify the moved
+files with the earlier key:
+
+```bash
+python tools/verify_audit_log.py --hmac-key "grounded-agency-audit-$(hostname -s)" \
+  --log-file moved/audit.log --head-file moved/audit.head --anchor-file moved/anchor.head
+```
+
+The earlier hook took the short host name each time it signed, and used
+`grounded-agency-audit-default` where `hostname -s` failed. If an intact log
+fails with the command above, give `--hmac-key grounded-agency-audit-default`,
+or the key with the short host name the machine had when the log was
+written.
+
+The audit skill signs its records, `.claude/audit/records.jsonl`, under
+`AUDIT_HMAC_KEY` only, never with the key file. Unlike the hooks, the skill
+computes the HMAC with `openssl dgst -sha256 -hmac "$AUDIT_HMAC_KEY"`, so
+while that command runs the key is on its command line, where any process
+of the user can list it. Check the records with that key, outside Claude
+Code:
+
+```bash
+python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl --no-head --hmac-key "$AUDIT_HMAC_KEY"
+```
+
+Records written without `AUDIT_HMAC_KEY` are unsigned, and the verifier
+reports each one.
 
 ## Hooks in Skill Frontmatter
 
@@ -1165,8 +1471,9 @@ escapes other encoders write for the characters its rules read decoded
 first looks for a value the plugin holds itself (`secret_held`):
 `AUDIT_HMAC_KEY`'s value and `SECRET_HELD`, which the pre-tool-use hook sets
 to the project's checkpoint key (`<git dir>/acs/checkpoints/key`) for a
-persist tool's data (STANDARD 1.2.0 §6.7: a host recognises at least the
-credentials it holds itself). The `persist`
+persist tool's data, and the log hook to the audit key it read from
+`~/.config/acs/audit.key` for the names it logs (STANDARD 1.2.0 §6.7: a
+host recognises at least the credentials it holds itself). The `persist`
 hook scans the text a call carries and the lines the file will hold after it
 that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is
