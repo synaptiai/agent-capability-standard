@@ -292,7 +292,7 @@ jobs:
   sandbox-boundary:
     name: Sandbox boundary (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The suite took 7 to 14 minutes on macOS and about 2 on Linux locally.
+    # The suite took 8 to 13.5 minutes on macOS and about 2 on Linux, locally.
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -320,33 +320,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
 
-      # Ubuntu 24.04 can refuse unprivileged user namespaces, which
-      # bubblewrap needs, through AppArmor. Lift that only when it is on, and
-      # show whether bubblewrap starts as the runner's user either way.
-      - name: Check that bubblewrap can start
-        if: runner.os == 'Linux'
-        run: |
-          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
-          if [ -r "$f" ]; then
-            echo "kernel.apparmor_restrict_unprivileged_userns=$(cat "$f")"
-            if [ "$(cat "$f")" = 1 ]; then
-              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            fi
-          else
-            echo "$f is absent: AppArmor does not restrict user namespaces here"
-          fi
-          bwrap --version
-          if bwrap --ro-bind / / --unshare-user --unshare-net true; then
-            echo "bubblewrap starts as $(id -un)"
-          else
-            echo "::error::bubblewrap cannot create a user namespace as $(id -un), so srt cannot sandbox a command on this runner"
-            exit 1
-          fi
-
       - name: Install the sandbox runtime
         run: |
           npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@$SANDBOX_RUNTIME_VERSION"
           srt --version
+
+      # On Linux this lifts Ubuntu's AppArmor restrictions on the user
+      # namespaces srt makes; on both systems it runs srt once and fails
+      # with srt's own message when it cannot start a sandbox.
+      - name: Check that srt can start a sandbox
+        run: bash .github/scripts/sandbox-runner-setup.sh
 
       - name: Install pytest
         run: pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
@@ -379,7 +362,8 @@ jobs:
     timeout-minutes: 20
     env:
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
-      CLAUDE_CODE_VERSION: "2.1.322"
+      CLAUDE_CODE_VERSION: "2.1.332"
+      SANDBOX_RUNTIME_VERSION: "0.0.82"
     steps:
       - name: Say why nothing runs
         if: env.HAS_ANTHROPIC_KEY != 'true'
@@ -405,14 +389,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
-          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
-          if [ -r "$f" ] && [ "$(cat "$f")" = 1 ]; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-          if ! bwrap --ro-bind / / --unshare-user --unshare-net true; then
-            echo "::error::bubblewrap cannot create a user namespace as $(id -un), so Claude Code cannot sandbox a command on this runner"
-            exit 1
-          fi
           # The package's bin/claude.exe is a placeholder until its install
           # script copies the native binary over it; the script runs here
           # by name rather than as an npm lifecycle script.
@@ -420,6 +396,14 @@ jobs:
           node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
           claude --version
           pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
+
+      # Claude Code's sandbox on Linux is the same runtime: srt here shows
+      # whether the runner lets it start, with srt's own message if not.
+      - name: Check that the sandbox can start
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        run: |
+          npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@$SANDBOX_RUNTIME_VERSION"
+          bash .github/scripts/sandbox-runner-setup.sh
 
       # A test skips when the model makes no Bash call; a run in which none
       # passed tested nothing, and fails.
