@@ -58,8 +58,9 @@ if [[ "$mode" == "list" ]]; then
   echo
   # The texts link this repository at one commit; set it to main's head on
   # the day of filing (see README.md, Filing).
-  pinned=$(grep -ho 'synaptiai/agent-capability-standard/\(tree\|blob\)/[0-9a-f]\{40\}' \
-    [0-9][0-9]-*.md | sed 's#.*/##' | sort -u | tr '\n' ' ')
+  # grep exits 1 when no text has a pinned link; that is not an error here.
+  pinned=$( { grep -ho 'synaptiai/agent-capability-standard/\(tree\|blob\)/[0-9a-f]\{40\}' \
+    [0-9][0-9]-*.md || true; } | sed 's#.*/##' | sort -u | tr '\n' ' ')
   echo "Links into this repository are pinned to: ${pinned:-none}"
   echo "Nothing was created. Run with --file to create these issues in $REPO."
 fi

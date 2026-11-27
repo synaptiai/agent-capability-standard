@@ -33,7 +33,7 @@ addition proposed here would apply from that version.
 
 ## Filing
 
-Texts 01, 07, 08 and 09 link the reference binding and the integration
+Texts 01 and 07 to 12 link the reference binding or the integration
 document at one commit of this repository, so that each issue keeps showing
 what its text describes. They are pinned to `8ec818c`, the head of `main` on
 27 November 2026. On the day of filing, set them to the head of `main`
