@@ -30,6 +30,7 @@ for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python to
 python tools/validate_profiles.py
 python tools/validate_skill_refs.py
 python tools/validate_ontology.py
+python tools/check_ontology_version.py   # needs the release tags (CI checks out with fetch-depth: 0)
 python tools/validate_canonical_schemas.py
 python tools/validate_rfcs.py
 python tools/validate_constraints.py

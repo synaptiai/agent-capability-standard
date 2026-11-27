@@ -1000,6 +1000,30 @@ here and marked so.
   release that carries this is a MAJOR version (3.0.0). No workflow,
   ontology or schema changes. The `layer` frontmatter key is removed from
   the 13 skills that had it (the ontology gives a capability's layer).
+- Plugin hooks (released with plugin 3.0.0): every `hooks.json` entry sets
+  a `timeout` of its own. Before, only the pre-tool-use hook did, and the
+  others ran under Claude Code's 600-second default. The log and checkpoint
+  hooks (PostToolUse, PostToolUseFailure) have 90 seconds, above the log's
+  longest lock wait (`AUDIT_LOCK_WAIT`, at most 55) and their 5-second
+  bounded reads together; the boundary hook (UserPromptSubmit, Stop,
+  StopFailure, SessionStart, SessionEnd) has 10 seconds, which on SessionEnd
+  also raises Claude Code's 1.5-second budget. `hooks/README.md` states how
+  the layer's records grow: about 0.7 KB of audit log per tool call, one
+  marker file per checkpoint under `.claude/checkpoints/used/` or `ended/`,
+  and one entry per checkpoint under `<git dir>/acs/checkpoints/commits/`,
+  none rotated. Part of #166.
+- Plugin hooks (released with plugin 3.0.0): the pre-tool-use hook also runs
+  on `PreSkillShellCommand` (matcher `Bash|PowerShell`, `onFailure:
+  "block"`, 30 seconds), before each shell command a skill or a `/name`
+  command injects as it loads, which no PreToolUse hook sees. It classifies
+  the command as a Bash call; one that needs nothing runs, and every other
+  one is refused with F502 before the checkpoint marker is read, since no
+  person can approve a command on that event, whatever `ACS_HOOK_APPROVAL`
+  and the permission mode say. Without the strict sandbox every injected
+  command is refused. The event needs Claude Code 2.1.332 or later, and the
+  plugin as a whole needs 2.1.295 or later, the first version that honours
+  `onFailure`; both floors are stated in `README.md` and `hooks/README.md`.
+  Part of #144.
 - Plugin hooks (released with plugin 3.0.0, Changed): without Claude
   Code's strict sandbox, every Bash call needs a checkpoint and approval,
   read-only commands included, and `git stash create` and a restore are
@@ -2368,6 +2392,23 @@ here and marked so.
   anchor still shows a cut log. The take hook writes a new marker, and the
   log hook a new head, in `.claude/checkpoints/` before renaming it onto
   the record.
+- `tools/check_ontology_version.py` and its step in the Validate YAML
+  schemas CI job: it compares the ontology with the one at the latest
+  `vX.Y.Z` release tag and fails when a safety flag (`risk`, `mutation`,
+  `requires_checkpoint`, `requires_approval`, `mutation_overridable`), a
+  layer, a capability or a `requires`, `precedes` or `conflicts_with` edge
+  changed while `meta.version` kept the release's MAJOR (Standard §11.6).
+  The job checks out with `fetch-depth: 0` so the tags are present. Part of
+  #164.
+- RFC review rule in `spec/GOVERNANCE.md`: a Standard or ontology RFC is
+  open for review for at least 14 days and is accepted by one maintainer
+  that `.github/CODEOWNERS` names. `tools/validate_rfcs.py` requires an
+  Accepted RFC's header to carry `**Review window:**` and `**Accepted
+  by:**`; RFC-0001 and RFC-0003 to RFC-0010, accepted before the rule, are
+  exempt. Part of #164.
+- `.github/CODEOWNERS` names the maintainers who review the ontology, the
+  domain profiles, `hooks/`, `grounded_agency/capabilities/mapper.py`,
+  `spec/` and the file itself. Part of #164.
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
