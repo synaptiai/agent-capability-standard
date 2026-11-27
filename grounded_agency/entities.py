@@ -170,12 +170,17 @@ def _resolve(name: Any, classes: Mapping[str, str]) -> str:
 
 
 def _id_class(entity_id: Any, classes: Mapping[str, str]) -> str:
-    """Parse an id and give the class its class part denotes."""
+    """Parse an id and give the class its class part denotes.
+
+    The parser refuses a class part that is neither in ``classes`` nor a
+    vendor class, so such an id is ``invalid_entity_id``, never
+    ``unknown_class``.
+    """
     try:
         parsed = parse_entity_id(entity_id, classes)
     except ValueError as exc:
         raise _Refused("invalid_entity_id", str(exc)) from None
-    return _resolve(parsed.cls, classes)
+    return classes.get(parsed.cls, parsed.cls)
 
 
 def _entity_class(entity: Any, classes: Mapping[str, str]) -> str:

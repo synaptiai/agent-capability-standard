@@ -115,9 +115,10 @@ The proposed text of §7.3 for Standard 1.3.0:
 > for an alias (`svc` denotes `service`, `node` denotes `host`), and the
 > type itself for a vendor class (`x-` …). A subtype of the taxonomy
 > (`employee`, `api`) is not a class, and a record whose `type` is neither
-> a class, an alias nor a vendor class is invalid (`unknown_class`). The
-> class part of the record's id MUST denote the same class as its `type`
-> (`class_mismatch`). Two records are of compatible types exactly when they
+> a class, an alias nor a vendor class is invalid (`unknown_class`). An id
+> whose class part is neither a class, an alias nor a vendor class is not an
+> id of §7.1 (`invalid_entity_id`). The class part of the record's id MUST
+> denote the same class as its `type` (`class_mismatch`). Two records are of compatible types exactly when they
 > are of the same class.
 >
 > A *unique attribute* is an attribute key whose value identifies an entity
@@ -138,7 +139,7 @@ The proposed text of §7.3 for Standard 1.3.0:
 > - the records are not all of one class (`incompatible_types`);
 > - two records conflict on a unique attribute (`conflicting_identifier`);
 > - the merged record's id is not an id of §7.1 (`invalid_entity_id`) or
->   does not denote the records' class (`unknown_class`, `class_mismatch`).
+>   does not denote the records' class (`class_mismatch`).
 >   It is one of the merged ids or a new one.
 >
 > A host that splits an entity record MUST refuse the split when:

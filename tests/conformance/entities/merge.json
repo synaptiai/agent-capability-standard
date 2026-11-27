@@ -1,5 +1,5 @@
 {
-  "description": "Merge and split vectors (Agent Capability Standard, section 7.3 as RFC-0012 proposes it for 1.3.0). Proposed, not normative: RFC-0012 is a Draft, and Standard 1.2.0 states section 7.3 as a requirement on hosts with no vectors. A record is a world-state entity: an id of section 7.1, a type, and attributes. Its class is what its type denotes in `classes` (a class name or alias of schemas/entity_taxonomy.yaml 1.1.0, mapped to its class name), or the type itself for a vendor class x-...; the class part of its id must denote the same class. A merge combines at least two records with distinct ids, all of one class, of which no two give a unique attribute (one listed in `unique_attributes`, which a host supplies) different values; a missing or null value conflicts with none, and values are compared as JSON values (numbers by value, strings exactly, a boolean is not a number). The merged id is one of the records' ids or a new id of their class. A split gives at least two records with distinct ids, none the split record's id, all of the split record's class; it has no identifier constraint. A check refuses with the reason of the first constraint violated, in this order: merge: too_few_entities, each record (invalid_entity, invalid_entity_id, unknown_class, class_mismatch), duplicate_id, incompatible_types, conflicting_identifier, the merged id (invalid_entity_id, unknown_class, class_mismatch); split: the split record, too_few_entities, each new record, duplicate_id, reused_id, incompatible_types. An allowed operation gives its lineage record: operation, class, from (the ids merged or split, in the given order) and into (the resulting ids, in the given order).",
+  "description": "Merge and split vectors (Agent Capability Standard, section 7.3 as RFC-0012 proposes it for 1.3.0). Proposed, not normative: RFC-0012 is a Draft, and Standard 1.2.0 states section 7.3 as a requirement on hosts with no vectors. A record is a world-state entity: an id of section 7.1, a type, and attributes. Its class is what its type denotes in `classes` (a class name or alias of schemas/entity_taxonomy.yaml 1.1.0, mapped to its class name), or the type itself for a vendor class x-...; the class part of its id must denote the same class, and an id whose class part is neither a class, an alias nor a vendor class is not an id of section 7.1 (invalid_entity_id). A merge combines at least two records with distinct ids, all of one class, of which no two give a unique attribute (one listed in `unique_attributes`, which a host supplies) different values; a missing or null value conflicts with none, and values are compared as JSON values (numbers by value, strings exactly, a boolean is not a number). The merged id is one of the records' ids or a new id of their class. A split gives at least two records with distinct ids, none the split record's id, all of the split record's class; it has no identifier constraint. A check refuses with the reason of the first constraint violated, in this order: merge: too_few_entities, each record (invalid_entity, invalid_entity_id, unknown_class, class_mismatch), duplicate_id, incompatible_types, conflicting_identifier, the merged id (invalid_entity_id, class_mismatch); split: the split record, too_few_entities, each new record, duplicate_id, reused_id, incompatible_types. An allowed operation gives its lineage record: operation, class, from (the ids merged or split, in the given order) and into (the resulting ids, in the given order).",
   "rfc": "RFC-0012",
   "target": "1.3.0",
   "section": "7.3",
@@ -778,6 +778,31 @@
         }
       ],
       "into": "api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "into_class_not_in_taxonomy",
+      "about": "A merged id whose class part is not in the taxonomy is not an id of section 7.1.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "service:acme/payments/prod/payments-api",
+          "type": "service",
+          "attributes": {}
+        }
+      ],
+      "into": "nosuch:acme/payments/prod/api",
       "unique_attributes": [
         "serial",
         "employee_id"
