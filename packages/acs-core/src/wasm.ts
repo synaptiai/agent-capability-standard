@@ -219,6 +219,11 @@ export interface StartArgs extends SetArgs {
    * `parseCatalog` returns it. Required. */
   header: string | null;
   runId: string;
+  /** The run's attendance, which the host gives for a run no trigger
+   * started (section 5.10.2); attended by default. Pass `unattended` when
+   * no person can answer an approval request within its `expires` through
+   * any channel: a `human` approver is then not asked, and
+   * `when_unattended` applies at once (section 5.14, Attendance). */
   attendance?: 'attended' | 'unattended';
   nowMs: number;
   actorIdentity?: Json;
@@ -251,7 +256,8 @@ export interface RestoreArgs extends SetArgs {
 
 /** How a run that ended `deferred` is resumed (section 5.14.1). */
 export interface ResumeArgs {
-  /** The run's attendance from now on; attended by default. */
+  /** The run's attendance from now on; attended by default. Decided as
+   * for `StartArgs.attendance`. */
   attendance?: 'attended' | 'unattended';
   nowMs: number;
   /** Who carries the run on (section 5.17); the run's actor when left out. */

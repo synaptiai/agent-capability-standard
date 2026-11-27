@@ -3087,6 +3087,15 @@ questions:
   depends: Whether a guard asks a `human` approver and waits, or applies `when_unattended` at once (F502
     by default). On Standard Agents a human-backed side shows that someone can answer, not that someone
     is there.
+  answer: 'The host decides: Standard 1.2.0 §5.10.2 has a host that starts a run by other means than a
+    trigger give its attendance itself, and §5.14 (Attendance) gives the effect, a `human` approver not
+    asked and `when_unattended` applied at once in an unattended run. The guidance, which adds no requirement
+    (docs/guides/ORCHESTRATION_EXTENSIONS.md, Triggers; docs/integrations/standard_agents.md, Running ACS
+    workflows): the run is attended when a person can answer within the approval''s `expires` through
+    some channel, on Standard Agents a human-backed side or the authenticated approval endpoint, and unattended
+    when no person can. The reference hosts start and resume such a run attended by default. Under either
+    reading no step runs unapproved, and an attended request nobody answers by its `expires_at` lapses
+    with F502 (§5.14).'
 - id: ACS-Q11
   question: May a canonical event's `raw` hold a payload from which the host has removed secrets, with
     the removal recorded as documented loss under §3.2, or does "Original unmodified data" in §6.2 forbid

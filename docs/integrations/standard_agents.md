@@ -1004,6 +1004,19 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 | `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
 | The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
+A run the handler starts has no trigger, so the host gives its attendance
+([§5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)). Start it
+attended when a person can answer an approval request within the request's
+`expires`: through a human-backed side of the thread, or by calling the
+binding's authenticated approval endpoint. Start it unattended when no person
+can, for example a thread with no human-backed side whose approvers have no
+access to the endpoint. In an unattended run a `human` approver is not asked
+and `when_unattended` applies at once (F502 by default). `CoreContext.start`
+and `CoreRun.resume` start and resume a run attended unless `attendance` says
+otherwise. Either way no step runs without approval: an attended request
+nobody answers before its `expires` lapses with F502
+([Orchestration extensions](../guides/ORCHESTRATION_EXTENSIONS.md#triggers-triggers1)).
+
 What stands in the way is the runtime, not the design. The reference core is
 a Rust crate; the TypeScript package's `./wasm` entry runs it in process
 through a JSON interface over WebAssembly, with a context built from bundled
