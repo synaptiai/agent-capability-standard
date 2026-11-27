@@ -647,8 +647,9 @@ def snapshot(paths: list[Path]) -> dict[str, tuple[Any, ...]]:
 
 # The targets, by name: each is a file or directory a sandboxed command must
 # not change. The project's records, the files that would weaken the next
-# session (settings files and hook scripts), the audit key's directory, and
-# files outside the project.
+# session (settings files, hook scripts, a project .mcp.json, the user
+# configuration directory and ~/.claude.json), the audit key's directory,
+# and files outside the project.
 TARGETS: dict[str, Any] = {
     "audit.log": lambda w: w.project / ".claude" / "audit.log",
     "audit.head": lambda w: w.project / ".claude" / "audit.head",
@@ -663,6 +664,7 @@ TARGETS: dict[str, Any] = {
     "project settings": lambda w: w.project / ".claude" / "settings.json",
     "project local settings": lambda w: w.project / ".claude" / "settings.local.json",
     "project hooks": lambda w: w.project / ".claude" / "hooks",
+    "project mcp": lambda w: w.project / ".mcp.json",
     "project hook script": lambda w: (
         w.project / ".claude" / "hooks" / "project-hook.sh"
     ),
@@ -672,6 +674,8 @@ TARGETS: dict[str, Any] = {
     "audit key directory": lambda w: w.home / ".config" / "acs",
     "home file": lambda w: w.home / "notes.txt",
     "user settings": lambda w: w.home / ".claude" / "settings.json",
+    "user config directory": lambda w: w.home / ".claude",
+    "user claude.json": lambda w: w.home / ".claude.json",
     "home": lambda w: w.home,
     "outside file": lambda w: w.outside / "file.txt",
     "outside directory": lambda w: w.outside,
@@ -767,11 +771,14 @@ CREATE: dict[str, Any] = {
 CREATE_TARGETS: list[tuple[str, str | None]] = [
     ("checkpoint marker", None),
     ("project local settings", None),
+    ("project mcp", None),
+    ("user claude.json", None),
     ("marker history", "planted"),
     ("git dir records", "planted"),
     ("project hooks", "planted.sh"),
     ("plugin hooks", "planted.sh"),
     ("audit key directory", "planted"),
+    ("user config directory", "planted"),
     ("home", "planted"),
     ("outside directory", "planted"),
 ]
@@ -799,6 +806,7 @@ def _watched(w: World) -> list[Path]:
     """Every path a write route could change, watched as a whole."""
     return [
         w.project / ".claude",
+        w.project / ".mcp.json",
         w.git_dir / "acs",
         w.git_dir,
         w.plugin / "hooks",
@@ -1330,8 +1338,8 @@ def test_reach_the_metadata_address(world: World, runtime: str, spelling: str) -
             "169.254.169.254 does not answer here without the sandbox, so the "
             "route cannot be tested"
         )
-        # The Linux CI job sets this when the address answered before the
-        # suite ran; whether it answers on a hosted runner is not known.
+        # The CI job sets this when the address answered before the suite
+        # ran (on ubuntu-latest it answered with HTTP status 400).
         if os.environ.get("ACS_BOUNDARY_METADATA_REQUIRED") == "1":
             pytest.fail(f"ACS_BOUNDARY_METADATA_REQUIRED=1 but {reason}", pytrace=False)
         pytest.skip(reason)
@@ -1505,14 +1513,17 @@ def test_a_glob_entry_is_skipped_on_linux(world: World, runtime: str) -> None:
 
 def test_the_shared_directories(world: World, runtime: str) -> None:
     """The runtime leaves a few directories writable and shared with the
-    host when they exist: its own temporary directory and two of the home
-    directory's (measured with srt 0.0.82). None holds a record, a key or
-    a settings file, and the layer reads nothing from them."""
+    host when they exist: its own temporary directory and the home
+    directory's .npm/_logs and .claude/debug (measured with srt 0.0.82).
+    The setup denies the user configuration directory to writes, which
+    takes .claude/debug back; the two left hold no record, key or settings
+    file, and the layer reads nothing from them."""
     tag = f"acs-boundary-{os.urandom(4).hex()}"
+    debug = world.home / ".claude" / "debug"
+    debug.mkdir(parents=True, exist_ok=True)
     shared = [
         Path("/tmp/claude"),
         world.home / ".npm" / "_logs",
-        world.home / ".claude" / "debug",
     ]
     made_tmp = not shared[0].exists()
     for d in shared:
@@ -1520,12 +1531,13 @@ def test_the_shared_directories(world: World, runtime: str) -> None:
     denied = json.loads(world.config.read_text())["filesystem"]["denyWrite"]
     for d in shared:
         assert not any(p == str(d) or p.startswith(str(d) + "/") for p in denied)
-    script = "; ".join(f"printf x > {_q(d / tag)}" for d in shared)
+    script = "; ".join(f"printf x > {_q(d / tag)}" for d in [*shared, debug])
     try:
         sandboxed(world, runtime, script)
         assert [d for d in shared if (d / tag).exists()] == shared
+        assert not (debug / tag).exists()
     finally:
-        for d in shared:
+        for d in [*shared, debug]:
             (d / tag).unlink(missing_ok=True)
         if made_tmp:
             shared[0].rmdir()
@@ -2035,6 +2047,6 @@ def test_claude_code_user_scope_unlisted_host(
     if PAGE_MARK in joined:
         raise RouteGotThrough(f"the unlisted host answered: see {run.stream}")
     # The sandbox's proxy refused the tunnel (curl's own words, seen under
-    # Claude Code 2.1.322 on macOS), not the permission check or a timeout.
+    # Claude Code 2.1.332 on macOS), not the permission check or a timeout.
     assert not run.refused, f"the permission check refused it: see {run.stream}"
     assert "CONNECT tunnel failed, response 403" in joined, f"see {run.stream}"

@@ -1244,8 +1244,9 @@ made in the command, `cp`, truncation, `rm`, `mv`, `touch`, `mkdir`):
   user's `~/.claude/settings.json`, the project's `.claude/settings.json`
   and `.claude/settings.local.json` (also with a weakening as content: the
   sandbox off, an excluded command, the escape parameter allowed, a wider
-  write scope), its `.claude/hooks/`, the plugin's hook scripts and the
-  audit key's directory;
+  write scope), its `.claude/hooks/` and an absent `.mcp.json`, the
+  plugin's hook scripts, the audit key's directory, the user configuration
+  directory `~/.claude` and an absent `~/.claude.json`;
 - write to the home directory or another directory outside the project;
 - read the audit key, an SSH key, gh's `hosts.yml`, `~/.git-credentials`,
   `~/.npmrc` and the checkpoint key, and the token variables `GH_TOKEN`,
@@ -1276,9 +1277,10 @@ runtime does that the settings must allow for: a misspelled key is
 accepted and ignored, so its denial fails open (the setup's check names
 it); on Linux a `denyWrite` entry holding a glob is skipped (Seatbelt
 honours it); and the runtime's temporary directory `/tmp/claude` and the
-home directory's `.npm/_logs` and `.claude/debug`, when they exist, stay
-writable and shared with the host. None of them holds a record, a key or
-a settings file.
+home directory's `.npm/_logs`, when they exist, stay writable and shared
+with the host. Neither holds a record, a key or a settings file. The
+runtime shares `~/.claude/debug` too, but the setup denies the user
+configuration directory to writes, and a write there is refused.
 
 How the settings are translated, as Claude Code builds the runtime's
 configuration (the evidence is from Claude Code 2.1.332 on macOS): the write scope is the project and Claude Code's
@@ -1296,16 +1298,26 @@ Results with srt 0.0.82, on 2026-11-27:
 
 | Where | Result |
 |-------|--------|
-| macOS 27.2 (Seatbelt), `/bin/bash` 3.2 | 561 passed, 2 expected failures; skipped: the metadata address (3) and the Claude Code tests (31) |
+| macOS 27.2 (Seatbelt), `/bin/bash` 3.2 | 594 passed, 2 expected failures; skipped: the metadata address (3) and the Claude Code tests (31) |
 | Linux, `node:22-bookworm` (bubblewrap 0.8.0), as uid 1000 | 565 passed, 2 expected failures; skipped: the keychain (8), the metadata address (3) and the Claude Code tests (31) |
 | Linux, `ubuntu:24.04` (bubblewrap 0.9.0), as uid 1000 | 565 passed, 2 expected failures; skipped as on `node:22-bookworm` |
 
-The two containers ran on an arm64 Mac under Docker Desktop with
+The Linux runs predate the routes against a project `.mcp.json`, the user
+configuration directory and `~/.claude.json` (33 tests), which ran on
+macOS only. The two containers ran on an arm64 Mac under Docker Desktop with
 `--security-opt seccomp=unconfined --security-opt systempaths=unconfined`.
 Their kernel has no `kernel.apparmor_restrict_unprivileged_userns`, so the
-AppArmor restriction of Ubuntu 24.04 hosts was not met there; the CI job
-lifts it when it reads 1 and checks that bubblewrap starts before the
-suite runs.
+AppArmor restriction of Ubuntu 24.04 hosts was not met there. On the
+hosted `ubuntu-latest` runner on 2026-11-27, lifting
+`kernel.apparmor_restrict_unprivileged_userns` alone was not enough: every
+test failed at setup because srt's seccomp helper could not make its
+nested user namespace ("write /proc/self/setgroups ... Permission
+denied"). The CI jobs now run `.github/scripts/sandbox-runner-setup.sh`
+before the suite: on Linux it also sets
+`kernel.apparmor_restrict_unprivileged_unconfined` to 0 and unloads
+AppArmor's profiles for bubblewrap where they are present, then runs srt
+once and fails with srt's own message when the sandbox does not start.
+Whether that is enough on the hosted runner has not been seen yet.
 
 The two expected failures are a hard link made before the command starts:
 it names the record or key under a path no deny entry lists, and both
@@ -1321,7 +1333,7 @@ the precedence of settings files, the permission modes, and the network
 callback that lets an unlisted host through when `strictAllowlist` is off.
 The suite's Claude Code tests run those routes through `claude -p` when
 `ACS_BOUNDARY_CLAUDE=1`. The canary each write route aims at is a scratch
-directory outside the project. Under Claude Code 2.1.322 (the version the
+directory outside the project. Under Claude Code 2.1.332 (the version the
 CI job pins) on macOS, on 2026-11-27: 26 passed, 4 expected failures and
 1 skipped. The skipped test is the escape parameter under the setup's
 settings at flag scope: the model did not set the parameter. Run on its
@@ -1384,10 +1396,12 @@ makes each of those a failure, and `ACS_SRT` names `srt` when it is not on
 runner's normal user. Before the suite, each job checks whether
 169.254.169.254 answers on the runner; where it does, the job sets
 `ACS_BOUNDARY_METADATA_REQUIRED=1` and a skipped metadata route fails,
-and where it does not, the job prints a warning. Whether it answers on a
-hosted runner has not been seen yet. A third job runs the Claude Code
-tests on Linux with Claude Code 2.1.322 when the repository secret
-`ANTHROPIC_API_KEY` is set, after checking that bubblewrap starts, and
+and where it does not, the job prints a warning. On `ubuntu-latest`, on
+2026-11-27, it answered with HTTP status 400, so the route is required
+there; the suite counts any status the proxy did not write as an answer.
+A third job runs the Claude Code
+tests on Linux with Claude Code 2.1.332 when the repository secret
+`ANTHROPIC_API_KEY` is set, after the same check that srt starts, and
 fails when none of them passes (a test skips when the model makes no
 call); without the secret the job runs nothing and passes. Claude Code has
 not been run on Linux.

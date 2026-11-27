@@ -2430,8 +2430,9 @@ here and marked so.
   permission rules. A hard link made before the command starts gets past
   the sandbox on both platforms; the tests mark it as an expected failure.
   They also record that the runtime ignores a misspelled key, skips a glob
-  on Linux, and shares `/tmp/claude`, `~/.npm/_logs` and `~/.claude/debug`
-  with the host. Claude Code tests run routes through `claude -p` in the
+  on Linux, and shares `/tmp/claude` and `~/.npm/_logs` with the host
+  (`~/.claude/debug` too, which the setup's denial of the user
+  configuration directory takes back). Claude Code tests run routes through `claude -p` in the
   default, `acceptEdits` and `bypassPermissions` modes, with controls for
   the audit-log deny rule, `strictAllowlist`, the escape parameter and
   `excludedCommands`, and with the settings at user scope under a project
