@@ -30,6 +30,9 @@ jobs:
   publish:
     name: Publish @synaptiai/acs-core
     runs-on: ubuntu-latest
+    # It builds the WebAssembly module, as ci.yml's typescript-package job does,
+    # and has the same limit, so a hung runner is not held for 360 minutes.
+    timeout-minutes: 30
     # A hand-started publish runs from main, never another branch (release.yml's guard).
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     permissions:

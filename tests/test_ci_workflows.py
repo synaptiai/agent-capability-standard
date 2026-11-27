@@ -1,13 +1,16 @@
-"""The npm publish workflow and the WebAssembly build in CI.
+"""The npm publish workflow, the WebAssembly build in CI, and time limits.
 
-`.github/` is outside `tests/test_core_yaml.py`'s scope, so this test is the
-one that reads the two workflow files (with the core's YAML loader). It
-checks that `publish-npm.yml` builds with CI's Rust toolchain, runs only
-from `main` or a pushed tag (release.yml's guard), checks out the tag and
-refuses one whose commit is not on `main`, and that every job that builds
-the WebAssembly module names the toolchain that has the wasm32 target. It
-also checks that each script a CI step runs can import what it needs from
-what its job has installed by then.
+`.github/` is outside `tests/test_core_yaml.py`'s scope, so this is the
+Python test that reads the workflow files `ci.yml`, `site.yml`,
+`publish-npm.yml` and `release.yml` (with the core's YAML loader). It checks
+that every job in them has a `timeout-minutes` of at least 15, that
+`publish-npm.yml` builds with CI's Rust toolchain, runs only from `main` or a
+pushed tag (release.yml's guard), checks out the tag and refuses one whose
+commit is not on `main`, and that every job that builds the WebAssembly
+module names the toolchain that has the wasm32 target. It also checks that
+each script a CI step runs can import what it needs from what its job has
+installed by then, and that only a pull request's superseded runs are
+cancelled.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ def load(name: str) -> dict[str, Any]:
 
 
 CI = load("ci.yml")
+SITE = load("site.yml")
 PUBLISH = load("publish-npm.yml")
 RELEASE = load("release.yml")
 
@@ -37,6 +41,31 @@ RELEASE = load("release.yml")
 def steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = job.get("steps") or []
     return found
+
+
+def test_every_job_has_a_time_limit() -> None:
+    """Without `timeout-minutes` a hung runner is held for GitHub's default
+    of 360 minutes."""
+    for doc in (CI, SITE, PUBLISH, RELEASE):
+        for name, job in doc["jobs"].items():
+            limit = job.get("timeout-minutes")
+            assert isinstance(limit, int) and limit >= 15, name
+
+
+def test_only_a_pull_requests_superseded_runs_are_cancelled() -> None:
+    """A pull request's runs share a group keyed on its ref, so a newer push
+    cancels the older run. Any other run gets a group of its own (keyed on
+    its run id): a group holds one pending run and a newer run cancels it even
+    when `cancel-in-progress` is false, so pushes to main sharing a group
+    would lose the CI result of a commit merged between two others."""
+    concurrency = CI["concurrency"]
+    assert concurrency["cancel-in-progress"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
+    assert concurrency["group"] == (
+        "ci-${{ github.event_name == 'pull_request' && github.ref"
+        " || github.run_id }}-${{ github.event_name }}"
+    )
 
 
 def test_publish_uses_cis_toolchain() -> None:
