@@ -7864,18 +7864,22 @@ left to the wave-2 pass that edits §5.5 and `CLAUDE.md` once.
 
 ### Checks after the batch
 
-On the round's fixes merged with origin/main at 18c38b74:
+On the round's fixes at 3463ac8c (merged with origin/main at 18c38b74):
 
-- TypeScript package: `npm run build:wasm` (toolchain 1.99.1), `npm run
-  build`, `npm run check`, `npm test` (2186 passed).
-- Binding: `tsc --noEmit`, `vitest run` (318 passed, 2 skipped).
-- Old code: the new tests against 8ec818c2's `grounded.ts`, `lint.ts` and
-  `binding.ts`, copied in place and then restored: 10 of 22 binding tests
-  and 9 of 17 package tests fail; the controls pass. The tests of defect 4
-  against the `audit.ts`, `grounded.ts` and `records.ts` that carried the
-  first three fixes: 2 of 3 fail; the control passes.
+- Binding: `tsc --noEmit`, `vitest run` (322 passed, 2 skipped).
+- Old code: `profiles.test.ts`, `grounded.test.ts` and `evidence.test.ts`
+  against 8ec818c2's `grounded.ts`, `lint.ts`, `audit.ts`, `records.ts`
+  and the package's `binding.ts`, copied in place and then restored: 16 of
+  134 tests fail, each a test of this round; at 3463ac8c all 134 pass.
+  One of the 16 is a control ("covers the plain call made while
+  `middle`'s own approval is valid"), which needs `middle` to ask an
+  approval of its own, as only the fix makes it do.
+- TypeScript package, on the round's first fixes merged with origin/main
+  (no package file changed after them): `npm run build:wasm` (toolchain
+  1.99.1), `npm run build`, `npm run check`, `npm test` (2186 passed); on
+  8ec818c2's `binding.ts`, 9 of the 17 tests of this round fail.
 - `tools/validate_doc_links.py`.
-- Not run: the site build and the figure-gap sweep for the Standard Agents
-  guide (no Chromium run here). No Python, Rust, hook or skill file
-  changed, so the Python suite, the Rust checks and the hook tests were not
-  run.
+- Not run here: the site build and the figure-gap sweep for the Standard
+  Agents guide (no Chromium run here; the pull request's CI runs them).
+  No Python, Rust, hook or skill file changed, so the Python suite, the
+  Rust checks and the hook tests were not run.
