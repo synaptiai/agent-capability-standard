@@ -150,13 +150,14 @@ class LivenessWatcher:
         return self.lost_at(now_ms) is not None
 
     def next_check_ms(self, now_ms: int) -> int:
-        """When to look again, after ``now_ms``: in ``probe`` mode when the
-        next probe is due (``interval`` after the last one, or after the
-        wait began); in ``push`` mode when the next miss is counted, 1 ms
-        after the next heartbeat is due."""
+        """When to look again, never before ``now_ms``: in ``probe`` mode
+        when the next probe is due (``interval`` after the last one, or
+        after the wait began), or ``now_ms`` when that time has passed
+        (probe now); in ``push`` mode when the next miss is counted, 1 ms
+        after the next heartbeat is due, which is always after ``now_ms``."""
         misses = self.misses(now_ms)
         if self.mode == "probe":
-            return self._last_ms + self.interval_ms
+            return max(self._last_ms + self.interval_ms, now_ms)
         return self._last_ms + (misses + 1) * self.interval_ms + 1
 
     def response(self, now_ms: int) -> LivenessLostResponse | None:

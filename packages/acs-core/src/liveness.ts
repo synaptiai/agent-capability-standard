@@ -132,13 +132,14 @@ export class LivenessWatcher {
   }
 
   /**
-   * When to look again, after `nowMs`: in `probe` mode when the next probe
-   * is due; in `push` mode when the next miss is counted, 1 ms after the
-   * next heartbeat is due.
+   * When to look again, never before `nowMs`: in `probe` mode when the next
+   * probe is due, or `nowMs` when that time has passed (probe now); in `push`
+   * mode when the next miss is counted, 1 ms after the next heartbeat is due,
+   * which is always after `nowMs`.
    */
   nextCheckMs(nowMs: number): number {
     const misses = this.misses(nowMs);
-    if (this.mode === 'probe') return this.#lastMs + this.intervalMs;
+    if (this.mode === 'probe') return Math.max(this.#lastMs + this.intervalMs, nowMs);
     return this.#lastMs + (misses + 1) * this.intervalMs + 1;
   }
 

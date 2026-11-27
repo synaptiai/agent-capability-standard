@@ -107,6 +107,16 @@ describe('LivenessWatcher in probe mode', () => {
   });
 });
 
+describe('LivenessWatcher overdue probe', () => {
+  it('is due now, never in the past', () => {
+    const w = new LivenessWatcher({ mode: 'probe', interval: '10m', failure_threshold: 3 }, 0);
+    expect(w.nextCheckMs(25 * MIN)).toBe(25 * MIN);
+    w.probeFailed(25 * MIN);
+    expect(w.nextCheckMs(25 * MIN)).toBe(35 * MIN);
+    expect(w.nextCheckMs(40 * MIN)).toBe(40 * MIN);
+  });
+});
+
 describe('LivenessWatcher construction', () => {
   it("reads an AwaitEvent action's wait, and gives null without liveness", () => {
     const w = LivenessWatcher.forAction({ liveness: { mode: 'probe', interval: 'PT30S', failure_threshold: 2 } }, 5);

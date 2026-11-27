@@ -121,6 +121,14 @@ class TestProbe:
         assert w.lost(40 * MIN)
 
 
+    def test_an_overdue_probe_is_due_now_never_in_the_past(self) -> None:
+        w = self.probe()
+        assert w.next_check_ms(25 * MIN) == 25 * MIN
+        w.probe_failed(25 * MIN)
+        assert w.next_check_ms(25 * MIN) == 35 * MIN
+        assert w.next_check_ms(40 * MIN) == 40 * MIN
+
+
 class TestConstruction:
     def test_for_action_reads_the_wait_and_none_without_liveness(self) -> None:
         action = {
