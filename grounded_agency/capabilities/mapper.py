@@ -37,6 +37,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..errors import ErrorCode, Severity, ValidationError, text_form
+from ..remote_writes import binding_records as _remote_write_bindings
 from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
 from .registry import CapabilityNode, CapabilityRegistry
 
@@ -1185,6 +1186,11 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "ListMcpResourcesTool": "observe",
     "ReadMcpResourceTool": "retrieve",
     "ExitPlanMode": "inquire",
+    # The plugin's typed remote writes, under the names Claude Code gives its
+    # MCP server's tools (grounded_agency/remote_writes.py): each a gated
+    # mutate. A host that offers the server under another name loads
+    # remote_writes.binding_records(<its prefix>) with load_bindings.
+    **{r["tool"]: r["capability"] for r in _remote_write_bindings()},
 }
 
 # Tools whose call loads a definition that runs commands no hook sees, with
