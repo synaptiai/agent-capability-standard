@@ -1372,6 +1372,13 @@ class ToolCapabilityMapper:
         self.command_may_be_content: Callable[
             [str, str | None, str | None, str | None], bool
         ] = command_may_be_content
+        # Whether an operating-system boundary holds for a Bash call now
+        # (STANDARD 1.2.0 section 5.18.3, as RFC-0011 proposes it): Bash is
+        # a shell-like tool, and its classifier relaxes a call below the
+        # worst case only while this returns True. The adapter sets it from
+        # the sandbox of the options it wraps (``wrap_options``). None, a
+        # False, or a check that raises: every Bash call is its worst case.
+        self.os_boundary: Callable[[], bool] | None = None
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1767,6 +1774,8 @@ class ToolCapabilityMapper:
         if tool_name == "Bash":
             if not isinstance(tool_input, dict):
                 tool_input = {}
+            if not self.boundary_holds(tool_input):
+                return self._worst_case()
             return self._classify_bash_command(tool_input, cwd)
 
         # Check dynamic mappings (MCP tools, etc.)
@@ -1785,6 +1794,25 @@ class ToolCapabilityMapper:
         # Unknown tool: nothing says what it does, so assume the strictest
         # case instead of a read.
         return UNCLASSIFIED_TOOL
+
+    def boundary_holds(self, tool_input: dict[str, Any]) -> bool:
+        """Whether the Bash call with ``tool_input`` runs under a verified
+        operating-system boundary (:attr:`os_boundary`), so that its
+        classifier may relax it. Never for a call that asks to run outside
+        the sandbox (``dangerouslyDisableSandbox`` set to anything but
+        false): whether the host honours that argument is the host's
+        configuration, which a call cannot settle (STANDARD 1.2.0 section
+        5.18.3)."""
+        if tool_input.get("dangerouslyDisableSandbox", False) is not False:
+            return False
+        check = self.os_boundary
+        if check is None:
+            return False
+        try:
+            return check() is True
+        except Exception:
+            logger.exception("Could not verify the operating-system boundary")
+            return False
 
     def person_required(self, mapping: ToolMapping) -> bool:
         """Whether the applied profiles require a person for a call with

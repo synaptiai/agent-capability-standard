@@ -106,6 +106,16 @@ async def main():
         )
     )
 
+    # Bash runs under the sandbox wrap_options() turns on, and the adapter
+    # classifies a Bash call by its command only there; without it, every
+    # Bash call is a gated mutate and send.
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+
+        adapter.wrap_options(ClaudeAgentOptions(setting_sources=[]))
+    except ImportError:
+        print("claude-agent-sdk is not installed: every Bash call is the worst case")
+
     # What wrap_options() installs as can_use_tool when the options it wraps
     # carry the host's callback (here: approve).
     permission_callback = adapter._make_permission_callback(approve)

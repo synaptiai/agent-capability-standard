@@ -563,10 +563,13 @@ def test_hooks_json_starts_each_hook_ignoring_the_shells_startup_variables() -> 
         assert any('exec bash -p "$0" "$@"' in line for line in head), script.name
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 class TestAdapter:
     """The SDK adapter's sibling: the CLI applies the same env to every
     command it runs where it loads the project's settings (setting_sources
-    None, or naming "project" or "local")."""
+    None, or naming "project" or "local"). Bash is classified as under a
+    verified sandbox: whether the sandbox holds is tests/test_adapter_sandbox.py's
+    concern, and it reads the user's settings, which these tests load."""
 
     def _hook(self, adapter: Any, **options: Any) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions

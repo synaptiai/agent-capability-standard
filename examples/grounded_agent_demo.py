@@ -235,6 +235,15 @@ async def demo_tool_mapping():
     adapter = GroundedAgentAdapter(
         demo_config()
     )
+    # Bash runs under the sandbox wrap_options() turns on, and the adapter
+    # classifies a Bash call by its command only there; without it, every
+    # Bash call is a gated mutate and send.
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+
+        adapter.wrap_options(ClaudeAgentOptions(setting_sources=[]))
+    except ImportError:
+        print("claude-agent-sdk is not installed: every Bash call is the worst case")
 
     # Test various tools
     test_cases = [

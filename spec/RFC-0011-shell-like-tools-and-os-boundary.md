@@ -41,8 +41,8 @@ interprets it: the shell, with its own version, options, configuration,
 environment and the files it reads. A classifier that reads the text cannot
 show that its reading matches what that program does.
 
-The reference layers relax shell calls today. The Python adapter's Bash
-classifier and the plugin's pre-tool-use hook let a command whose every
+Both reference layers classify shell calls from their text. The Python
+adapter's Bash classifier and the plugin's pre-tool-use hook let a command whose every
 program is on a read-only list run with no checkpoint and no approval, take
 `git stash create` as a checkpoint, take `git stash pop` or `apply` of a
 recorded commit as a rollback, and give local file changes a gated `mutate`
@@ -446,15 +446,9 @@ claim of class SL is judged without it.
 §10.4's list of what a layer does not apply (`not_applied` in the
 statement schema) covers the rule for shell-like tools as well as the
 checks of §5.18.10, and a layer that lists anything there does not conform.
-The Python adapter's statement does not list its Bash classifier there:
-under the text that binds today the adapter conforms, and
-`spec/CONFORMANCE.md` states that neither reference layer lists anything.
-The gap is stated in prose instead (the Standard's status line,
-`spec/CONFORMANCE.md`, `spec/SECURITY.md` and the SDK guide). A test of the
-statement fails once the Bash classifier stops relaxing calls, so the
-statement and the prose change with the classifier. When this RFC is
-Accepted, the adapter either meets the rule (issue #184), or its statement
-lists the gap in `not_applied` and the adapter no longer claims the class.
+Neither reference layer lists anything there: the Python adapter meets the
+rule (below), and `spec/CONFORMANCE.md` states that neither lists
+anything.
 
 ## Backward compatibility
 
@@ -473,19 +467,17 @@ statements carry the member.
 
 What each reference layer does:
 
-- **The Python SDK adapter** offers Claude Code's Bash, and its classifier
-  relaxes Bash calls (read-only commands, `git stash create`, restores of a
-  recorded checkpoint, local file changes) with no boundary declared. Its
-  statement declares what is true now: `"none"` for Bash, and for Monitor,
-  PowerShell, Skill, Agent and Task, which it already gives one worst case
-  whatever their arguments. Once this RFC is Accepted the adapter does not
-  conform to class SL until it either gives every Bash call the worst case
-  or turns on a sandbox with the four properties in the options it wraps,
-  verifies it in the effective options, and declares it. Issue #184 tracks
-  that work. Decision 8 says why the statement does not list the gap in
-  `not_applied` while the RFC is a Draft; the gap is stated here, in the
-  Standard's status line, in `spec/CONFORMANCE.md`, in `spec/SECURITY.md`
-  and in the SDK guide.
+- **The Python SDK adapter** offers Claude Code's Bash. `wrap_options()`
+  turns on Claude Code's sandbox with the four properties in the options
+  it builds, unless they carry a sandbox of their own, and adds deny rules
+  for the layer's records. Its classifier relaxes a Bash call (a read-only
+  command, `git stash create`, a restore of a recorded checkpoint, a local
+  file change) only while it has verified, in the options it built and in
+  the other settings files the CLI loads, that the sandbox has each
+  property; every other Bash call gets the worst case. Its statement
+  declares that sandbox for Bash, and `"none"` for Monitor, PowerShell,
+  Skill, Agent and Task, which it gives one worst case whatever their
+  arguments.
 - **The Standard Agents binding** covers no shell-like tool and applies no
   classifier: a binding with a `classifier` gets its worst case. Its
   statement declares `{}`. It conforms unchanged.
@@ -505,14 +497,16 @@ its shell-like tools the worst case and takes checkpoints by another route.
   least one entry). Its `not_applied` covers the rule for shell-like tools
   as well as the checks of §5.18.10.
 - `tests/conformance/calls/statements/grounded_agency_adapter.json` declares
-  `"none"` for Bash, Monitor, PowerShell, Skill, Agent and Task;
+  Claude Code's sandbox for Bash and `"none"` for Monitor, PowerShell,
+  Skill, Agent and Task;
   `tests/conformance/calls/statements/standard_agents_binding.json` declares
   `{}`. The existing tests validate every statement against the schema; a
   new test checks that the schema refuses an empty `outside`, a member it
   does not define and a statement without `shell_tools`. The adapter's test
   checks the statement against the mapper: Monitor and PowerShell get an
   unbound tool's worst case, Skill, Agent and Task one gated mapping
-  whatever their arguments, and Bash is still relaxed.
+  whatever their arguments, and Bash is relaxed only in options the
+  adapter wrapped with its sandbox.
 - The binding fixture `offered_classified_tool_counts` names its classified
   tool `batch` instead of `shell`: a fixture cannot say whether a tool is
   shell-like, and under §5.18.2 a shell-like tool with no boundary would not
@@ -564,8 +558,9 @@ its shell-like tools the worst case and takes checkpoints by another route.
   layer with no boundary conforms by giving the worst case, and a layer
   that cannot verify one is in the same position. The worst case still
   runs only with a checkpoint and approval.
-- **Recording the adapter's gap in `not_applied` now.** Rejected while the
-  RFC is a Draft: see decision 8.
+- **Recording a layer's gap in `not_applied` while the RFC is a Draft.**
+  Rejected: under the text that binds today such a layer conforms;
+  decision 8 says when the rule binds.
 - **Naming an unreadable configuration source as a host gap.** Rejected: a
   host gap is a case where a call runs without the layer's decision; here
   the layer decides, and an unverified boundary would let it relax on a

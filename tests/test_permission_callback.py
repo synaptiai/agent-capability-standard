@@ -88,6 +88,7 @@ async def test_a_stop_of_another_session_while_the_call_waits_is_f501(
     assert result.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 @pytest.mark.asyncio
 async def test_changed_arguments_that_need_a_checkpoint_are_f501(
     adapter: GroundedAgentAdapter,

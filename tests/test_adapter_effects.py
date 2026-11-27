@@ -328,6 +328,7 @@ async def test_a_command_that_may_send_is_f504_under_a_policy(
     assert adapter.has_valid_checkpoint()
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 @pytest.mark.parametrize("command", ["ls -la", "rm -rf build", "git stash push"])
 @pytest.mark.asyncio
 async def test_a_local_command_is_not_checked_against_the_policy(

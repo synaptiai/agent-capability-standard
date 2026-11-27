@@ -27,6 +27,10 @@ from grounded_agency.capabilities.mapper import ToolCapabilityMapper, ToolMappin
 from grounded_agency.capabilities.registry import CapabilityRegistry
 from tests.conftest import missing_objects
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = pytest.mark.usefixtures("bash_under_sandbox")
+
 # A commit a checkpoint recorded, and one it did not (a merge commit, say).
 SHA = "0123456789abcdef0123456789abcdef01234567"
 OTHER = "89abcdef0123456789abcdef0123456789abcdef"

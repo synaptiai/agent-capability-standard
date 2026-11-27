@@ -71,7 +71,10 @@ def create_evidence_collector(
 
     Args:
         store: Evidence store to append the anchors to (§6.6)
-        mapper: Optional mapper to associate anchors with capabilities
+        mapper: Optional mapper to associate anchors with capabilities.
+            One with no operating-system boundary (a bare
+            ``ToolCapabilityMapper()``) gives every Bash call its worst
+            case; pass the adapter's mapper.
         include_tool_input: Keep each call's input in its anchor's
             metadata, and a Bash command's text in its command anchor
         required: The capture is required (STANDARD v1.2 §6.4): a call

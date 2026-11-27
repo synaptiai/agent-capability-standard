@@ -146,6 +146,26 @@ def _strict_sandbox_for_the_hooks(_a_home_with_no_audit_key: None) -> Iterator[N
 
 
 @pytest.fixture
+def bash_under_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every mapper, an adapter's included, classifies a Bash call as it
+    does under a verified operating-system boundary: the Bash classifier
+    relaxes a call only there (STANDARD 1.2.0 section 5.18.3, RFC-0011),
+    and with no boundary every Bash call is its worst case. For tests of
+    the classifier itself; ``tests/test_adapter_sandbox.py`` tests when the
+    adapter verifies the boundary. A call that sets
+    ``dangerouslyDisableSandbox`` is still the worst case."""
+    from grounded_agency.capabilities.mapper import ToolCapabilityMapper
+
+    monkeypatch.setattr(
+        ToolCapabilityMapper,
+        "boundary_holds",
+        lambda self, tool_input: (
+            tool_input.get("dangerouslyDisableSandbox", False) is False
+        ),
+    )
+
+
+@pytest.fixture
 def ontology_path() -> str:
     """Path to the capability ontology YAML file."""
     return str(Path(__file__).parent.parent / "schemas/capability_ontology.yaml")
