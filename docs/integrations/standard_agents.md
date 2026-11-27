@@ -1240,26 +1240,29 @@ conformance impact). The texts are in this repository under
 
 | Proposal | What it would allow |
 |---|---|
-| **A hook that runs before a tool executes and can decline the call.** `before_tool_call` returns a result to use in place of running the tool, or nothing to let it run. A hook that fails declines the call | A safety rule imposed on tools one did not write, by an agent on itself or by a child on its parent. This is the one change that turns cooperative enforcement into imposed enforcement, for an agent's own prompts and for a child's parent. It would not let a composing agent gate the calls inside a packaged child |
-| **Record the authenticated caller on a message sent through the Thread Client API.** A read-only `user_id` on the message record, set by the runtime and `null` on every other message | Telling a client's answer from a message a model or a parent queued. An approval gate built on messages cannot be trusted without it |
+| **A hook that runs before a tool executes and can decline the call.** `before_tool_call` returns a result to use in place of running the tool, or nothing to let it run. A hook that fails declines the call | A safety rule imposed on tools one did not write, by an agent on itself or by a child on its parent. This is the one change that turns cooperative enforcement into imposed enforcement, for an agent's own prompts and for a child's parent. It would not let a composing agent gate the calls inside a packaged child. The same text asks which calls fire the existing tool hooks, in what order, and what a hook that throws or times out does |
+| **Record the authenticated caller on a message sent through the Thread Client API.** A read-only `user_id` on the message record, set by the runtime and `null` on every other message, and the same rule for the `subagent_id` of a child's messages to its parent | Telling a client's answer from a message a model or a parent queued, and a child's report from typed input. An approval gate built on messages cannot be trusted without it |
 | **Let a tool know which call it is serving.** The call's id and name on `state.execution` while `execute` runs | Evidence, audit entries and idempotency keys tied to the stored tool result, without matching by order |
 | **Specify what `execute` returns, and add a metadata field.** Define `ToolResult` in the text, carry `error_code` and `error_data` through hooks and storage, and add `metadata` that is stored but not sent to the model | Refusal codes that clients can act on, and evidence that is not model-facing text |
 | **Annotations on agents and prompts, and on the call a hook receives.** The same inert field on `defineAgent` and then `definePrompt`, a tool's annotations passed to its hooks, and a stated subject for the rule, so that it reads as a requirement on runtimes | A composed agent that carries a classification, and hooks that can read a tool's |
 | **What a runtime does with a tool call the request did not offer.** Such a call, and any call under `toolChoice: 'none'`, is not executed and gets an error result; the same for a model's lifecycle call that targets a hidden relationship | A prompt's tool list and `hidden` as boundaries. A read-only prompt, a guard tool and a gated delegation rest on it |
 | **The lifecycle operations code calls to create and message a child.** The call, its arguments, how the caller gets the new reference, what a child without a side A prompt accepts, and which user a child thread has | A delegation that is checked first: the injected `subagent_create` has no `execute` to wrap, so the child has to be created from code |
 | **What may run alongside an execution, and when `flowId` changes.** A definition of a flow, what is serialized with a running execution, and a `flowId` that is unique per execution | Records that are read and rewritten without a conditional write, and a checkpoint rule keyed on `flowId` |
+| **What a parent receives for each way a child session ends.** A table of the five ways, a failure option on `stopSession()`, and an error result with a stable code for a blocking caller whose child does not close normally | A workflow hosted in a handler-backed child that can end as failed, and a delegation bounded in time |
+| **Which source governs where the text and the published types differ.** The text governs, and each member found only in the types is defined or marked | Knowing which members of the types a portable package may use |
+| **Persistence and delivery guarantees.** Rules for the thread file system like the key-value store's, the durability and delivery of scheduled effects, and a definition of eligible history | A restore point kept in a thread file, a timeout that fires, and a refusal the model sees on its next step |
 | **Editorial.** Eleven places where two passages disagree, such as two sections numbered 14 on the Runtime page, or where an example pins a version range that excludes the current package | Nothing for grounding; found while checking references |
 
-The nine come out of 83 findings about the specification, none of which
+The twelve come out of 83 findings about the specification, none of which
 stops a grounded agent from being built and 29 of which leave a rule
 enforceable only cooperatively or with a workaround. They are listed, with
 evidence and with the issue that covers each, in
-[`findings_standard_agents.yaml`](../research/analysis/standard_agents_mapping/findings_standard_agents.yaml).
-Among those not written up as proposals: which tool calls fire the tool
-hooks; no way for code to end a session as failed; scheduled effects have no
-delivery guarantee; the thread file system has no durability or isolation
-rules like the key-value store's; a parked human turn has no deadline; and a
-child returns text and files but no structured data.
+[`findings_standard_agents.yaml`](../research/analysis/standard_agents_mapping/findings_standard_agents.yaml),
+with the 30 questions the text leaves open and, for the 20 that a text asks,
+the issue that asks each.
+Among the findings not written up as proposals: a parked human turn has no
+deadline; a child returns text and files but no structured data; and which
+globals definition code can rely on, WebAssembly among them.
 
 ## Changes to the Agent Capability Standard
 

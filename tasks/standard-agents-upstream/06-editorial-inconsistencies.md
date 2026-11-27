@@ -94,7 +94,9 @@ channel that Subagents §6.4 has in mind, or a violation of item 3.
 `getValue` and `setValue` never resolve another thread's keys, and nothing is
 inherited or copied), and state whether a `ThreadState` obtained through
 `getParentThread()`, `getChildThread()` or the `childState` argument of
-`after_subagent_created` may read and write that thread's store. The same question applies to its file system.
+`after_subagent_created` may read and write that thread's store. The same question applies to its file system, and to
+`stopSession()`, `execution.stop()` and `terminate()` called on that
+`ThreadState`: whether a parent can end a child's session from code.
 
 ## 7. Where thread endpoints are mounted
 
@@ -157,7 +159,8 @@ Runtime §7.3.1 and Packaging also name only subagent relationships.
 
 **Suggested fix:** say in one place whether adding an exposed agent to a
 prompt as a handoff activates its `parentHooks`, and make the four passages
-agree.
+agree. The same place could say whether a child's `parentHooks` run when the
+owning side is handler-backed, and while the parent thread is at rest.
 
 ## 11. The Examples page pins a range that excludes the current package
 

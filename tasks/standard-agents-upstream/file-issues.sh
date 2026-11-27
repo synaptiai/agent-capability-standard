@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="standardagents/spec"
 # 06 first: it is small and asks for nothing. Then 01, which matters most.
-ORDER=(06 01 07 09 02 03 04 05 08)
+ORDER=(06 01 07 09 02 03 04 05 08 10 11 12)
 
 cd "$(dirname "$0")"
 mode="list"

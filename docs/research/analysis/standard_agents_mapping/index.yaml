@@ -60,6 +60,9 @@ meta:
     finding: The finding the question belongs to, when it belongs to one.
     answer: 'Agent Capability Standard questions only: how the Standard answers the question, with the
       section and the RFC decision. Absent while the question is open.'
+    outcome: 'Standard Agent Specification questions only: the drafted issue that asks the question (its
+      file under tasks/standard-agents-upstream/) and where in it. Absent while it is undecided whether
+      the question is asked on its own.'
   references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
     commit above. Other paths are in this repository at the commit above, and line numbers refer to those
     commits. The exceptions are the files this analysis added (examples/standard_agents/, schemas/interop/standard_agents_annotation.schema.json,

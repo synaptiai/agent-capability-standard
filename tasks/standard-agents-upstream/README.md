@@ -51,7 +51,7 @@ at that commit. Commit the changed texts with the filing results.
 
 ```bash
 tasks/standard-agents-upstream/file-issues.sh          # lists what would be filed
-tasks/standard-agents-upstream/file-issues.sh --file   # creates the nine issues
+tasks/standard-agents-upstream/file-issues.sh --file   # creates the twelve issues
 ```
 
 The script needs the GitHub CLI, signed in as the account the issues should
@@ -60,8 +60,8 @@ already exists, and prints each new issue's address.
 
 | # | Title | Why it matters for a grounded agent | Size |
 |---|-------|-------------------------------------|------|
-| [01](01-before-tool-call-hook.md) | Define a hook that runs before a tool executes and can decline the call | Lets a safety rule be imposed on tools one did not write. Today a rule holds only inside tools written with the binding | One new hook |
-| [02](02-message-sender.md) | Record the authenticated caller on a message sent through the Thread Client API | Lets code tell a client's answer from a message a model or a parent queued. An approval gate built on messages cannot be trusted without it | One read-only field |
+| [01](01-before-tool-call-hook.md) | Define a hook that runs before a tool executes and can decline the call | Lets a safety rule be imposed on tools one did not write. Today a rule holds only inside tools written with the binding. Also asks which calls fire the existing tool hooks, in what order, and what a failing hook does | One new hook, and clarifications of the existing tool hooks |
+| [02](02-message-sender.md) | Record the authenticated caller on a message sent through the Thread Client API | Lets code tell a client's answer from a message a model or a parent queued, and a child's report from typed input. An approval gate built on messages cannot be trusted without it | One read-only field, and a rule for an existing one |
 | [03](03-tool-call-identity.md) | Let a tool know which call it is serving | Lets a tool's own records (evidence, audit, idempotency keys) be tied to the stored tool result | One optional property |
 | [04](04-tool-result-contract.md) | Specify what a tool's `execute` returns, and give results a field for metadata | Gives refusal codes and evidence a defined place that is not model-facing text | Text, plus one optional field |
 | [05](05-annotations.md) | Annotations: allow them on agents and prompts, pass a tool's to its hooks, and say whom the rule binds | Lets a composed agent carry a classification, and lets a hook read a tool's | Three optional fields, one reworded sentence |
@@ -69,6 +69,9 @@ already exists, and prints each new issue's address.
 | [07](07-unoffered-tool-call.md) | State what a runtime does with a tool call the request did not offer | Decides whether a prompt's tool list, `toolChoice: 'none'` and `hidden` are boundaries a runtime enforces. A read-only prompt, a guard tool and a gated delegation all rest on it | Two sentences, no API change |
 | [08](08-child-creation-from-code.md) | Specify the lifecycle operations code calls to create and message a child | The injected `subagent_create` has no `execute` to wrap, so a delegation that must be checked first has to be created from code, and the text does not give the call | One subsection, two sentences |
 | [09](09-execution-concurrency-and-flow-id.md) | Say what may run alongside an execution of a thread, and when `flowId` changes | The binding's records are read and rewritten in a store with no conditional write, and its checkpoint rule is keyed on `flowId` | Text only |
+| [10](10-child-session-outcomes.md) | Say what a parent receives for each way a child session ends | A workflow hosted in a handler-backed child cannot end as failed, and a delegation that must be bounded in time cannot block on its child | One table, one optional option |
+| [11](11-text-and-published-types.md) | Say which source governs where the 0.2.0 text and the published types differ | Every member that exists only in the types has to be treated as not portable, and a field a runtime drops cannot be detected | One statement, documentation tags |
+| [12](12-persistence-and-delivery.md) | State the persistence and delivery guarantees of thread files, scheduled effects and eligible history | The binding keeps a restore point in a thread file, a workflow's timeouts need a timer that fires, and a refusal works only if the model sees the tool result | Text only |
 
 ## Order
 
@@ -76,14 +79,17 @@ File 06 first: it is small, checkable and asks for nothing. Then 01, which
 the others do not depend on but which matters most. 02 to 05 and 07 to 09 are
 independent of one another. 07 and 09 ask only for sentences that settle what
 the text leaves open, with no API change, so they are the easiest of the rest
-to accept and the script files them next.
+to accept and the script files them next. 10 to 12 came out of the same
+findings later and are filed last; they are independent of the others and of
+one another.
 
 The proposals come out of 83 findings about the specification, listed with
 their evidence in
 [`findings_standard_agents.yaml`](../../docs/research/analysis/standard_agents_mapping/findings_standard_agents.yaml).
-Each finding says which issue covers it, or why none does. Eleven are marked
-`candidate`: they would stand as issues of their own and are not drafted. The
-file also lists 30 questions the text leaves open.
+Each finding says which issue covers it, or why none does. The file also
+lists 30 questions the text leaves open, each with the issue that asks it,
+or with no outcome while the maintainer decides whether to ask it on its
+own.
 
 ## How the maintainers take proposals
 

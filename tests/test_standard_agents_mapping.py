@@ -250,6 +250,14 @@ def test_findings_match_the_index_and_have_the_documented_fields(
             if "answer" in q:
                 assert about == "agent_capability_standard", q["id"]
                 assert "§" in q["answer"], q["id"]
+            if "outcome" in q:
+                # The other standard's questions are asked by a drafted
+                # issue, named by its file.
+                assert about == "standard_agent_specification", q["id"]
+                named = re.findall(r"\b\d\d-[\w-]+\.md\b", q["outcome"])
+                assert named, q["id"]
+                for name in named:
+                    assert (PROPOSALS / name).is_file(), (q["id"], name)
 
 
 def test_a_finding_covered_by_a_proposal_names_one_that_exists(
