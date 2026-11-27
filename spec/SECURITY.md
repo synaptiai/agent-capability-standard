@@ -666,7 +666,7 @@ The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard
 Signs of security issues:
 - Unexpected F5xx (safety) errors in logs
 - High rate of rollback operations
-- Audit entries without corresponding checkpoints
+- Audit entries without corresponding checkpoints (`tools/check_audit_invariants.py` lists each gated call in the plugin's log with no used checkpoint marker, and each executed `mutate` or `send` in the SDK adapter's records with no checkpoint or approval, by call id)
 - World state versions without parent links
 
 ### 6.2 Response
