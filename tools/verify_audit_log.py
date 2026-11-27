@@ -57,6 +57,22 @@ every field but ``hmac`` in the order recorded:
 - before the hook logged every tool call: ts, skill, args, prev_hmac, hmac,
   for Skill calls only.
 
+The key is the one the hook reads: the first line of ~/.config/acs/audit.key
+when that file exists, else AUDIT_HMAC_KEY. The file is refused unless it is
+a regular file owned by this user, with no permission for group or others,
+with one link, in a directory of this user's (not a symbolic link) that
+group and others cannot write, and its first line is 32 to 4096 visible
+ASCII characters; a refused file is not replaced by AUDIT_HMAC_KEY. The
+hook also refuses a key file inside the project directory, which the
+verifier does not know. With no key, the check is not run (exit 2): give
+one with --hmac-key. A line the hook wrote without a key (its hmac empty) is
+reported as unsigned.
+
+The audit skill signs .claude/audit/records.jsonl under AUDIT_HMAC_KEY only,
+never with the key file, so check that file with the key it was signed
+with: --log-file .claude/audit/records.jsonl --no-head --hmac-key
+"$AUDIT_HMAC_KEY".
+
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
         [--head-file PATH] [--anchor-file PATH] [--no-head]
@@ -73,7 +89,7 @@ import hmac
 import json
 import os
 import re
-import socket
+import stat
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -91,16 +107,128 @@ GENERATIONS = (
 )
 
 
+class AuditKeyError(ValueError):
+    """No audit key can be used: why, in words."""
+
+
+def key_file_path() -> Path | None:
+    """Where the hook reads the key: ``$HOME/.config/acs/audit.key``, when
+    HOME is an absolute path; else None."""
+    home = os.environ.get("HOME", "")
+    if not home.startswith("/"):
+        return None
+    return Path(home.rstrip("/") or "/") / ".config" / "acs" / "audit.key"
+
+
+def _key_file_refusal(path: Path, st: os.stat_result) -> str | None:
+    """Why the key file ``path`` (``st``, its own status, not followed)
+    cannot hold the key, by the hook's rules; None when it can."""
+    if stat.S_ISLNK(st.st_mode):
+        return "it is a symbolic link"
+    if not stat.S_ISREG(st.st_mode):
+        return "it is not a regular file"
+    if not hasattr(os, "getuid"):
+        return (
+            "its owner and mode cannot be checked on this system (give the key "
+            "with --hmac-key)"
+        )
+    uid = os.getuid()
+    if st.st_uid != uid:
+        return (
+            f"it is owned by user {st.st_uid}, not by the user the verifier "
+            f"runs as ({uid})"
+        )
+    if st.st_mode & 0o077:
+        return (
+            f"its mode is {stat.S_IMODE(st.st_mode):o}: group or others may "
+            "read or write it (chmod 600)"
+        )
+    if st.st_nlink != 1:
+        return (
+            f"it has {st.st_nlink} hard links: another name for it may be "
+            "readable where the key is not denied"
+        )
+    try:
+        parent = os.lstat(path.parent)
+    except OSError as e:
+        return f"its directory could not be read: {e.strerror}"
+    if stat.S_ISLNK(parent.st_mode):
+        # Its mode is not its directory's, and a deny rule names the path,
+        # not where the link leads.
+        return "its directory is a symbolic link"
+    if not stat.S_ISDIR(parent.st_mode):
+        return "its directory is not a directory"
+    if parent.st_uid != uid:
+        return (
+            f"its directory is owned by user {parent.st_uid}, not by the user "
+            f"the verifier runs as ({uid})"
+        )
+    if parent.st_mode & 0o022:
+        return (
+            f"its directory's mode is {stat.S_IMODE(parent.st_mode):o}: group "
+            "or others may replace the file (chmod 700)"
+        )
+    return None
+
+
+# The key file's first line: 32 to 4096 visible ASCII characters
+_FILE_KEY = re.compile(rb"[!-~]{32,4096}")
+
+
+def read_key_file(path: Path) -> str:
+    """The key held in ``path``, its first line without the line break, by
+    the hook's rules (a regular file owned by this user, mode 600 or 400,
+    one link, in a directory of this user's, not a symbolic link, that
+    group and others cannot write; 32 to 4096 visible ASCII characters). Raises
+    :class:`AuditKeyError` saying why when the file is refused."""
+    try:
+        before = os.lstat(path)
+    except OSError as e:
+        raise AuditKeyError(
+            f"the key file {path} cannot be read: {e.strerror}"
+        ) from None
+    why = _key_file_refusal(path, before)
+    if why is None:
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError as e:
+            raise AuditKeyError(
+                f"the key file {path} cannot be read: {e.strerror}"
+            ) from None
+        with os.fdopen(fd, "rb") as f:
+            # The file read is the one checked: a file put in its place
+            # since is refused.
+            after = os.fstat(f.fileno())
+            if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+                why = "it was replaced while it was read"
+            else:
+                why = _key_file_refusal(path, after)
+            first = f.read(4098).split(b"\n", 1)[0]
+        if why is None:
+            if _FILE_KEY.fullmatch(first):
+                return first.decode("ascii")
+            why = "its first line is not a key of 32 to 4096 visible ASCII characters"
+    raise AuditKeyError(
+        f"the key file {path} is refused: {why} (AUDIT_HMAC_KEY is not used in "
+        "its place)"
+    )
+
+
 def get_default_hmac_key() -> str:
-    """Derive the default HMAC key matching the shell hook's logic."""
+    """The key the hook signs with, read the way the hook reads it: the key
+    file (:func:`key_file_path`) when it exists, else ``AUDIT_HMAC_KEY``.
+    Raises :class:`AuditKeyError` when the file exists but is refused, or
+    when there is neither: no key is derived from anything else."""
+    path = key_file_path()
+    if path is not None and (path.exists() or path.is_symlink()):
+        return read_key_file(path)
     key = os.environ.get("AUDIT_HMAC_KEY")
     if key:
         return key
-    try:
-        hostname = socket.gethostname().split(".")[0]
-    except OSError:
-        hostname = "default"
-    return f"grounded-agency-audit-{hostname}"
+    raise AuditKeyError(
+        f"no audit key: there is no {path or '~/.config/acs/audit.key (HOME is not an absolute path)'} "
+        "and AUDIT_HMAC_KEY is not set; give the key with --hmac-key"
+    )
 
 
 def compute_hmac(content: str, key: str) -> str:
@@ -192,7 +320,13 @@ def verify_line(
     errors = verify_fields(entry, expected_prev_hmac)
     if errors and errors[0].startswith("Missing fields"):
         return errors, following
-    if match is None:
+    if recorded == "" and line.endswith(',"hmac":""}'):
+        errors.append(
+            "Unsigned: the hook wrote this line without a key (no key file and "
+            "no AUDIT_HMAC_KEY, a key file it refused, or no openssl), so "
+            "nothing shows whether it was changed"
+        )
+    elif match is None:
         errors.append(
             "The line does not end with its hmac member as the hook writes it "
             '(,"hmac":"<64 hex digits>"})'
@@ -222,7 +356,9 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
     # Reconstruct the content the hook signed: every field but `hmac`, in the
     # order recorded, as jq -c prints it
     content = compact({key: value for key, value in entry.items() if key != "hmac"})
-    if entry["hmac"] != compute_hmac(content, hmac_key):
+    if entry["hmac"] == "":
+        errors.append("Unsigned: the hook wrote this entry without a key")
+    elif entry["hmac"] != compute_hmac(content, hmac_key):
         errors.append(f"HMAC mismatch: recorded={entry['hmac']!r}")
     return errors
 
@@ -421,7 +557,11 @@ def main() -> None:
     parser.add_argument(
         "--hmac-key",
         default=None,
-        help="HMAC key (default: derived from hostname, matching shell hook)",
+        help="HMAC key (default: the key the hook reads: the first line of "
+        "~/.config/acs/audit.key when that file exists, else AUDIT_HMAC_KEY; "
+        "for the audit skill's records, which it signs under AUDIT_HMAC_KEY "
+        'only, give "$AUDIT_HMAC_KEY"; for a log signed before the key file, '
+        "the earlier key, such as grounded-agency-audit-<short host name>)",
     )
     parser.add_argument(
         "--head-file",
@@ -460,7 +600,14 @@ def main() -> None:
             "--no-head checks no head: it takes no --head-file or --anchor-file"
         )
 
-    hmac_key = args.hmac_key or get_default_hmac_key()
+    if args.hmac_key:
+        hmac_key = args.hmac_key
+    else:
+        try:
+            hmac_key = get_default_hmac_key()
+        except AuditKeyError as e:
+            print(f"INTEGRITY CHECK NOT RUN: {e}")
+            sys.exit(2)
     head_path = (
         None if args.no_head else (args.head_file or args.log_file.with_suffix(".head"))
     )

@@ -205,6 +205,8 @@ exclude commands or widen its write scope; only managed settings prevent
 that. On native Windows, which has no sandbox, it writes nothing. See
 [Setting up the sandbox](hooks/README.md#setting-up-the-sandbox).
 
+Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
+
 ### Option 2: Standalone Validation
 
 Use the validator independently:
@@ -316,7 +318,7 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool) | Classify the call (an unbound tool, MCP tools included, is a gated `mutate`); one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback` |
+| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool) | Classify the call (an unbound tool, MCP tools included, is a gated `mutate`; Bash is read by command only under Claude Code's strict sandbox, verified from the settings files, and is otherwise a gated `mutate`); one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback` |
 | `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Take the checkpoint after a successful `git stash create`: write the marker, with its commit recorded for a later rollback |
 | `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity when a turn or a session ends or starts, filing it under `.claude/checkpoints/ended/` |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
@@ -479,6 +481,8 @@ claude plugin install agent-capability-standard
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Setup command** | `/grounded-setup`: turns on Claude Code's strict sandbox in your user settings, after showing the change ([Setting up the sandbox](hooks/README.md#setting-up-the-sandbox)) |
 | **Validator** | Design-time validation for custom workflows |
+
+Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 
 ### Local Development
 

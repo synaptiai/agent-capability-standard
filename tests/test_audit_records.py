@@ -348,25 +348,24 @@ def test_the_audit_skills_documented_line() -> None:
     assert verify_entry(record, "", "example-key") == []
 
 
-def test_the_audit_skill_signs_with_the_verifiers_default_key(
+def test_no_audit_key_is_derived_from_the_host_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With AUDIT_HMAC_KEY unset, the skill, the hook and the verifier use
-    one default key, so the skill's own chain verifies (§6.4)."""
-    import socket
-
-    from tools.verify_audit_log import get_default_hmac_key
+    """The skill signs under AUDIT_HMAC_KEY and writes its record unsigned
+    without it; the hook and the verifier read the key file or the
+    variable; none of them derives a key from the host name (#183)."""
+    from tools.verify_audit_log import AuditKeyError, get_default_hmac_key
 
     monkeypatch.delenv("AUDIT_HMAC_KEY", raising=False)
-    monkeypatch.setattr(socket, "gethostname", lambda: "box.example")
-    assert get_default_hmac_key() == "grounded-agency-audit-box"
+    with pytest.raises(AuditKeyError, match="no audit key"):
+        get_default_hmac_key()
     hook = HOOK.read_text(encoding="utf-8")
-    assert 'hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s' in hook
+    assert "grounded-agency-audit" not in hook and "hostname" not in hook
     skill = (ROOT / "skills" / "audit" / "SKILL.md").read_text(encoding="utf-8")
     (row,) = [x for x in skill.splitlines() if x.startswith("| `record` |")]
-    assert "under `AUDIT_HMAC_KEY`, else the default key" in row
-    assert "`grounded-agency-audit-` then the short host name, `hostname -s`" in row
-    assert "or `default` when there is none" in row
+    assert "under `AUDIT_HMAC_KEY`" in row
+    assert "`hmac` empty" in row
+    assert "grounded-agency-audit" not in skill and "hostname -s" not in skill
 
 
 class _FailingStore:

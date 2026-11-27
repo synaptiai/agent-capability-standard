@@ -90,6 +90,7 @@ def run_command(
     cwd: Path,
     shell: str,
     env_override: dict[str, str] | None = None,
+    timeout: float = 30,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     if env_override:
@@ -102,7 +103,7 @@ def run_command(
         text=True,
         cwd=cwd,
         env=env,
-        timeout=30,
+        timeout=timeout,
     )
 
 
@@ -2212,10 +2213,8 @@ class TestAuditCommandHook:
             "sed -i s/a/b/ src/*.py",
             # What step 6 runs besides the append
             'mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"',
-            "hostname -s",
             "date -u +%Y%m%dT%H%M%SZ",
-            "printf '%s' '{\"a\":1}' | openssl dgst -sha256 -hmac "
-            '"${AUDIT_HMAC_KEY:-grounded-agency-audit-host}"',
+            "printf '%s' '{\"a\":1}' | openssl dgst -sha256 -hmac \"$AUDIT_HMAC_KEY\"",
             "test -L .claude/audit/records.jsonl && echo link",
             "ls -la .claude/audit 2>/dev/null",
             "LINE='{\"a\":1}'",
@@ -2911,16 +2910,35 @@ class TestAuditCommandHook:
                 + " >> .claude/audit/records.jsonl"
             )
 
+        # BSD grep (macOS) reads about ten times slower than GNU grep, and a
+        # busy runner can take over 30 s for the full line there
+        limit = 30 if GNU_GREP else 300
+
         def seconds_at(line: str) -> float:
             started = time.monotonic()
-            run_command(hook, bash_call(command_of(line)), tmp_path, shell)
+            run_command(
+                hook, bash_call(command_of(line)), tmp_path, shell, timeout=limit
+            )
             return time.monotonic() - started
 
+        # BSD grep reads linearly: there the test checks how the time grows
+        # over a quarter and a half of the run, with the same time limit as
+        # the full line
         if not GNU_GREP:
             run = "a" * max(len(r) for r in re.findall("a+", record))
-            assert_linear(seconds_at, record.replace(run, run[: len(run) // 2]), record)
+            assert_linear(
+                seconds_at,
+                record.replace(run, run[: len(run) // 4]),
+                record.replace(run, run[: len(run) // 2]),
+            )
         started = time.monotonic()
-        result = run_command(hook, bash_call(command_of(record)), tmp_path, shell)
+        result = run_command(
+            hook,
+            bash_call(command_of(record)),
+            tmp_path,
+            shell,
+            timeout=limit,
+        )
         if GNU_GREP:
             assert time.monotonic() - started < 10
         if expect is None:
@@ -3309,7 +3327,12 @@ def test_the_plugin_log_records_a_digest_and_not_the_input(
         "tool_input": TOOL_INPUTS[tool],
         "tool_response": {"stdout": SECRET},
     }
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    env = {
+        **os.environ,
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        # A key: without one the hook writes the line unsigned and exits 1
+        "AUDIT_HMAC_KEY": "skill-test-key",
+    }
     result = subprocess.run(
         ["bash", str(POSTTOOLUSE_HOOK)],
         input=json.dumps(tool_call),
