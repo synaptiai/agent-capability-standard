@@ -28,6 +28,8 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    # A hung runner is cut off instead of held for GitHub's default of 360 minutes.
+    timeout-minutes: 15
     # A hand-started release tags main, never another branch.
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     permissions:
