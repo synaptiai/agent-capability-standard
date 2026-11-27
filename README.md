@@ -484,6 +484,7 @@ claude plugin install agent-capability-standard
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Setup command** | `/grounded-setup`: turns on Claude Code's strict sandbox in your user settings, after showing the change ([Setting up the sandbox](hooks/README.md#setting-up-the-sandbox)) |
 | **Validator** | Design-time validation for custom workflows |
+| **Remote writes** | An MCP server with typed tools for push, tag, pull request, merge, release and issue writes, each a gated change a person approves, to the origin a person recorded ([hooks/README.md](hooks/README.md#remote-writes)) |
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 

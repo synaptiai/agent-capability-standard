@@ -87,7 +87,8 @@ def strict_sandbox_settings(
     directory in ``covered`` (as written and as resolved), which cover the
     records, settings files and hook scripts of every project and plugin
     copy under them, and for the user configuration directory
-    ``config_dir``; with rules for the audit key file and Read rules for the
+    ``config_dir``; with an Edit rule for ``~/.config/acs`` (the audit key and
+    the remote-write record), a Read rule for the audit key file and Read rules for the
     user's credentials (~/.ssh, gh's hosts.yml, ~/.git-credentials, the
     keychains); and with envVars denials for the token variables."""
     dirs: list[str] = []
@@ -98,8 +99,8 @@ def strict_sandbox_settings(
     home = os.path.expanduser("~")
     deny = [f"{tool}(/{d.rstrip('/')}/**)" for d in dirs for tool in ("Edit", "Read")]
     for h in dict.fromkeys((home, os.path.realpath(home))):
-        k = os.path.join(h, ".config", "acs", "audit.key")
-        deny += [f"Edit(/{k})", f"Read(/{k})"]
+        k = os.path.join(h, ".config", "acs")
+        deny += [f"Edit(/{k}/**)", f"Read(/{k}/audit.key)"]
         deny += [f"Read(/{h}/.ssh/**)", f"Read(/{h}/Library/Keychains/**)"]
         deny += [f"Read(/{h}/.config/gh/hosts.yml)", f"Read(/{h}/.git-credentials)"]
     deny.append("Read(//Library/Keychains/**)")
