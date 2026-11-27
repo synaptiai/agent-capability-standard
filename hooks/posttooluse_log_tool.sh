@@ -65,7 +65,7 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # cut written back with an earlier head, or with one the key signs anew, by
 # a command a person approved that names neither, verifies. A witness, a
 # copy of the head kept where the agent cannot write (verify_audit_log.py
-# --witness), shows it.
+# --witness), shows it; tools/export_audit_witness.py makes one.
 #
 # The hook records; it does not block (the tool has already run). The log is
 # a best-effort capture (STANDARD v1.2 §6.4): it can miss a call, but never
