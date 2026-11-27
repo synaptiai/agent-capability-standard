@@ -1373,7 +1373,7 @@ class ToolCapabilityMapper:
             [str, str | None, str | None, str | None], bool
         ] = command_may_be_content
         # Whether an operating-system boundary holds for a Bash call now
-        # (STANDARD 1.2.0 section 5.18.3, as RFC-0011 proposes it): Bash is
+        # (STANDARD 1.2.0 section 5.18.3, RFC-0011): Bash is
         # a shell-like tool, and its classifier relaxes a call below the
         # worst case only while this returns True. The adapter sets it from
         # the sandbox of the options it wraps (``wrap_options``). None, a
@@ -1813,6 +1813,12 @@ class ToolCapabilityMapper:
         except Exception:
             logger.exception("Could not verify the operating-system boundary")
             return False
+
+    def bash_worst_case(self) -> ToolMapping:
+        """Bash's worst case, a gated ``mutate`` and ``send``, with the
+        flags the applied profiles raise: what every Bash call is without a
+        verified operating-system boundary (section 5.18.3)."""
+        return self._apply_profiles(self._worst_case())
 
     def person_required(self, mapping: ToolMapping) -> bool:
         """Whether the applied profiles require a person for a call with

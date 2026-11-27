@@ -1,5 +1,5 @@
 """The operating-system boundary the adapter runs Bash under (STANDARD 1.2.0
-section 5.18.3, as RFC-0011 proposes it).
+section 5.18.3, RFC-0011).
 
 Claude Code confines a Bash command with its sandbox (Seatbelt on macOS,
 bubblewrap on Linux) when its settings turn the sandbox on. The adapter
@@ -53,10 +53,12 @@ from .git import SAFE_GIT_OPTIONS, safe_git_environment
 from .project_settings import PROJECT_SETTINGS_FILES, _read_regular_file
 
 __all__ = [
+    "CHECKED_CLI_VERSIONS",
     "CREDENTIAL_ENV_VARS",
     "BoundaryPaths",
     "boundary_faults",
     "boundary_paths",
+    "cli_faults",
     "config_dir",
     "credential_env",
     "deny_rules",
@@ -701,6 +703,48 @@ def pattern_faults(paths: BoundaryPaths) -> list[str]:
         for path in _unique([*paths.records, *paths.protected, *paths.credential_files])
         if _PATTERN.search(path)
     ]
+
+
+# The Claude Code versions whose settings this module checks a sandbox
+# against: which sources the CLI reads, which values it honours from each,
+# and the keys that may weaken the sandbox. A layer that does not know them
+# for the host's version has not verified the boundary (STANDARD 1.2.0
+# section 5.18.3). 2.1.321 is the CLI that claude-agent-sdk 0.2.180
+# bundles, whose settings schema these checks follow; constraints.txt pins
+# that SDK for CI.
+CHECKED_CLI_VERSIONS: frozenset[str] = frozenset({"2.1.321"})
+
+
+def cli_faults(options: Any) -> list[str]:
+    """Why the CLI the Agent SDK starts for ``options`` is not one whose
+    settings this module checks (:data:`CHECKED_CLI_VERSIONS`): a CLI that
+    ``cli_path`` names (its version is not known without running it), no
+    CLI bundled with the SDK (the SDK then runs the ``claude`` on
+    ``PATH``), or a bundled CLI of another version. Empty when the SDK
+    starts its bundled CLI of a checked version."""
+    if getattr(options, "cli_path", None):
+        return ["cli_path names a CLI whose version this layer does not know"]
+    try:
+        import claude_agent_sdk
+        from claude_agent_sdk._cli_version import __cli_version__
+    except ImportError:
+        return ["the Agent SDK states no version for the CLI it bundles"]
+    name = "claude.exe" if sys.platform == "win32" else "claude"
+    bundled = os.path.join(
+        os.path.dirname(os.path.realpath(claude_agent_sdk.__file__)), "_bundled", name
+    )
+    if not os.path.isfile(bundled):
+        return [
+            "the Agent SDK bundles no CLI, so it runs the claude on PATH, "
+            "whose version this layer does not know"
+        ]
+    if __cli_version__ not in CHECKED_CLI_VERSIONS:
+        return [
+            f"the Agent SDK bundles Claude Code {__cli_version__}, and this "
+            f"layer checks the settings of Claude Code "
+            f"{', '.join(sorted(CHECKED_CLI_VERSIONS))} only"
+        ]
+    return []
 
 
 def boundary_faults(

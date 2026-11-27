@@ -1,5 +1,5 @@
 """The operating-system boundary of Bash in the Python adapter (STANDARD
-1.2.0 section 5.18.3, as RFC-0011 proposes it).
+1.2.0 section 5.18.3, RFC-0011).
 
 ``wrap_options()`` turns on a strict sandbox where the options carry none
 of their own and adds deny rules for the layer's records; the Bash
@@ -851,9 +851,65 @@ def test_a_local_plugin_and_the_cli_path(tmp_path: Path, project: Path) -> None:
     )
     assert f"Edit(/{os.path.realpath(plugin)})" in deny
     assert f"Edit(/{os.path.realpath(cli)})" in deny
+    # The CLI cli_path names is of a version this layer does not know.
+    assert not _relaxed(adapter)
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(
+        _options(project, plugins=[{"type": "local", "path": str(plugin)}])
+    )
     assert _relaxed(adapter)
     # A plugin hook with a second hard link in the project.
     os.link(plugin / "hooks" / "h.sh", project / "h-link")
+    assert not _relaxed(adapter)
+
+
+# --- the CLI's version -------------------------------------------------------
+
+
+def test_the_bundled_cli_of_a_checked_version_is_verified(
+    tmp_path: Path, project: Path
+) -> None:
+    from claude_agent_sdk._cli_version import __cli_version__
+
+    assert __cli_version__ in sandbox_module.CHECKED_CLI_VERSIONS
+    assert sandbox_module.cli_faults(_options(project)) == []
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project))
+    assert _relaxed(adapter)
+
+
+def test_a_cli_named_by_cli_path_is_not_verified(tmp_path: Path, project: Path) -> None:
+    """Section 5.18.3: a layer that does not know, for the host's version,
+    which sources it reads and which values it honours has not verified
+    the boundary; the version of a CLI cli_path names is not known."""
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project, cli_path="/usr/bin/true"))
+    assert not _relaxed(adapter)
+
+
+def test_a_bundled_cli_of_another_version_is_not_verified(
+    tmp_path: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sandbox_module, "CHECKED_CLI_VERSIONS", frozenset({"0.0.0"}))
+    faults = sandbox_module.cli_faults(_options(project))
+    assert len(faults) == 1 and "checks the settings of Claude Code 0.0.0" in faults[0]
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project))
+    assert not _relaxed(adapter)
+
+
+def test_no_bundled_cli_is_not_verified(
+    tmp_path: Path, project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a bundled CLI the SDK runs the claude on PATH."""
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(
+        sandbox_module.os.path,
+        "isfile",
+        lambda p: False if "_bundled" in str(p) else real_isfile(p),
+    )
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project))
     assert not _relaxed(adapter)
 
 

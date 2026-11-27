@@ -131,6 +131,7 @@ def create_checkpoint_recorder(
     *,
     refuses_output: Callable[[str, Any, Any], bool] | None = None,
     call_dir: Callable[[str | None], str | None] | None = None,
+    boundary_held: Callable[[str | None], bool] | None = None,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that records the checkpoint a successful
@@ -175,6 +176,11 @@ def create_checkpoint_recorder(
             working directory; one whose input names another directory
             than that hook's takes none. The adapter passes what its
             PreToolUse hook kept.
+        boundary_held: Whether the operating-system boundary held when the
+            PreToolUse hook classified a Bash call, by call id (STANDARD
+            1.2.0 section 5.18.3: the boundary is verified before the call
+            runs). A Bash call for which it returns False takes none. The
+            adapter passes what its PreToolUse hook kept.
 
     Returns:
         Async hook callback function
@@ -206,6 +212,12 @@ def create_checkpoint_recorder(
                     # It reports another directory than the one it was
                     # checked in: where it ran cannot be told.
                     return {}
+            if (
+                tool_name == "Bash"
+                and boundary_held is not None
+                and not boundary_held(tool_use_id or input_data.get("tool_use_id"))
+            ):
+                return {}
             mapping = classify.map_tool(tool_name, tool_input, cwd)
             if "checkpoint" not in mapping.capabilities:
                 return {}

@@ -84,6 +84,7 @@ from .utils.sandbox import (
     BoundaryPaths,
     boundary_faults,
     boundary_paths,
+    cli_faults,
     deny_rules,
     flag_settings,
     git_dirs,
@@ -984,6 +985,13 @@ class GroundedAgentAdapter:
         # does not clear it (it records what was checked, and authorises
         # nothing). Bounded by _HOOK_CHECK_LIMIT, oldest first.
         self._hook_checks: OrderedDict[str, _HookCheck] = OrderedDict()
+        # Whether the operating-system boundary held when the PreToolUse
+        # hook classified each Bash call, by call id: a call classified
+        # after it ran is its worst case unless the boundary was verified
+        # before it ran (STANDARD 1.2.0 section 5.18.3), so that no
+        # checkpoint or prerequisite is read from the text of a call that
+        # ran unrelaxed. Bounded by _HOOK_CHECK_LIMIT, oldest first.
+        self._bash_boundary: OrderedDict[str, bool] = OrderedDict()
         # The tools create_grounded_mcp_server serves, which check their own
         # output (section 5.20); the PostToolUse hook checks other servers'
         # bound MCP tools. Tools a policy would check but whose results carry
@@ -1796,6 +1804,36 @@ class GroundedAgentAdapter:
         with self._state_lock:
             return self._hook_checks.pop(call, None)
 
+    def _note_bash_boundary(self, call: str, held: bool) -> None:
+        """Keep whether the boundary held when the PreToolUse hook
+        classified the Bash call ``call``."""
+        with self._state_lock:
+            self._bash_boundary.pop(call, None)
+            self._bash_boundary[call] = held
+            while len(self._bash_boundary) > _HOOK_CHECK_LIMIT:
+                self._bash_boundary.popitem(last=False)
+
+    def _bash_boundary_held(self, call: str | None) -> bool:
+        """Whether the boundary held when the PreToolUse hook classified the
+        Bash call ``call``: False for a call it kept nothing of."""
+        if call is None:
+            return False
+        with self._state_lock:
+            return self._bash_boundary.get(call, False)
+
+    def _ran_mapping(
+        self, tool_name: str, tool_input: Any, cwd: str | None, call: str | None
+    ) -> ToolMapping:
+        """The mapping of a call that ran, classified after it ran: a Bash
+        call is its worst case unless the boundary held when the PreToolUse
+        hook classified it (STANDARD 1.2.0 section 5.18.3: the boundary is
+        verified before the call runs)."""
+        if tool_name == "Bash" and not self._bash_boundary_held(call):
+            return self.mapper.bash_worst_case()
+        return self.mapper.map_tool(
+            tool_name, tool_input if isinstance(tool_input, dict) else {}, cwd
+        )
+
     def _kept_call_dir(self, call: str | None) -> str | None:
         """The directory the PreToolUse hook classified ``call`` in (what it
         kept of it), keeping it."""
@@ -2116,6 +2154,7 @@ class GroundedAgentAdapter:
             expiry_minutes=self.config.expiry_minutes,
             refuses_output=self._refuses_host_result,
             call_dir=self._kept_call_dir,
+            boundary_held=self._bash_boundary_held,
         )
         post_hooks.append(self._wrap_hook(recorder))
 
@@ -2486,6 +2525,10 @@ class GroundedAgentAdapter:
         # the session.
         if getattr(wrapped, "add_dirs", None):
             faults.append("add_dirs adds directories the sandbox may write")
+        # The CLI's version decides which sources it reads and which values
+        # it honours from each: one this layer has not checked leaves the
+        # boundary unverified (STANDARD 1.2.0 section 5.18.3).
+        faults.extend(cli_faults(wrapped))
         faults.extend(code_faults)
         faults.extend(source_faults(project_dir, sources, env))
         digest = _options_digest(wrapped)
@@ -2927,6 +2970,12 @@ class GroundedAgentAdapter:
                             )
                         )
 
+                bash_args = (
+                    (tool_input if isinstance(tool_input, dict) else {})
+                    if tool_name == "Bash"
+                    else None
+                )
+                boundary = bash_args is not None and mapper.boundary_holds(bash_args)
                 try:
                     mapping = mapper.map_tool(tool_name, tool_input, cwd)
                 except Exception:
@@ -2936,6 +2985,10 @@ class GroundedAgentAdapter:
                     mapping = UNCLASSIFIED_TOOL
                 if isinstance(call, str):
                     checked_under[call] = mapping
+                    if bash_args is not None:
+                        self._note_bash_boundary(
+                            call, boundary and mapper.boundary_holds(bash_args)
+                        )
 
                 if mapping.control:
                     try:
@@ -3228,7 +3281,6 @@ class GroundedAgentAdapter:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
-        mapper = self.mapper
 
         async def record_after_call(
             input_data: dict[str, Any],
@@ -3259,7 +3311,7 @@ class GroundedAgentAdapter:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                mapping = mapper.map_tool(tool_name, tool_input, call_dir)
+                mapping = self._ran_mapping(tool_name, tool_input, call_dir, holder)
                 tool_response = input_data.get("tool_response")
                 try:
                     fault = self._host_result_fault(
@@ -3360,8 +3412,11 @@ class GroundedAgentAdapter:
                     # person_required (section 5.21.3). A mapping that fails
                     # loses neither the record nor the failure.
                     try:
-                        mapping: ToolMapping | None = self.mapper.map_tool(
-                            tool_name, input_data.get("tool_input", {}), call_dir
+                        mapping: ToolMapping | None = self._ran_mapping(
+                            tool_name,
+                            input_data.get("tool_input", {}),
+                            call_dir,
+                            holder,
                         )
                     except Exception as e:
                         logger.warning("Failure recorder cannot map: %s", e)

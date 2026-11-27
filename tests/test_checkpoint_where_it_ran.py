@@ -305,6 +305,44 @@ class TestTheAdaptersRecorder:
         asyncio.run(self._call(adapter, pre, posts, evil, bash_post(project, printed)))
         assert not adapter.checkpoint_tracker.has_valid_checkpoint()
 
+    def test_a_call_classified_without_the_boundary_takes_none(
+        self, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The boundary is verified before the call runs (STANDARD 1.2.0
+        section 5.18.3): a `git stash create` the PreToolUse hook gave the
+        worst case, because the boundary did not hold then, takes no
+        checkpoint and counts as no checkpoint that ran, though the
+        boundary holds again when the call reports back."""
+        project, _, adapter, pre, posts = self._setup(tmp_path)
+        (project / "a.txt").write_text("project change\n")
+        printed = stash(project)
+        held = [False]
+        monkeypatch.setattr(
+            ToolCapabilityMapper, "boundary_holds", lambda self, tool_input: held[0]
+        )
+
+        async def run() -> None:
+            adapter.create_checkpoint(["*"], "held by the call")
+            out = await pre(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": STASH},
+                    "cwd": str(project),
+                    "tool_use_id": "toolu_1",
+                },
+                "toolu_1",
+                None,
+            )
+            decision = out.get("hookSpecificOutput", {}).get("permissionDecision")
+            assert decision in (None, "allow"), out
+            held[0] = True
+            for hook in posts:
+                await hook(bash_post(project, printed), "toolu_1", None)
+
+        asyncio.run(run())
+        assert not adapter.checkpoint_tracker.has_valid_checkpoint()
+        assert "checkpoint" not in adapter._executed
+
     def test_control_the_project_takes_one(self, tmp_path: Path, outside: Path) -> None:
         project, _, adapter, pre, posts = self._setup(tmp_path)
         (project / "a.txt").write_text("project change\n")
