@@ -887,6 +887,7 @@ describe("a composite that took no token is held, for its plain nested call, to 
       const trace = await readTrace(s.t.state);
       const mid = trace.find((e) => e.action === 'middle' && e.status === 'executed')!;
       expect(trace.find((e) => e.action === 'store')).toMatchObject({ status: 'executed', covered_by: mid.seq });
+      if (what === 'person') expect(trace.find((e) => e.action === 'store')?.person_required).toBe(true);
     });
 
     it(`covers the plain call when middle takes the token (${what}, control)`, async () => {
@@ -906,6 +907,9 @@ describe("a composite that took no token is held, for its plain nested call, to 
     expect(s.mids.at(-1)?.status).toBe('success');
     expect(s.nested.map((r) => r.error_code)).toEqual(['F502']);
     expect(s.counts.stored).toBe(0);
+    // The plain call's entry carries the person the outer profiles require.
+    const entry = (await readTrace(s.t.state)).find((e) => e.action === 'store');
+    expect(entry).toMatchObject({ status: 'refused', code: 'F502', person_required: true });
   });
 
   for (const how of ['secrets', 'check'] as const) {

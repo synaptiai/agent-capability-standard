@@ -975,10 +975,20 @@ function nestingState(
     } catch (cause) {
       unreadable = cause;
     }
+    // Whether the profiles that govern the call require a person for it
+    // (§5.21.3), so its entries carry `person_required`. Where they cannot
+    // be read, the checks below fail the call.
+    let personRequired = false;
+    try {
+      personRequired = raisedBy(composite.profiles, bound.capabilities, { risk: bound.risk }).person;
+    } catch {
+      personRequired = false;
+    }
     const base = {
       action: tool,
       capability,
       ...(bound.control ? { control: true as const } : {}),
+      ...(personRequired ? { person_required: true as const } : {}),
       ...(bound.domain !== undefined ? { domain: bound.domain } : {}),
       ...position,
       ...(args_digest !== undefined ? { args_digest } : {}),
