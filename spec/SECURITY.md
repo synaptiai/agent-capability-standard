@@ -62,17 +62,26 @@ binds, fails with F505 (§5.20).
 
 ### 1.4 Identity Merges Are Constrained
 
-Hard constraints prevent catastrophic entity conflation:
+This invariant is a requirement on hosts, not one the reference layers
+enforce. Standard 1.2.0 §7.3 requires a host that merges or splits entity
+records to keep three constraints:
 - Never merge entities with conflicting unique identifiers
 - Never merge across incompatible entity types
 - Always record merge/split operations in lineage
 
+No reference layer merges or splits entities, so none checks these
+constraints at run time. [RFC-0012](RFC-0012-identity-merge-and-split.md), a Draft for Standard 1.3.0, defines them
+as checks with vectors (`tests/conformance/entities/merge.json`). The
+Python package implements those checks as `check_merge` and `check_split`
+in `grounded_agency.entities`, for a host to call before it merges or
+splits.
+
 ```mermaid
 ---
-title: The hard constraints on a merge
+title: The hard constraints a host keeps on a merge
 ---
 flowchart TB
-  accDescr: A candidate merge is never made when the unique identifiers conflict or the entity types are incompatible; otherwise the merge is made and recorded in lineage.
+  accDescr: A host never makes a candidate merge when the unique identifiers conflict or the entity types are incompatible; otherwise the host makes the merge and records it in lineage.
   c[Candidate merge] --> q{"Conflicting unique identifiers, or incompatible entity types?"}
   q -->|yes| no[Never merged]
   q -->|no| m[Merge]
@@ -337,9 +346,9 @@ The reference implementations enforce this by code:
 **Scenario**: Two distinct entities are incorrectly merged, corrupting the world state.
 
 **Mitigations**:
-- Hard constraints prevent incompatible merges
-- Alias confidence scoring requires threshold
-- Merge operations are recorded in lineage
+- A host that merges entities keeps the hard constraints of Standard 1.2.0 §7.3 (§1.4); the reference layers perform no merge and do not enforce them
+- `grounded_agency.entities` offers the merge and split checks that RFC-0012 proposes, for a host to call before it merges or splits
+- A host that scores aliases sets its own thresholds; the policy's weights and thresholds are a heuristic
 - World state versioning enables rollback
 
 #### 2.2.3 Trust Manipulation

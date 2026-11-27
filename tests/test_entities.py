@@ -1,6 +1,7 @@
 """Entity ids (STANDARD v1.2 §7.1): ``grounded_agency.entities`` against the
 normative vectors, the taxonomy's examples and pattern, and the §7.1 code
-block of the newest Standard."""
+block of the newest Standard. Merge and split checks (§7.3 as RFC-0012
+proposes it for 1.3.0) against the proposed vectors."""
 
 from __future__ import annotations
 
@@ -12,12 +13,20 @@ from typing import Any
 import pytest
 
 from grounded_agency import _core
-from grounded_agency.entities import ENTITY_ID, parse_entity_id, taxonomy_classes
+from grounded_agency.entities import (
+    ENTITY_ID,
+    check_merge,
+    check_split,
+    class_index,
+    parse_entity_id,
+    taxonomy_classes,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 IDS = json.loads((ROOT / "tests/conformance/entities/ids.json").read_text("utf-8"))
 TAXONOMY: dict[str, Any] = _core.load_yaml(str(ROOT / "schemas/entity_taxonomy.yaml"))
 CLASSES = taxonomy_classes(TAXONOMY)
+MERGE = json.loads((ROOT / "tests/conformance/entities/merge.json").read_text("utf-8"))
 
 
 def newest_standard() -> Path:
@@ -103,3 +112,77 @@ def test_every_literal_entity_id_in_the_examples_parses() -> None:
             parse_entity_id(value, CLASSES)
         except ValueError as e:
             raise AssertionError(f"{where}: {value!r}: {e}") from e
+
+
+def test_the_merge_vectors_are_proposed_and_list_the_taxonomy_classes() -> None:
+    # Proposed by RFC-0012 (a Draft) for 1.3.0: not normative for 1.2.0.
+    assert MERGE["status"] == "proposed"
+    assert MERGE["rfc"] == "RFC-0012"
+    assert (ROOT / "spec/RFC-0012-identity-merge-and-split.md").is_file()
+    assert MERGE["classes"] == class_index(TAXONOMY)
+    assert set(MERGE["classes"]) == CLASSES
+
+
+def test_the_merge_vectors_cover_every_reason() -> None:
+    merge = {v["expect"].get("reason") for v in MERGE["merge"]}
+    split = {v["expect"].get("reason") for v in MERGE["split"]}
+    assert merge - {None} == {
+        "too_few_entities",
+        "invalid_entity",
+        "invalid_entity_id",
+        "unknown_class",
+        "class_mismatch",
+        "duplicate_id",
+        "incompatible_types",
+        "conflicting_identifier",
+    }
+    assert split - {None} == {
+        "too_few_entities",
+        "invalid_entity_id",
+        "unknown_class",
+        "class_mismatch",
+        "duplicate_id",
+        "reused_id",
+        "incompatible_types",
+    }
+    assert None in merge and None in split
+    for group in ("merge", "split"):
+        names = [v["name"] for v in MERGE[group]]
+        assert len(names) == len(set(names)), group
+
+
+def _expect(got: Any, expect: dict[str, Any]) -> None:
+    assert got.ok is expect["ok"], got.message
+    if expect["ok"]:
+        assert got.reason is None
+        assert got.lineage == expect["lineage"]
+    else:
+        assert got.reason == expect["reason"], got.message
+        assert got.lineage is None
+
+
+@pytest.mark.parametrize("vector", MERGE["merge"], ids=lambda v: v["name"])
+def test_merge_vector(vector: dict[str, Any]) -> None:
+    got = check_merge(
+        vector["entities"],
+        vector["into"],
+        classes=MERGE["classes"],
+        unique_attributes=vector["unique_attributes"],
+    )
+    _expect(got, vector["expect"])
+
+
+@pytest.mark.parametrize("vector", MERGE["split"], ids=lambda v: v["name"])
+def test_split_vector(vector: dict[str, Any]) -> None:
+    got = check_split(vector["entity"], vector["into"], classes=MERGE["classes"])
+    _expect(got, vector["expect"])
+
+
+def test_a_name_in_two_classes_is_refused() -> None:
+    taxonomy = {
+        "classes": {
+            "digital": {"service": {"aliases": ["s"]}, "sensor": {"aliases": ["s"]}}
+        }
+    }
+    with pytest.raises(ValueError):
+        class_index(taxonomy)
