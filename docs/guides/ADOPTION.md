@@ -12,7 +12,7 @@ not change what an earlier one checks.
 | 2. Gate Claude Code sessions | The plugin's hooks | None: the hooks claim no class | A gated call with no checkpoint is refused, and the audit log verifies |
 | 3. Gate an agent's tool calls | The Python SDK adapter or the Standard Agents binding | SL, the safety-layer class | The binding and call-sequence fixtures pass under a conformance statement |
 | 4. Run workflows | The executor (`WorkflowRunner`) or your own | EX, the executor class | The runtime fixtures pass |
-| 5. Apply domain rules | Domain profiles and the authority trust model | Part of SL and EX | The profiles validate and the layer loads them |
+| 5. Apply domain rules | Domain profiles and the authority trust model | Applied by an SL layer or an EX executor | The profiles validate and the layer loads them |
 
 The levels and classes are defined in
 [STANDARD-v1.2.0 §10.1](../../spec/STANDARD-v1.2.0.md#101-conformance-levels).
@@ -113,11 +113,12 @@ Run the fixtures for the layer you use:
 ```bash
 # Python SDK adapter
 pytest tests/test_binding_fixtures.py tests/test_call_fixtures.py
-
-# Standard Agents binding
-(cd packages/acs-core && npm test)
-(cd examples/standard_agents && npm test)
 ```
+
+For the Standard Agents binding, the runners are `npm test` in
+`packages/acs-core/` (after `npm ci` and `npm run build:wasm`) and in
+`examples/standard_agents/` (after `npm ci`, with the package built by
+`npm run build:ts`); the binding's README gives the full steps.
 
 A layer of your own runs the same fixtures with a runner of its own and
 publishes a statement that follows
@@ -125,8 +126,8 @@ publishes a statement that follows
 ([Safety-layer conformance](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)).
 
 **Exit check:** every binding fixture and call-sequence fixture that your
-statement's features cover passes, and the statement names each fixture it
-skips and why.
+statement's features cover passes, and the statement names the features
+the layer lacks, whose fixtures it skips.
 
 ## Stage 4: run workflows with an executor (class EX)
 
