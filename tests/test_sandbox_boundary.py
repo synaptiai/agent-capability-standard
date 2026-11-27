@@ -383,12 +383,13 @@ def _make_world(tmp_path: Path) -> World:
     os.link(home / ".config" / "acs" / "audit.key", project / "pre-linked-key")
 
     # A fake gh: it reads gh's token file and calls GitHub's API, as a merge
-    # or a release would. It never holds a real credential.
+    # or a release would. It never holds a real credential. curl does not
+    # verify the certificate, for the reason given at FETCH.
     _write(
         bin_dir / "gh",
         "#!/bin/sh\n"
         'cat "$HOME/.config/gh/hosts.yml" 2>&1\n'
-        "curl -sS -m 15 -o /dev/null -w 'GITHUB_STATUS=%{http_code}\\n' "
+        "curl -sS -k -m 15 -o /dev/null -w 'GITHUB_STATUS=%{http_code}\\n' "
         "https://api.github.com/zen 2>&1\n",
         0o755,
     )
@@ -1242,12 +1243,21 @@ def unlisted_ip() -> str:
 
 # Spellings that fetch a URL. Proxied ones honour the proxy the sandbox
 # sets; the direct ones bypass it.
+#
+# curl does not verify the certificate (-k): these routes test the network
+# boundary, not the trust store. On macOS the system curl verifies with
+# /etc/ssl/cert.pem and then the system's trust service, which Seatbelt
+# denies unless enableWeakerNetworkIsolation is set (the setup reports that
+# key as a weakness). Where the file alone does not verify a host (the
+# hosted macOS runner, for example.com), a verifying curl fails under the
+# sandbox for a listed host and an unlisted one alike, and a refusal would
+# then show nothing about the allowlist.
 FETCH: dict[str, Any] = {
-    "curl": lambda url: f"curl -sS -m 15 {_q(url)}",
-    "curl without the proxy": lambda url: f"curl -sS -m 15 --noproxy '*' {_q(url)}",
+    "curl": lambda url: f"curl -sS -k -m 15 {_q(url)}",
+    "curl without the proxy": lambda url: f"curl -sS -k -m 15 --noproxy '*' {_q(url)}",
     "env without the proxy variables": lambda url: (
         "env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy -u ALL_PROXY "
-        f"-u all_proxy curl -sS -m 15 {_q(url)}"
+        f"-u all_proxy curl -sS -k -m 15 {_q(url)}"
     ),
     # A User-Agent of its own: the host refuses urllib's.
     "interpreter": lambda url: (
@@ -1256,7 +1266,7 @@ FETCH: dict[str, Any] = {
         f"print(u.urlopen(r, timeout=15).read().decode())' {_q(url)}"
     ),
     "curl through the proxy": lambda url: (
-        f'curl -sS -m 15 ${{HTTPS_PROXY:+-x "$HTTPS_PROXY"}} {_q(url)}'
+        f'curl -sS -k -m 15 ${{HTTPS_PROXY:+-x "$HTTPS_PROXY"}} {_q(url)}'
     ),
 }
 
