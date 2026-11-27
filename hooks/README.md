@@ -169,7 +169,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       },
@@ -178,7 +179,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh",
+            "timeout": 90
           }
         ]
       }
@@ -189,7 +191,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       }
@@ -199,7 +202,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -209,7 +213,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -219,7 +224,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -229,7 +235,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -239,7 +246,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -253,7 +261,7 @@ Each hook entry specifies:
 - **hooks**: Array of hook commands to execute
 - **type**: Hook type (`command` for shell scripts)
 - **command**: Path to the hook script (`${CLAUDE_PLUGIN_ROOT}` resolves to the plugin directory)
-- **timeout**: Seconds the hook may run (Claude Code's default otherwise)
+- **timeout**: Seconds the hook may run. Every entry sets one: 30 for the pre-tool-use hook; 90 for the log and checkpoint hooks, above the longest their bounded reads and the log's lock wait (`AUDIT_LOCK_WAIT`, at most 55) can take together; 10 for the boundary hook, which on SessionEnd also raises Claude Code's 1.5-second budget for that event
 - **onFailure**: `block` makes a run that fails, cannot start or times out block the call
 
 ## Checkpoint System

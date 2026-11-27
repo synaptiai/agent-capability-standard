@@ -19,7 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       },
@@ -28,7 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh",
+            "timeout": 90
           }
         ]
       }
@@ -39,7 +41,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       }
@@ -49,7 +52,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -59,7 +63,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -69,7 +74,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -79,7 +85,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -89,7 +96,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }

@@ -1345,6 +1345,36 @@ class TestHookPatternParity:
             f"current matcher: {matcher}"
         )
 
+    def test_hooks_json_sets_a_timeout_on_every_hook(self) -> None:
+        """Every hooks.json entry bounds its run (Claude Code's default for a
+        command hook is 600 seconds), and the log hook's bound is above the
+        longest lock wait it accepts (AUDIT_LOCK_WAIT, at most 55)."""
+        hooks_data = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        timeouts: dict[str, set[int]] = {}
+        for event, groups in hooks_data["hooks"].items():
+            for group in groups:
+                for hook in group["hooks"]:
+                    timeout = hook.get("timeout")
+                    assert isinstance(timeout, int) and 0 < timeout <= 600, (
+                        f"{event} {hook['command']}: no timeout of its own"
+                    )
+                    script = hook["command"].rsplit("/", 1)[-1]
+                    timeouts.setdefault(script, set()).add(timeout)
+        assert timeouts["pretooluse_require_checkpoint.sh"] == {30}
+        assert min(timeouts["posttooluse_log_tool.sh"]) > 55
+        # The boundary hook's timeout also sets the SessionEnd budget, which
+        # Claude Code caps at 60 seconds.
+        assert max(timeouts["stop_end_checkpoints.sh"]) <= 60
+
+    def test_hooks_readme_shows_hooks_json(self) -> None:
+        """The configuration block in hooks/README.md is hooks.json."""
+        readme = (ROOT / "hooks" / "README.md").read_text()
+        start = readme.index("Hooks are configured in `hooks.json`")
+        block = readme[start:].split("```json\n", 1)[1].split("```\n", 1)[0]
+        assert json.loads(block) == json.loads(
+            (ROOT / "hooks" / "hooks.json").read_text()
+        )
+
     @pytest.mark.parametrize("event", ["PostToolUse", "PostToolUseFailure"])
     def test_hooks_json_audit_hook_matches_every_tool(self, event: str) -> None:
         """The audit hook runs after every tool call, succeeded or failed."""
