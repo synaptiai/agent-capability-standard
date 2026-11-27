@@ -343,7 +343,7 @@ findings file and the PVC review, checked against the tree.
    - The margins of the figure-gap runs.
    - The three workflows the digital-twin example copies.
    - The RFCs' open questions; RFC-0002 is still a Draft.
-   - The 319-row mapping is dated against 1.1.0.
+   - The 319-row mapping: done. The rows stay a 1.1.0 record, and each concern file lists the rows Standard 1.2.0 changes (#154).
    - Default redaction leaves an S3 presigned URL's `X-Amz-Signature`.
 
 ## Round 2: fix our side, pull request, merge

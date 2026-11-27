@@ -9,14 +9,18 @@ have to change for the combination to be complete.
 
 | Standard | Compared here |
 |---|---|
-| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0, for the mapping. The binding implements [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md), ontology 2.2.0 |
-| Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types |
+| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0, for the mapping, checked against [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md), ontology 2.2.0, on 27 November 2026. The binding implements Standard 1.2.0, ontology 2.2.0 |
+| Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types; checked again at commit `f462a67` and 0.45.13 on 27 November 2026, with no change to the text |
 
-Standard 1.2.0 added the rules for tool calls that the mapping found missing
+The mapping's rows were made against Standard 1.1.0 and are kept as that
+record; their citations are 1.1.0's. Each concern file of the mapping lists
+the rows a section of Standard 1.2.0 changes, with the section and what it
+changes, under `changes_in_1_2_0`; a row not listed holds under 1.2.0 as it
+reads. Standard 1.2.0 added, among others, the rules for tool calls that the
+mapping found missing
 ([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)). Where the
-binding follows one of them, the section cited is 1.2.0's; the mapping's own
-citations are 1.1.0's. Statements about Standard Agents cite the page and
-section they come from.
+binding follows one of them, the section cited is 1.2.0's. Statements about
+Standard Agents cite the page and section they come from.
 Where the specification text and the published types differ, the difference
 is noted. [How this analysis was done](#how-this-analysis-was-done) says what
 was checked and what was not.
@@ -1399,6 +1403,12 @@ continued instead of restarted.
   `@standardagents/spec` 0.45.10 type declarations. ACS was read from this
   repository: Standard 1.1.0, the ontology, the RFCs, the reference executor
   and the Python SDK.
+- **Standard 1.2.0.** The rows were not redone for 1.2.0. Its Appendix D,
+  which lists every change from 1.1.0 by accepting RFC, was walked against
+  each concern. The concern files list 230 of the 319 rows as changed by a
+  1.2.0 section, each with the section and the effect. The Standard Agents
+  side was checked again at commit `f462a67`: no file under `content/`
+  changed, and the quoted passages of the types are unchanged in 0.45.13.
 - **Mapping.** Ten concerns were mapped separately, each from the full text
   of both sides. Each mapping was then read by two independent reviewers.
   One, told to refute, checked every reference and quotation and searched
@@ -1444,5 +1454,5 @@ continued instead of restarted.
   so nothing here is a statement about how any runtime behaves beyond what the
   specification requires of it. No runtime's source and no conformance suite
   was examined. The specification is at 0.2.0 and its maintainers edit that
-  version in place; a passage quoted here may have changed since the commit
-  above.
+  version in place; a passage quoted here may have changed since the last
+  check, at `f462a67`.

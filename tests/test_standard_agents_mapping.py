@@ -128,6 +128,29 @@ def test_row_ids_are_unique_within_a_concern(
         assert sorted({i for i in ids if ids.count(i) > 1}) == [], key
 
 
+def test_change_lists_name_rows_of_their_concern(
+    index: dict[str, Any], concerns: dict[str, dict[str, Any]]
+) -> None:
+    """Each concern lists the rows a section of Standard 1.2.0 changes: once
+    each, in row order, with the sections and the effect."""
+    documented = set(index["meta"]["change_fields"])
+    assert index["meta"]["checked_against"]["agent_capability_standard"]["standard"]
+    for key, doc in concerns.items():
+        changes = doc["changes_in_1_2_0"]
+        assert changes, key
+        ids = [row["id"] for row in doc["rows"]]
+        listed = [change["row"] for change in changes]
+        assert all(row in ids for row in listed), key
+        assert listed == sorted(set(listed), key=ids.index), key
+        for change in changes:
+            assert set(change) == documented, (key, change["row"])
+            assert "§" in change["sections"] or "Appendix" in change["sections"], (
+                key,
+                change["row"],
+            )
+            assert change["effect"].strip(), (key, change["row"])
+
+
 def test_rows_have_the_documented_fields(
     index: dict[str, Any], concerns: dict[str, dict[str, Any]]
 ) -> None:

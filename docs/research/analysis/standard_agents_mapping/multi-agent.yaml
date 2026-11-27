@@ -2,6 +2,67 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: multi-agent
 title: Delegation and composition across agents
+changes_in_1_2_0:
+- row: coord-01
+  sections: '§5.15.1 to §5.15.3'
+  effect: 'Agent manifests, the workflow field `agents` and `continues` are added to `delegate`.'
+- row: coord-02
+  sections: '§5.15.2'
+  effect: 'With `agents`, the executor checks a delegation''s task.'
+- row: coord-03
+  sections: '§5.15.3'
+  effect: 'Each call has a `task_id` of its own, and `continues` names the delegation it continues.'
+- row: coord-04
+  sections: '§5.13'
+  effect: 'The host polls liveness and reports `LivenessLost`.'
+- row: coord-06
+  sections: '§5.15.2'
+  effect: 'A host that cannot enforce `read_only` refuses the delegation, and an unattested `read_only`
+    fails a 1.2 delegation without retry.'
+- row: coord-07
+  sections: '§5.15, §5.17'
+  effect: 'Model families are derived from the model identifier by one rule and compared exactly;
+    `effective` and `agent_identity` gain `model_id`.'
+- row: coord-12
+  sections: '§5.2.3'
+  effect: 'Parallel group semantics and `join: all_complete` are defined.'
+- row: coord-13
+  sections: '§4.3'
+  effect: '`conflicts_with` applies within one `parallel_group` and not across runs or agents.'
+- row: coord-15
+  sections: '§5.1.1'
+  effect: 'Qualified workflow ids name `invoke` targets across catalog sets.'
+- row: coord-16
+  sections: '§5.13.1'
+  effect: 'Answers to an inquiry are defined.'
+- row: coord-17
+  sections: '§5.17'
+  effect: 'A handoff to another actor cancels the run unless it ended `deferred`, and a resumption may
+    name a new actor.'
+- row: coord-18
+  sections: '§5.15.1, §5.15.2'
+  effect: 'An agent manifest states what an agent may do, and the delegator''s `delegate` flags are raised
+    to it, so a delegate''s declaration now shapes its delegator''s step.'
+- row: coord-19
+  sections: '§5.15.2'
+  effect: 'With `agents`, the delegator''s flags are raised to what the targets may do.'
+- row: coord-20
+  sections: '§5.15.2, §5.15.4'
+  effect: 'Raised flags gate a delegation before it starts, and checkpoints across a delegation are
+    defined.'
+- row: coord-21
+  sections: '§5.15.3'
+  effect: 'An earlier delegation can be continued (`continues`); capping concurrent delegations is still
+    not defined.'
+- row: coord-23
+  sections: '§6.5'
+  effect: '`evidence_anchors` items are anchors of one defined type; legacy forms are deprecated.'
+- row: coord-26
+  sections: '§5.19.4'
+  effect: 'Saving and continuing a run is specified.'
+- row: coord-29
+  sections: 'Appendix B'
+  effect: 'The prefix `x-acs-` is reserved for the Standard.'
 rows:
 - id: coord-01
   relation: partial

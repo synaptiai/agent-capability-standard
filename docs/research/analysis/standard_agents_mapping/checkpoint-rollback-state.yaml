@@ -2,6 +2,86 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: checkpoint-rollback-state
 title: Checkpoints, rollback, state and memory
+changes_in_1_2_0:
+- row: state-01
+  sections: '§4.5, §6.7'
+  effect: '`persist` gains `scope`, a `ttl` grammar, `stored_at` and `expires_at`, with host guarantees; a
+    `persist` of a secret is refused.'
+- row: state-02
+  sections: '§4.5'
+  effect: '`recall` gains `scope` in its input and output.'
+- row: state-03
+  sections: '§4.4.1'
+  effect: 'A checkpoint is a host-kept copy of the state within its scope and reports what it `captured`
+    and `excluded`.'
+- row: state-04
+  sections: '§5.2.2, §4.4.1'
+  effect: 'Checkpoint use is stated, and the checkpoint output gains `mechanism`, `captured`, `excluded`,
+    `digest` and `expires_at`.'
+- row: state-05
+  sections: '§2, §4.4.1'
+  effect: 'The term checkpoint is redefined as a host-kept copy of the state within its scope, and the
+    capability''s outputs are extended.'
+- row: state-06
+  sections: '§4.4.1'
+  effect: '`restored` is true only on a full restore, `unrestored` and `not_covered` report the rest, and
+    `RolledBack` answers only a full restore (else F503).'
+- row: state-07
+  sections: '§5.2.2, §5.18.6, §10.4'
+  effect: 'Where the rule is enforced is now stated for executors and for safety layers over calls.'
+- row: state-08
+  sections: '§5.2.2, §4.4.1'
+  effect: 'Validity ends at the end of a wait or delay and at a resumption; retention is separate from
+    validity, and `expires_at` is reported.'
+- row: state-09
+  sections: '§5.18.6'
+  effect: 'One checkpoint per gated call is stated for safety layers.'
+- row: state-11
+  sections: '§4.5, §4.4.1'
+  effect: '`persist` and `recall` have a `scope`, and a checkpoint''s scope bounds what it captures.'
+- row: state-12
+  sections: '§5.15.4'
+  effect: 'A run''s checkpoints never authorise a delegate''s changes, except in a safety layer''s shared
+    scope.'
+- row: state-13
+  sections: '§4.5'
+  effect: 'Memory scopes, lifetimes and host guarantees are defined.'
+- row: state-15
+  sections: '§5.19.4'
+  effect: 'Saving and continuing a run is specified: one writer, save before acting, state integrity, and
+    a key where others can change stored states.'
+- row: state-16
+  sections: '§3.3, §4.4.2, §12.1'
+  effect: 'A `send` checkpoint restores the agent''s own state, not the transmission; `send` reports
+    `compensation`.'
+- row: state-17
+  sections: '§6.3, §4.4.1'
+  effect: '`retention_policy` applies to the store the records are written to, `audit.retention` is a
+    duration, and checkpoint retention is separate from validity.'
+- row: state-19
+  sections: '§6.4, §4.4.1'
+  effect: 'Audit records are specified, the status `cancelled` is added, and a rollback never restores
+    records.'
+- row: state-20
+  sections: '§5.2.2'
+  effect: 'With no valid checkpoint, the executor has its host take one, and F501 if that fails.'
+- row: state-21
+  sections: '§4.3'
+  effect: '`conflicts_with` applies within one `parallel_group`; a host should serialise a rollback with
+    `mutate` and `persist` on the same state.'
+- row: state-22
+  sections: '§5.21.3'
+  effect: '`checkpoint_policy` keys are `*` or capability ids, and a profile''s policy raises
+    `requires_checkpoint` by risk (F501).'
+- row: state-23
+  sections: '§4.4.1, §5.19.7'
+  effect: 'An incomplete rollback is F503, and error reasons are defined.'
+- row: state-24
+  sections: '§6.7, §4.4.1'
+  effect: 'Secrets never enter persisted memory or records, and a checkpoint reports what it `excluded`.'
+- row: state-26
+  sections: '§4.4.1'
+  effect: 'A rollback never restores the record of what happened.'
 rows:
 - id: state-01
   relation: partial

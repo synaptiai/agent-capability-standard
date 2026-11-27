@@ -2,6 +2,88 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: safety-enforcement
 title: Safety flags, ontology edges and enforcement
+changes_in_1_2_0:
+- row: gate-01
+  sections: '§5.18, §10.4'
+  effect: 'Denying a tool call before it runs is specified for safety layers, with conformance class SL.'
+- row: gate-04
+  sections: '§5.15.2'
+  effect: 'A host that cannot enforce `read_only` refuses the delegation, and an unattested `read_only`
+    fails a 1.2 delegation without retry.'
+- row: ckpt-01
+  sections: '§5.2.2, §5.18.6'
+  effect: 'Checkpoint use is stated for steps, and checkpoints are required over calls.'
+- row: ckpt-02
+  sections: '§5.2.2'
+  effect: 'Checkpoint lifetime is stated: used up just before the capability is called, the most recent
+    valid one first, validity ending at a wait, a delay or a resumption.'
+- row: ckpt-03
+  sections: '§5.2.2, §4.4.1'
+  effect: 'A gate or failure-mode rollback restores the latest checkpoint (F503 with none), and
+    `RolledBack` answers only a full restore.'
+- row: appr-01
+  sections: '§5.14, §5.18.7'
+  effect: 'A step with no `approval` field is asked as a human approval in session, and approval is
+    required over calls.'
+- row: appr-02
+  sections: '§5.14, §5.10.2, §5.14.1'
+  effect: 'A human approver is never asked in an unattended run in either mode, the host gives the
+    attendance of a run no trigger started, and a deferred run can be resumed.'
+- row: appr-03
+  sections: '§5.17'
+  effect: 'With `identity@1`, approvers are counted by principal and checked against the requested kind
+    and role.'
+- row: flags-01
+  sections: '§5.21.3'
+  effect: 'An applied domain profile can tighten flags, checks, evidence, confidence and destinations.'
+- row: flags-02
+  sections: '§5.21.3, §5.18.3'
+  effect: 'Profiles raise effective flags further, and calls outside a workflow are classified by effect.'
+- row: edge-01
+  sections: '§5.18.5'
+  effect: 'Over calls, `requires` is evaluated within the layer''s scope and refused; `precedes` is
+    neither refused nor reported.'
+- row: edge-02
+  sections: '§4.3'
+  effect: '`conflicts_with` applies within one `parallel_group` of a workflow and not across runs or
+    agents; a host should serialise a rollback with `mutate` and `persist` on the same state.'
+- row: trace-01
+  sections: '§5.18.5, §5.2.3'
+  effect: 'The order relation is defined over calls as well as steps, and members of a parallel group are
+    not ordered.'
+- row: hook-02
+  sections: '§6.4'
+  effect: 'Audit records, required and best-effort capture, and no silent capture failure are specified.'
+- row: audit-01
+  sections: '§6.4'
+  effect: 'Action records carry `prev_hmac` and `hmac`, so a chained audit log is part of the record
+    format.'
+- row: err-01
+  sections: '§9, §9.8'
+  effect: 'F501 to F504 cover bindings and calls too, F506 and R407 are added, and locations are fully
+    defined.'
+- row: err-02
+  sections: '§5.18.8'
+  effect: 'A refused call ends with a defined refusal and record, and a layer fails closed (R407).'
+- row: lim-01
+  sections: '§5.2'
+  effect: 'The retry backoff schedule is stated: `linear` waits attempt × 1 s, `exponential` 2^(attempt−1)
+    s.'
+- row: exec-01
+  sections: '§5.19, §10.5'
+  effect: 'The host protocol is normative and executors have a conformance class (EX).'
+- row: scope-01
+  sections: '§5.15.4'
+  effect: 'A run''s checkpoints never authorise a delegate''s changes, except in a safety layer''s shared
+    scope.'
+- row: surface-01
+  sections: '§5.18.3'
+  effect: 'Changes made through tool calls outside a workflow are classified by effect (`mutate`, `send`,
+    `persist`) and gated.'
+- row: cred-01
+  sections: '§4.4.2, §5.21.3'
+  effect: 'Destination policies (and a profile''s `allowed_destinations`) refuse a `send` to a destination
+    not allowed (F504).'
 rows:
 - id: gate-01
   relation: acs_only

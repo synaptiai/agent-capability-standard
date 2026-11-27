@@ -2,6 +2,79 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: tools-contracts
 title: Capabilities, tools and typed contracts
+changes_in_1_2_0:
+- row: cls-02
+  sections: '§5.18.1'
+  effect: 'A tool binding is now normative (`schemas/interop/tool_binding.schema.json`): what a
+    classification of a tool carries is defined by the Standard, not only proposed.'
+- row: cls-03
+  sections: '§5.18.3, §5.18.6, §5.18.7'
+  effect: 'A binding classifies a tool by its effect, and a safety layer applies checkpoints and approval
+    per call, so effective flags are acted on over tool calls too.'
+- row: cls-04
+  sections: '§5.18.1, §5.18.2'
+  effect: 'Looking up a tool by name is the tool binding; a tool with no binding is treated as the
+    strictest case (high risk, mutation, checkpoint and approval), and W617 reports it.'
+- row: cls-06
+  sections: '§5.15.1, §5.15.2, §5.15.3'
+  effect: 'Agent manifests and the workflow field `agents` bound the targets of `delegate` and raise its
+    flags to what they may do; `delegate` gains `continues`.'
+- row: cls-07
+  sections: '§5.15, §5.15.2, §5.15.3'
+  effect: 'Model families are derived from the model identifier by one rule, an unattested `read_only`
+    fails a 1.2 delegation, and a delegation can be continued by `task_id`.'
+- row: cls-08
+  sections: '§5.19'
+  effect: 'The host protocol is normative: actions, responses, run operations, time, saving and continuing
+    a run, and cancellation.'
+- row: cls-10
+  sections: '§5.18.3'
+  effect: 'A classifier may read one call as several actions (a shell line of several commands), and the
+    call takes the strictest flags of all of them, so classification by call arguments has a rule in the
+    Standard.'
+- row: cls-13
+  sections: '§5.1.1'
+  effect: 'Catalog manifests, catalog sets and qualified workflow ids name the targets of `invoke` across
+    catalogs.'
+- row: rec-01
+  sections: '§5.2.2, §5.14'
+  effect: 'Checkpoint use is stated (one per gated step, used up just before the capability is called),
+    and the approval digest input and `recheck` behaviour are defined.'
+- row: dom-01
+  sections: '§5.2.4'
+  effect: 'Step `domain` values are domain ids, with a rule for how the host selects a domain.'
+- row: io-01
+  sections: '§4.1.2'
+  effect: 'Contract schemas are written in the schema dialect (Draft 2020-12 keywords plus the ontology''s
+    extensions), with a Draft 2020-12 rendering.'
+- row: io-02
+  sections: '§4.1.2'
+  effect: 'The contracts are not plain JSON Schema: the schema dialect adds `type: any`, `a|b`, `$ref`
+    with merged siblings and `nullable`; an unresolvable or cyclic `$ref` is refused at load.'
+- row: io-03
+  sections: '§5.19.1, §5.18.9'
+  effect: 'In a workflow that targets 1.2, the executor checks each `Output` as a consumer does (R402); a
+    result carried as a string is decoded by the text-only result rule.'
+- row: io-05
+  sections: '§4.1.1, §6.5'
+  effect: 'Every output contract declares `confidence`, `inference_method` and `uncertainty` (ontology
+    2.2.0), and `evidence_anchors` items are anchors of one defined type.'
+- row: io-06
+  sections: '§9.8, §5.18.8'
+  effect: 'Diagnostic locations gain `path` and `catalog`, and a safety layer refuses a call with the same
+    codes and records it.'
+- row: io-08
+  sections: '§4.1.1'
+  effect: '`confidence` is defined as a self-reported probability that the claim is correct, with no
+    threshold in the Standard.'
+- row: io-09
+  sections: '§6.5'
+  effect: 'One anchor type serves outputs, events and records, with `digest`, the kind `record` and vendor
+    kinds; bare strings and other objects are deprecated legacy forms.'
+- row: var-01
+  sections: '§6.7'
+  effect: 'Rules on secrets are normative: a secret never enters evidence, records, diagnostics, traces or
+    persisted memory. The Standard still does not model the configuration a capability needs.'
 rows:
 - id: cls-01
   relation: partial
