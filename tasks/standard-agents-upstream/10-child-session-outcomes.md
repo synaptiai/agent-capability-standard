@@ -94,8 +94,10 @@ that each row has an answer. Three rules go with the table.
 - **An error result with a stable code.** Where the table says "an error
   result", the blocking call returns a tool result with `status: 'error'` and
   a code that names the row (for example `child_failed`,
-  `child_terminated`, `caller_lost`), so a caller can tell a failed child
-  from a finished one without parsing text. Waiting while a child is
+  `child_terminated`), so a caller can tell a failed child from a finished
+  one without parsing text. When the caller's own execution is lost while it
+  waits, say what the recovery run does with the pending call: return the
+  child's result to it, or store an error result for it. Waiting while a child is
   `awaiting_human` is ordinary waiting, and the §3.3 warning should apply to
   prompt-backed callers too. Optionally, a per-relationship bound on the
   wait.

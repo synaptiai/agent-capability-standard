@@ -1109,10 +1109,11 @@ findings:
   disposition: proposal
   proposal: 10-child-session-outcomes.md
   coverage: full
-  disposition_note: 'Issue 10 asks that a blocking `subagent_create` whose child fails, is terminated or
-    whose caller''s execution is lost return an error result with a stable code naming the case, that
-    waiting on an `awaiting_human` child be stated as ordinary waiting, that the Subagents §3.3 warning
-    cover prompt-backed callers, and optionally for a per-relationship bound on the wait.'
+  disposition_note: 'Issue 10 asks that a blocking `subagent_create` whose child fails or is terminated
+    return an error result with a stable code naming the case, leaves the turn-cap row to the maintainers,
+    and asks what a recovery run does with the call of a caller whose execution was lost; that waiting
+    on an `awaiting_human` child be stated as ordinary waiting; that the Subagents §3.3 warning cover
+    prompt-backed callers; and optionally for a per-relationship bound on the wait.'
   concerns:
   - approval-human
   - multi-agent
@@ -3231,8 +3232,9 @@ questions:
   depends: Whether a caller can build a deadline from an effect and `terminate()`, and tell a failed child
     from a finished one without parsing text. If not, blocking relationships are avoided.
   finding: SA-27
-  outcome: 'Asked by 10-child-session-outcomes.md: an error result with a stable code for a failed,
-    terminated or capped child and for a lost caller, and an optional bound on the wait.'
+  outcome: 'Asked by 10-child-session-outcomes.md: an error result with a stable code for a failed or
+    terminated child, the turn-cap row, what a recovery run does with a lost caller''s call, and an optional
+    bound on the wait.'
 - id: SA-Q13
   question: Does any message on a human-backed side's perspective fulfil its parked turn, including a
     parent's `subagent_message` and `queueMessage` from code, or only a message from a client?

@@ -46,7 +46,7 @@ relates the package's version to the text's, or says which governs where
 they differ. The Packaging example's peer range is
 `"@standardagents/spec": ">=0.2.0"`
 ([Packaging, package.json Requirements](https://standardagentspec.org/0.2.0/distribution/packaging#packagejson-requirements)),
-a range that every package version meets, and `PackedMeta` and
+which every release of the package since 0.2.0 meets, and `PackedMeta` and
 `package.json.standardagent` have no member for the specification version a
 package targets.
 
