@@ -14,7 +14,9 @@ Reads .claude/audit.log and verifies that:
    git directory (<git dir>/acs/audit.head), where a command that removes
    .claude whole (git clean -fdx, rm -rf .claude) leaves it. So does each
    witness given (--witness): a copy of a head kept where the agent cannot
-   write it.
+   write it. A --witness that names a directory checks every witness in it,
+   each file whose name ends in .head (as tools/export_audit_witness.py
+   names them), and each failure names the witness the log fails.
 
 A line is checked as the bytes it holds, not as what a parser reads from
 it: JSON that names a member twice parses, in most readers, to the last
@@ -76,7 +78,7 @@ with: --log-file .claude/audit/records.jsonl --no-head --hmac-key
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
         [--head-file PATH] [--anchor-file PATH] [--no-head]
-        [--witness PATH ...]
+        [--witness PATH|DIR ...]
 
 SEC-005: Audit log integrity verification.
 """
@@ -462,6 +464,39 @@ def _head_errors(
     return []
 
 
+class WitnessDirError(ValueError):
+    """A witness directory that cannot be read, or holds no witness."""
+
+
+def expand_witnesses(paths: Sequence[Path]) -> list[Path]:
+    """``paths`` with each directory replaced by the witnesses it holds:
+    its files whose name ends in ``.head``, in name order (the export's
+    names begin with the time each was taken). A path that is not a
+    directory is kept as it is, to be checked as one witness. Raises
+    :class:`WitnessDirError` for a directory that cannot be read or holds
+    no witness: it was named to be checked."""
+    found: list[Path] = []
+    for path in paths:
+        if not path.is_dir():
+            found.append(path)
+            continue
+        try:
+            held = sorted(
+                p for p in path.iterdir() if p.name.endswith(".head") and p.is_file()
+            )
+        except OSError as e:
+            raise WitnessDirError(
+                f"Witness directory {path} cannot be read: {e.strerror}"
+            ) from None
+        if not held:
+            raise WitnessDirError(
+                f"Witness directory {path} holds no witness (no file whose name "
+                "ends in .head)"
+            )
+        found.extend(held)
+    return found
+
+
 def verify_log(
     log_path: Path,
     hmac_key: str,
@@ -590,7 +625,8 @@ def main() -> None:
         default=[],
         metavar="PATH",
         help="A copy of a head kept where the agent cannot write it (another "
-        "machine, a CI artifact), checked as the head is; repeatable. It "
+        "machine, a CI artifact), checked as the head is, or a directory of "
+        "them (every file in it whose name ends in .head); repeatable. It "
         "shows a cut that an earlier head written back hides, or a head "
         "signed anew with a key the agent's commands could read",
     )
@@ -614,8 +650,13 @@ def main() -> None:
     anchor_path = (
         None if args.no_head else (args.anchor_file or default_anchor(args.log_file))
     )
+    try:
+        witnesses = expand_witnesses(args.witness)
+    except WitnessDirError as e:
+        print(f"INTEGRITY CHECK FAILED: {e}")
+        sys.exit(1)
     total, valid, errors = verify_log(
-        args.log_file, hmac_key, head_path, anchor_path, args.witness
+        args.log_file, hmac_key, head_path, anchor_path, witnesses
     )
 
     if errors:

@@ -1030,8 +1030,52 @@ a CI artifact, a write-once store), and verify with
 `--witness <copy>` (repeatable): a log cut before the witness's entry
 fails, and goes on failing as the log grows again.
 
+`tools/export_audit_witness.py` takes a witness: it copies the head, and
+the anchor where there is one, into a destination directory as new files
+named by the time and the session (`<UTC time>-<session>-head.head`,
+`<UTC time>-<session>-anchor.head`); a copy never replaces another. The
+destination is `--dest`, else `ACS_AUDIT_WITNESS_DIR` from the
+environment, which is not used when the project's settings files set it.
+The export refuses a destination inside the project directory or its git
+directory. `--witness <directory>` checks the log against every witness
+kept there (each file whose name ends in `.head`), and each failure names
+the witness the log fails. A witness shows only a cut of the entries
+before it: witnesses taken at each session's end show a cut of any earlier
+session.
+
 ```bash
-python tools/verify_audit_log.py --witness /mnt/audit-witness/project.head
+python tools/export_audit_witness.py --dest /mnt/audit-witness/project --session "$SESSION_ID"
+python tools/verify_audit_log.py --witness /mnt/audit-witness/project
+```
+
+A local directory the user can write is a test destination only: the
+agent runs as the same user, so its commands can remove or replace the
+witnesses there. A destination counts when it keeps the witnesses out of
+the agent's reach: a mount where the user can add files but not delete or
+overwrite them (an append-only or write-once store), or a copy taken off
+the machine to an account whose credential the agent's commands cannot
+read.
+
+### Checking the records for invariant violations
+
+`tools/check_audit_invariants.py` reads the log, the used checkpoint
+markers under `.claude/checkpoints/used/` and, with `--records`, the SDK
+adapter's exported action records (`export_action_records`). It prints the
+lines by tool, status and settings and the changes of `config_sha256`, and
+it fails (exit 1) on a violation, printed with its call id: a call that ran
+and that the pre-tool-use hook gates by its tool name (Write, Edit, Skill,
+Agent, an MCP or other unbound tool) with no used marker for its call id;
+an executed `mutate` or `send` (or unbound, Skill, Agent or Task) call in
+the adapter's records with no `checkpoint_id` or no approval. It also
+fails on an anomaly: a line recorded with `approval` `off`, a change of
+`config_sha256`, or a refusal rate in the adapter's records above
+`--max-refusal-rate` (default 0.2). A Bash call is gated by its command,
+which the log does not hold, so a Bash call with no marker is counted, not
+flagged. `--verify` adds the checks of `tools/verify_audit_log.py`, with
+`--witness` for the witnesses.
+
+```bash
+python tools/check_audit_invariants.py --verify --witness /mnt/audit-witness/project
 ```
 
 ### The audit key
