@@ -35,22 +35,11 @@ The Agent Capability Standard provides structural reliability:
 | Debug time for agent issues | 50-80% reduction |
 | Data corruption from failed workflows | Near elimination |
 | Compliance audit preparation | Automatic decision lineage |
-| Integration bugs caught pre-production | 90%+ with L3 conformance |
+| Integration bugs caught pre-production | 90%+ with the validator in CI (`--strict`) |
 
 ### Adoption Recommendation
 
-- **Start small**: Run the validator on existing workflows (1 day)
-- **Add safety**: Implement checkpoints for high-risk mutations (1 week)
-- **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
-
-```mermaid
----
-title: The recommended adoption path
----
-flowchart LR
-  accDescr: Start by running the validator on existing workflows in about a day, add checkpoints for high-risk mutations in about a week, and progress to full conformance over a quarter as the value shows.
-  s1["Start small: validate existing workflows, 1 day"] --> s2["Add safety: checkpoints for high-risk mutations, 1 week"] --> s3["Expand: full conformance, 1 quarter"]
-```
+Adopt the standard in stages, from the validator in CI to a safety layer (class SL) and an executor (class EX); the [adoption guide](../docs/guides/ADOPTION.md) gives each stage's component and the check that ends it.
 
 The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
 
