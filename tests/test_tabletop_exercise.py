@@ -50,6 +50,7 @@ RESTORE_WORKTREE = "git restore --source=<commit> --worktree -- notes.txt"
 RESTORE_INDEX = "git restore --source=<commit>^2 --staged -- notes.txt"
 CHECK_RESTORED = "git diff --quiet <commit> -- notes.txt"
 VERIFY_LOG = "python tools/verify_audit_log.py"
+FIND_WRITE = "jq -c 'select(.tool == \"Write\") | {timestamp, status, call_id}' .claude/audit.log"
 
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -164,6 +165,7 @@ def test_the_template_names_every_code_and_command_the_exercise_runs() -> None:
         RESTORE_INDEX,
         CHECK_RESTORED,
         VERIFY_LOG,
+        FIND_WRITE,
         "bypassPermissions",
     ):
         assert expected in text, expected
@@ -216,6 +218,12 @@ def test_an_approved_write_is_traced_to_its_checkpoint_and_undone(
     assert len(writes) == 1
     call_id = writes[0]["call_id"]
     assert call_id == "toolu_tt_03"
+    found = _shell(project, FIND_WRITE)
+    assert found.returncode == 0, found.stderr
+    (row,) = [json.loads(line) for line in found.stdout.splitlines()]
+    assert row["call_id"] == call_id
+    assert row["status"] == "executed"
+    assert row["timestamp"]
     (marker_file,) = (project / ".claude" / "checkpoints" / "used").glob(
         f"*.{call_id}.*"
     )

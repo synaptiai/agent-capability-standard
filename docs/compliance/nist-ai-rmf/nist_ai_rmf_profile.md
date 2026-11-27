@@ -397,7 +397,7 @@ The Grounded Agency framework currently provides:
 
 - **Structural safety enforcement** — Checkpoint-before-mutation, typed contracts, risk metadata
 - **Domain-parameterized risk management** — 7 profiles with trust weights and compliance configuration
-- **Comprehensive documentation** — EU AI Act and ISO 42001 compliance suites
+- **Comprehensive documentation** — EU AI Act and ISO 42001 compliance suites, and the NIST decommissioning, third-party risk and tabletop exercise documents
 - **Auditability infrastructure** — Evidence anchors, audit hooks, provenance tracking
 
 ### 9.2 Target Profile
@@ -434,12 +434,12 @@ Owned outside this repository:
 ### 9.4 Roadmap Visualization
 
 ```
-Current State              Target State
-─────────────              ────────────
-GOVERN:  Tier 2 ──G-02──→  Tier 3
-MAP:     Tier 3 ──G-04──→  Tier 4
-MEASURE: Tier 2 ──G-05──→  Tier 3
-MANAGE:  Tier 3 ──G-08──→  Tier 4
+Current State                   Target State
+─────────────                   ────────────
+GOVERN:  Tier 2 ──G-02───────→  Tier 3
+MAP:     Tier 3 ──G-04, #78──→  Tier 4
+MEASURE: Tier 2 ──G-05───────→  Tier 3
+MANAGE:  Tier 3 ──G-08───────→  Tier 4
 ```
 
 ---
