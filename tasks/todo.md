@@ -222,10 +222,15 @@ rounds. Every defect, fix and test is recorded in
 | 3 | 28 | 22 | 20 | 2 | 15 | 3 |
 | 4 | 32 | 26 | 24 | 2 | 18 | 4 |
 | 5 | 28 | 26 | 24 | 0 | 21 | 3 |
-| **All** | 167 | 147 | 130 | 9 | 101 | 20 |
+| 6 | 7 | 6 | 3 | 0 | 2 | 1 |
+| **All** | 174 | 153 | 133 | 9 | 103 | 21 |
 
-All 130 are fixed. Every fix batch ended done, and no finding was lost or
-left unverified.
+All 133 are fixed. Every fix batch ended done, and no finding was lost or
+left unverified. Round 6 (#142) covered only the Standard Agents binding
+and the TypeScript package, the first layer group of decision 23 (b), and
+one reviewer ran its six lenses and reproduced each finding with a test,
+in place of six finders and a verifier per finding; that group has not
+converged.
 
 *Not converged.* The loop stopped at its five-round cap, not because it ran
 dry. Each round still confirmed about 20 medium defects, mostly in reading
