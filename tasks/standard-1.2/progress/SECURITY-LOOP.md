@@ -7684,9 +7684,9 @@ The six lenses, and what each probed:
 
 | Reported | New | Confirmed | High | Medium | Low |
 |---|---|---|---|---|---|
-| 7 | 6 | 3 | 0 | 2 | 1 |
+| 7 | 6 | 4 | 0 | 3 | 1 |
 
-The group has not converged: this round confirmed two new medium defects.
+The group has not converged: this round confirmed three new medium defects.
 
 ### 1. A nested call was not held to the flags the composite's profiles raise for it (medium)
 
@@ -7730,8 +7730,14 @@ profile given to a composite govern the calls its approval covers.
   each refused after the lapse and covered while the approval is valid)
   and "the flags a composite's profiles raise reach a nested call that
   takes no token" (a person is asked; control: the unchanged arguments
-  are covered). On 8ec818c2's `grounded.ts` 6 of the 16 tests fail; the
-  controls and the two placements that were already checked pass.
+  are covered), and "a plain nested call under a composite that took no
+  token is held to the outer composite's profiles" (`outer`, with the
+  profiles, invokes `middle`, whose arguments the runtime validates, which
+  invokes the plain `store`: refused F502 when the profiles require a
+  person's approval and F501 when they require a checkpoint; controls:
+  `middle` takes the token). On 8ec818c2's `grounded.ts` 8 of the 20 tests
+  fail; the controls and the two placements that were already checked
+  pass.
 
 ### 2. A control tool's thrown error reached the runtime unredacted (medium)
 
@@ -7775,6 +7781,48 @@ such a name), so it is low.
   `binding.ts` 9 of the 17 package tests fail; on its `binding.ts` and
   `lint.ts` the binding's test fails.
 
+### 4. The audit hook gave a model's call id to a nested call's entry (medium)
+
+An entry a nested call wrote waited for a tool call id as a top-level
+call's does. Whether a runtime fires `tool_call_done` for
+`state.invokeTool` is not stated by the Standard Agent Specification
+(0.2.0; `@standardagents/spec` 0.45.10 says only that the hook "fires once
+per tool call"). In a runtime that fires none for an invocation, the hook
+of the model's direct call of the same tool later in the step took the
+oldest finished entry of that name, the nested one: the nested call's
+record carried the direct call's id, and the direct call's own entry kept
+none (§6.4: a record names the call that produced it).
+
+- Probe: `gather` (integrate) invokes `fetch` (retrieve) with `{n: 1}`;
+  the model then calls `fetch` with `{n: 2}` in the same step. With no
+  hook for the invocation, the hook of the direct call linked `c2` to the
+  nested entry and left the direct entry unlinked. The same with
+  `fetch`'s arguments validated by the runtime, so that the nested call
+  took no token.
+- Fix (`records.ts`, `grounded.ts`, `audit.ts`): an entry written through
+  a composite's state, a nested call's, or a call made while the
+  composite's invocation of the tool was pending (`pendingUnder`, for a
+  nested call that takes no token), records the composite's `seq`
+  (`under`) in the list of entries waiting for a call id. Such an entry
+  waits only while the composite's own entry waits, at any depth
+  (`withoutOrphans`): once the composite's hook has linked it, the nested
+  entry keeps no call id, and a later call of the same tool takes its own
+  entry. A runtime that does fire the hook for an invocation fires it
+  while the composite runs, so the nested entry is still linked to it.
+- Limit: the rule relies on the order the rest of the matching relies on,
+  the calls of a step running one after another with each hook before the
+  next call (Tools §9). A hook of the model's own call delivered while a
+  composite's entry still waits would still take a finished nested entry
+  of the same tool.
+- Python: the SDK adapter's records come from its own hooks, which do not
+  see nested calls, so it has no sibling.
+- Tests: `evidence.test.ts` "the audit hook links a nested call only while
+  its composite waits" (no hook for the invocation; the same with the
+  nested call taking no token; control: the runtime fires the hook for the
+  invocation and it is linked to the nested entry). On 50167f14's
+  `audit.ts`, `grounded.ts` and `records.ts` the first two fail and the
+  control passes.
+
 ### Reported and not confirmed
 
 - **A covered nested call is not held to the checkpoint's age at the
@@ -7787,15 +7835,6 @@ such a name), so it is low.
 - **The argument digest of a call whose arguments hold a secret.** A
   duplicate: round 1 batch 7 checked it (the digest is of the whole
   arguments, which §6.7 allows).
-- **The audit hook can link a model's call to a nested call's entry.**
-  An entry a nested call writes waits for a tool call id as a top-level
-  call's does, so when a model calls a tool directly in the step in which
-  a composite invoked it, the hook of the direct call takes the oldest
-  finished entry of that name, the nested one, if the runtime fires no
-  `tool_call_done` hook for an invocation. Whether a runtime fires one for
-  `state.invokeTool` is not stated by the Standard Agent Specification
-  (0.2.0), and the binding's behaviour is right if it does. Not
-  confirmed; left as a question for the specification.
 - Probed and clean: a credential in a member name of `persist` data or of
   a refusal's diagnostic is refused and redacted (`holdsCredential`,
   `redactJson`).
@@ -7804,7 +7843,8 @@ such a name), so it is low.
 
 The Standard Agents guide (the secrets bullet: a control tool's thrown
 error; "Rules that reach a nested call without a token": the raised flags
-and person requirement), and the `profiles` option's comment in
+and person requirement; "A tool is not told which call it is serving":
+a nested call's entry), and the `profiles` option's comment in
 `grounded.ts`. `spec/SECURITY.md` §5.5 and `CHANGELOG.md` are edited by
 open pull requests and are left to the wave-2 pass that edits §5.5 once.
 

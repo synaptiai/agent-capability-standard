@@ -222,10 +222,10 @@ rounds. Every defect, fix and test is recorded in
 | 3 | 28 | 22 | 20 | 2 | 15 | 3 |
 | 4 | 32 | 26 | 24 | 2 | 18 | 4 |
 | 5 | 28 | 26 | 24 | 0 | 21 | 3 |
-| 6 | 7 | 6 | 3 | 0 | 2 | 1 |
-| **All** | 174 | 153 | 133 | 9 | 103 | 21 |
+| 6 | 7 | 6 | 4 | 0 | 3 | 1 |
+| **All** | 174 | 153 | 134 | 9 | 104 | 21 |
 
-All 133 are fixed. Every fix batch ended done, and no finding was lost or
+All 134 are fixed. Every fix batch ended done, and no finding was lost or
 left unverified. Round 6 (#142) covered only the Standard Agents binding
 and the TypeScript package, the first layer group of decision 23 (b), and
 one reviewer ran its six lenses and reproduced each finding with a test,
