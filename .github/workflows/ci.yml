@@ -292,7 +292,8 @@ jobs:
   sandbox-boundary:
     name: Sandbox boundary (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # The suite took 7 to 14 minutes on macOS and about 2 on Linux locally.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -374,7 +375,8 @@ jobs:
   sandbox-boundary-claude:
     name: Sandbox boundary through Claude Code
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The Claude Code tests took about 5 minutes locally, plus the install.
+    timeout-minutes: 20
     env:
       HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       CLAUDE_CODE_VERSION: "2.1.322"
