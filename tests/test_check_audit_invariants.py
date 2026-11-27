@@ -280,6 +280,21 @@ class TestTheAdaptersRecords:
             in result.stdout
         )
 
+    def test_a_control_only_call_needs_no_checkpoint_or_approval(
+        self, tmp_path: Path
+    ) -> None:
+        records = [
+            call_record(1, "signal_done", None, "allowed", "toolu_1", control=True),
+            call_record(2, "signal_done", None, "ran", "toolu_1", control=True),
+            # The control flag never exempts a call whose worst case is gated.
+            call_record(3, "Skill", None, "ran", "toolu_2", control=True),
+            # An unbound call (no capability, no control flag) is still flagged.
+            call_record(4, "mcp__x__y", None, "ran", "toolu_3"),
+        ]
+        assert records[1]["details"]["control"] is True
+        report = monitor.run(None, None, [self.write(tmp_path, records)])
+        assert [v["call_id"] for v in report.violations] == ["toolu_2", "toolu_3"]
+
     def test_a_refusal_rate_above_the_threshold_is_an_anomaly(
         self, tmp_path: Path
     ) -> None:

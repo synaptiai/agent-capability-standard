@@ -22,7 +22,9 @@ Violations (each printed with its call id):
 - An executed call in the adapter's records whose capability is mutate or
   send, that is unbound (no capability), or that is a Skill, Agent or Task
   call (whose worst case is mutate and send), with no checkpoint_id or no
-  approved approval in any record of the same call id.
+  approved approval in any record of the same call id. A control-only tool
+  (no capability and ``details.control`` true, STANDARD 1.2.0 section
+  5.18.3) needs neither and is not flagged.
 - A line that is not a JSON object, and, with --verify, every error
   tools/verify_audit_log.py reports for the log (the chain, the head, the
   anchor and each witness).
@@ -305,6 +307,19 @@ def _seq(action_id: Any) -> tuple[str, int] | None:
     return (scope, int(number)) if number.isdigit() else None
 
 
+def is_control_only(record: dict[str, Any]) -> bool:
+    """A record of a control-only tool (STANDARD 1.2.0 section 5.18.3): no
+    capability, ``details.control`` true, and not a Skill, Agent or Task
+    call. Such a call needs no checkpoint and no approval."""
+    details = record.get("details")
+    return (
+        record.get("capability") is None
+        and isinstance(details, dict)
+        and details.get("control") is True
+        and record.get("tool") not in UNSEEN_TOOLS
+    )
+
+
 def check_records(
     records: Sequence[dict[str, Any]], max_refusal_rate: float, report: Report
 ) -> None:
@@ -333,6 +348,8 @@ def check_records(
             continue
         tool = record.get("tool")
         capability = record.get("capability")
+        if is_control_only(record):
+            continue
         if not (
             capability is None
             or capability in GATED_CAPABILITIES

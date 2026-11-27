@@ -1703,7 +1703,9 @@ it fails (exit 1) on a violation, printed with its call id: a call that ran
 and that the pre-tool-use hook gates by its tool name (Write, Edit, Skill,
 Agent, an MCP or other unbound tool) with no used marker for its call id;
 an executed `mutate` or `send` (or unbound, Skill, Agent or Task) call in
-the adapter's records with no `checkpoint_id` or no approval. It also
+the adapter's records with no `checkpoint_id` or no approval (a
+control-only tool, recorded with no capability and `control` true, needs
+neither and is not flagged). It also
 fails on an anomaly: a line recorded with `approval` `off`, a change of
 `config_sha256`, or a refusal rate in the adapter's records above
 `--max-refusal-rate` (default 0.2). A Bash call is gated by its command,
