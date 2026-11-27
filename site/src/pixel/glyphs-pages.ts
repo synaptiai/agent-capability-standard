@@ -36,6 +36,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:faq': ['..#####..', '.##...##.', '.##...##.', '......##.', '....###..', '...##....', '...##....', '.........', '...##....'],
 
   // ---- Guides
+  // Steps rising left to right, for the staged adoption path.
+  'page:adoption': ['.........', '.......##', '.......##', '.....####', '.....####', '...######', '...######', '.########', '#########'],
   // A bus with three branches: one call fanned out to three.
   'page:orchestration-extensions': ['....#####', '....#.###', '....#....', '###.#.###', '#########', '###.#.###', '....#....', '....#.###', '....#####'],
   // A picture: a frame round a hill and a sun.
@@ -171,6 +173,7 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/start/glossary/': 'chapter:terms',
   '/developers/': 'page:api',
 
+  '/guides/adoption/': 'page:adoption',
   '/guides/running-workflows/': 'tool:executor',
   '/guides/orchestration-extensions/': 'page:orchestration-extensions',
   '/guides/modality-handling/': 'page:modality-handling',

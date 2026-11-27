@@ -315,6 +315,7 @@ export function buildRoutes(): Route[] {
   add(
     'guides',
     { source: null, url: '/guides/', title: 'Overview', template: 'listing' },
+    prose('docs/guides/ADOPTION.md', '/guides/adoption/', 'Adopting the Standard'),
     prose('docs/guides/RUNNING_WORKFLOWS.md', '/guides/running-workflows/', 'Running workflows'),
     prose('docs/guides/ORCHESTRATION_EXTENSIONS.md', '/guides/orchestration-extensions/', 'Orchestration extensions'),
     prose('docs/guides/MODALITY_HANDLING.md', '/guides/modality-handling/', 'Modality handling'),
