@@ -1300,8 +1300,22 @@ def test_the_listed_host_is_reachable(
     """The listed host answers under the sandbox, so the refusals above are
     the allowlist's, not a dead network."""
     assert world.settings["sandbox"]["network"]["allowedDomains"] == [LISTED_HOST]
-    out = sandboxed(world, runtime, FETCH[spelling](f"https://{LISTED_HOST}/")).out
-    assert PAGE_MARK in out, out[-500:]
+    url = f"https://{LISTED_HOST}/"
+    out = sandboxed(world, runtime, FETCH[spelling](url)).out
+    if PAGE_MARK not in out:
+        # Which curl ran and how it verifies certificates, under the same
+        # sandbox, and whether the system's own curl reaches the host there.
+        probe = sandboxed(
+            world,
+            runtime,
+            "command -v curl; curl -V 2>&1 | head -n 1; "
+            "env | grep -i -e ssl -e ca_bundle -e cert; "
+            f"curl -sv -m 15 -o /dev/null {_q(url)} 2>&1 "
+            "| grep -i -e cafile -e capath -e 'ssl cert' -e issuer; "
+            "/usr/bin/curl -sS -m 15 -o /dev/null "
+            f"-w '/usr/bin/curl status %{{http_code}}\\n' {_q(url)} 2>&1",
+        ).out
+        pytest.fail(f"{out[-500:]}\n--- under the same sandbox:\n{probe[-1500:]}")
 
 
 @pytest.mark.parametrize("spelling", sorted(FETCH))
