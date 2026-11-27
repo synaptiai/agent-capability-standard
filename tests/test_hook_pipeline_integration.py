@@ -319,7 +319,12 @@ class TestAuditLogIntegrity:
             input=payload,
             capture_output=True,
             text=True,
-            env=_minimal_env({"CLAUDE_PROJECT_DIR": str(project_dir)}),
+            env=_minimal_env(
+                {
+                    "CLAUDE_PROJECT_DIR": str(project_dir),
+                    "AUDIT_HMAC_KEY": "integration-test-key",
+                }
+            ),
             timeout=10,
         )
         assert result.returncode == 0

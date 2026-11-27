@@ -57,6 +57,94 @@ def _no_git_configuration_but_the_tests() -> Iterator[None]:
             patch.undo()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _a_home_with_no_audit_key() -> Iterator[None]:
+    """Every test, and every hook and verifier it runs, sees HOME as an empty
+    directory of its own, so no audit key file (``~/.config/acs/audit.key``,
+    which the log hook and ``tools/verify_audit_log.py`` prefer to
+    ``AUDIT_HMAC_KEY``) on the machine signs or verifies a test's log, and no
+    test reads the person's key. A test that needs a key file makes one in a
+    HOME of its own (``tests/test_audit_key_file.py``)."""
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-home-") as where:
+        patch.setenv("HOME", where)
+        try:
+            yield
+        finally:
+            patch.undo()
+
+
+# The directory of the plugin's hooks, and the repository's root.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def strict_sandbox_settings(
+    *covered: str | os.PathLike[str], config_dir: str | os.PathLike[str]
+) -> dict[str, Any]:
+    """User settings holding the strict sandbox the pre-tool-use hook relaxes
+    read-only Bash under (hooks/README.md, The strict sandbox), with
+    ``Edit(//<dir>/**)`` and ``Read(//<dir>/**)`` deny rules for each
+    directory in ``covered`` (as written and as resolved), which cover the
+    records, settings files and hook scripts of every project and plugin
+    copy under them, and for the user configuration directory
+    ``config_dir``; with an Edit rule for ``~/.config/acs`` (the audit key and
+    the remote-write record), a Read rule for the audit key file and Read rules for the
+    user's credentials (~/.ssh, gh's hosts.yml, ~/.git-credentials, the
+    keychains); and with envVars denials for the token variables."""
+    dirs: list[str] = []
+    for d in (*covered, config_dir):
+        for form in (os.path.abspath(d), os.path.realpath(d)):
+            if form not in dirs:
+                dirs.append(form)
+    home = os.path.expanduser("~")
+    deny = [f"{tool}(/{d.rstrip('/')}/**)" for d in dirs for tool in ("Edit", "Read")]
+    for h in dict.fromkeys((home, os.path.realpath(home))):
+        k = os.path.join(h, ".config", "acs")
+        deny += [f"Edit(/{k}/**)", f"Read(/{k}/audit.key)"]
+        deny += [f"Read(/{h}/.ssh/**)", f"Read(/{h}/Library/Keychains/**)"]
+        deny += [f"Read(/{h}/.config/gh/hosts.yml)", f"Read(/{h}/.git-credentials)"]
+    deny.append("Read(//Library/Keychains/**)")
+    return {
+        "sandbox": {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "allowUnsandboxedCommands": False,
+            "network": {"allowedDomains": ["example.com"], "strictAllowlist": True},
+            "credentials": {
+                "envVars": [
+                    {"name": name, "mode": "deny"}
+                    for name in ("AUDIT_HMAC_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+                ]
+            },
+        },
+        "permissions": {"deny": deny},
+    }
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _strict_sandbox_for_the_hooks(_a_home_with_no_audit_key: None) -> Iterator[None]:
+    """Every hook a test runs reads a user settings file (CLAUDE_CONFIG_DIR)
+    with the strict sandbox, whose deny rules cover the temporary directory
+    and this repository: the pre-tool-use hook relaxes a read-only Bash
+    command only under it, and the tests of the classification assume it.
+    tests/test_strict_sandbox.py tests the rule itself, with settings of its
+    own. It runs after _a_home_with_no_audit_key, so the rules for the
+    audit key name the HOME the hooks see."""
+    import json
+
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-claude-config-") as where:
+        settings = strict_sandbox_settings(
+            tempfile.gettempdir(), REPO_ROOT, config_dir=where
+        )
+        Path(where, "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        patch.setenv("CLAUDE_CONFIG_DIR", where)
+        try:
+            yield
+        finally:
+            patch.undo()
+
+
 @pytest.fixture
 def ontology_path() -> str:
     """Path to the capability ontology YAML file."""

@@ -82,7 +82,13 @@ def run(
         capture_output=True,
         text=True,
         cwd=project,
-        env={**os.environ, **GIT_ENV, "CLAUDE_PROJECT_DIR": str(project)},
+        env={
+            **os.environ,
+            **GIT_ENV,
+            "CLAUDE_PROJECT_DIR": str(project),
+            # A key: without one the log hook writes unsigned lines and says so
+            "AUDIT_HMAC_KEY": "git-bound-test-key",
+        },
         timeout=60,
     )
     return result, time.monotonic() - start
