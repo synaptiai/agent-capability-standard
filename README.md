@@ -306,19 +306,6 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 | `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity when a turn or a session ends or starts, filing it under `.claude/checkpoints/ended/` |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
 
-### Remote Writes
-
-The plugin also ships an MCP server, `grounded_agency/remote_writes.py`,
-for the remote writes the agent's commands cannot make under the strict
-sandbox, which denies them git's and gh's credentials: `push`, `tag_push`,
-`pr_create`, `pr_merge`, `release_create`, `issue_create` and
-`issue_assign`, one action per call. No tool takes a repository: the target
-is the origin a person records for the project, outside Claude Code, with
-`/usr/bin/python3 -I <plugin>/grounded_agency/remote_writes.py record`,
-which also records the git and gh the server runs. Each call is a gated `mutate`, with a checkpoint and a person's approval
-that names its target (see
-[hooks/README.md](hooks/README.md#remote-writes)).
-
 ## Documentation
 
 ### For Users
@@ -475,6 +462,7 @@ claude plugin install agent-capability-standard
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Validator** | Design-time validation for custom workflows |
+| **Remote writes** | An MCP server with typed tools for push, tag, pull request, merge, release and issue writes, each a gated change a person approves, to the origin a person recorded ([hooks/README.md](hooks/README.md#remote-writes)) |
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 
