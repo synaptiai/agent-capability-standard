@@ -412,10 +412,17 @@ def _make_world(tmp_path: Path) -> World:
     env["ACS_ALLOWED_VAR"] = secrets["allowed-read"]
 
     # The settings the setup command's `settings` action prints for this
-    # project and home, run as the command runs it: a script under -I.
+    # project and home, run as the command runs it: a script under -I, with
+    # the interpreter the command names. The test suite's own Python may sit
+    # where every user can write (a CI runner's tool cache), and the script
+    # refuses to run under such a Python.
+    setup = _load_setup(plugin)
+    interpreter = (
+        setup.INTERPRETER if os.access(setup.INTERPRETER, os.X_OK) else sys.executable
+    )
     result = subprocess.run(
         [
-            sys.executable,
+            interpreter,
             "-I",
             str(plugin / "grounded_agency" / "sandbox_settings.py"),
             "settings",
@@ -459,7 +466,7 @@ def _make_world(tmp_path: Path) -> World:
         settings=settings,
         config=config,
         sandbox_only=sandbox_only,
-        setup=_load_setup(plugin),
+        setup=setup,
     )
 
 
