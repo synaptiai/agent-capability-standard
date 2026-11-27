@@ -1635,7 +1635,7 @@ any of them:
 | Record | Grows by | Size |
 |--------|----------|------|
 | `.claude/audit.log` | one line per tool call, succeeded or failed | about 0.7 KB a line (689 bytes on average over 30 lines for `Bash` and `Write` calls; a longer tool or skill name, or an anchor's reason, adds its length) |
-| `.claude/checkpoints/used/`, `.claude/checkpoints/ended/` | one marker file per checkpoint: under `used/` when a gated call takes it, under `ended/` when its validity ends unused | about 160 bytes a file |
+| `.claude/checkpoints/used/`, `.claude/checkpoints/ended/` | one marker file per checkpoint: under `used/` when a gated call takes it, under `ended/` when its validity ends unused | about 190 bytes a file (189 for a marker with a 40-digit commit id) |
 | `<git dir>/acs/checkpoints/commits/` | one entry per checkpoint taken, named by its commit | 64 bytes a file (the commit's signature), plus the objects `git stash create` wrote |
 
 Each entry is an action record with these fields, in this order:
