@@ -120,7 +120,6 @@ class TestProbe:
         w.heartbeat(40 * MIN)
         assert w.lost(40 * MIN)
 
-
     def test_an_overdue_probe_is_due_now_never_in_the_past(self) -> None:
         w = self.probe()
         assert w.next_check_ms(25 * MIN) == 25 * MIN
