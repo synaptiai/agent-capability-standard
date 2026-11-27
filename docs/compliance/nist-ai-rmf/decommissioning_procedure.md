@@ -37,7 +37,7 @@ Record the trigger, the date and the approver in the decommissioning record (sec
 
 Do these steps in order, and record the time of each one.
 
-1. **Announce the stop.** Tell the system's users and the parties that receive its output (the stakeholder register, AIMS-STK-001) when the system stops and what replaces it.
+1. **Announce the stop.** Tell the system's users and the parties that receive its output (the stakeholder analysis, AIMS-CTX-001) when the system stops and what replaces it.
 2. **Stop new runs.** Remove the system's triggers and schedules, and stop any host that starts runs (`WorkflowRunner`, a Standard Agents runtime). A run that is in progress either finishes or is cancelled; record which.
 3. **Revoke the agent's tools.** Remove the MCP servers, API credentials and tokens the system was given. Rotate any credential that was shared with another system.
 4. **Remove the plugin or the adapter.** For the Claude Code plugin, uninstall it, or remove its hooks from the settings that load them. For the Python adapter, remove `GroundedAgentAdapter` from the host. Removing the safety layer while the agent can still run would let calls run ungated, so step 3 comes first.
@@ -52,7 +52,7 @@ The records answer what the system did and how to undo it. Preserve them before 
 | Plugin audit log | `.claude/audit.log`, its head `.claude/audit.head`, and the head's anchor `<git dir>/acs/audit.head` | Verify it (step 1 below), then copy all three to the archive |
 | Audit key | `~/.config/acs/audit.key`, or the `AUDIT_HMAC_KEY` the deployment set | Keep it, under the archive's access control, for as long as the log is kept; without it the log cannot be verified |
 | Checkpoint markers | `.claude/checkpoints/used/` and `.claude/checkpoints/ended/` | Copy to the archive; each used marker's name `<checkpoint_id>.<call_id>.<suffix>` links a call to its restore point |
-| Checkpoint commits | The commits named in `<git dir>/acs/checkpoints/commits/` | Keep them while a restore may still be needed (section 5) |
+| Checkpoint commits | The commits named in `<git dir>/acs/checkpoints/commits/` | Pin them with refs (section 5, step 1) and keep them while a restore may still be needed |
 | SDK checkpoint state | The `CheckpointTracker` directory (`.checkpoints/` by default) | Copy to the archive |
 | Evidence and memory stores | The paths the deployment gave the evidence store and the memory store | Copy to the archive, then apply the deployment's redaction rules |
 | Run records and traces | Where the host keeps them | Copy to the archive |
@@ -68,14 +68,22 @@ Steps:
 
 For a period the AI System Owner sets (default: [30] days), keep the means to restore the last state the system left:
 
-- Do not run `git gc --prune=now` or delete the repository while a checkpoint commit may still be restored. An unreferenced commit stays restorable only until git prunes it.
-- A checkpoint commit is restored as the rollback skill restores it: `git restore --source=<commit> --worktree -- <paths>`, and `git restore --source=<commit>^2 --staged -- <paths>` for the index.
-- After the period, record that the way back is closed.
+1. **Pin the checkpoint commits.** A checkpoint commit comes from `git stash create`, which makes no ref, so git's automatic garbage collection deletes it once it is older than `gc.pruneExpire` (two weeks by default), whatever period was set. From your own terminal, in the repository, give each commit listed in `<git dir>/acs/checkpoints/commits/` a ref (each file there is named by its commit):
+
+   ```bash
+   commits="$(git rev-parse --absolute-git-dir)/acs/checkpoints/commits"
+   for c in $(ls "$commits"); do git update-ref "refs/acs-archive/$c" "$c"; done
+   git for-each-ref refs/acs-archive/
+   ```
+
+   The last command lists one line per pinned commit. Record the number in the decommissioning record. Do not delete the repository while the way back is open.
+2. **Restore when needed.** A checkpoint commit is restored as the rollback skill restores it: `git restore --source=<commit> --worktree -- <paths>`, and `git restore --source=<commit>^2 --staged -- <paths>` for the index.
+3. **Close the way back.** After the period, remove the refs with `git for-each-ref --format='%(refname)' refs/acs-archive/ | xargs -n 1 git update-ref -d`, and record that the way back is closed.
 
 ## 6. Retain and Dispose
 
 1. **Retain.** Keep the archive for the retention period the deployment requires. A domain profile's `compliance` member can declare one (`audit_retention_days`), but the framework does not enforce it: the deployer's storage does.
-2. **Dispose.** At the end of the period, delete the archive, the audit key and the checkpoint commits, and record the date, the method and who approved it.
+2. **Dispose.** At the end of the period, delete the archive, the audit key and the checkpoint commits (with any `refs/acs-archive/` ref that section 5 has not removed), and record the date, the method and who approved it.
 3. **Personal data.** Where the records hold personal data, apply the deployer's data protection rules, which may require earlier deletion than the retention period.
 
 ## 7. Close Out
@@ -113,6 +121,7 @@ A deployer that uses a deprecated item plans the migration during the deprecatio
 | Audit log verification | [Command output, date] |
 | Witness copy of the head | [Where it is kept] |
 | Archive location and checksums | [Section 4, step 3] |
+| Checkpoint commits pinned | [Number, section 5 step 1] |
 | Way back closed | [Date, or "open until" date] |
 | Retention period and disposal date | [Section 6] |
 | Signed off | [AI System Owner, date] |
