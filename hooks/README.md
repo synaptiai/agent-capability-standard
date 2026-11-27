@@ -1302,9 +1302,10 @@ Results with srt 0.0.82, on 2026-11-27:
 | Linux, `node:22-bookworm` (bubblewrap 0.8.0), as uid 1000 | 565 passed, 2 expected failures; skipped: the keychain (8), the metadata address (3) and the Claude Code tests (31) |
 | Linux, `ubuntu:24.04` (bubblewrap 0.9.0), as uid 1000 | 565 passed, 2 expected failures; skipped as on `node:22-bookworm` |
 
-The Linux runs predate the routes against a project `.mcp.json`, the user
-configuration directory and `~/.claude.json` (33 tests), which ran on
-macOS only. The two containers ran on an arm64 Mac under Docker Desktop with
+The Linux rows predate the routes against a project `.mcp.json`, the user
+configuration directory and `~/.claude.json`. Those routes and the shared
+directories' test (133 tests) ran again in `node:22-bookworm` on
+2026-11-27 and passed. The two containers ran on an arm64 Mac under Docker Desktop with
 `--security-opt seccomp=unconfined --security-opt systempaths=unconfined`.
 Their kernel has no `kernel.apparmor_restrict_unprivileged_userns`, so the
 AppArmor restriction of Ubuntu 24.04 hosts was not met there. On the
