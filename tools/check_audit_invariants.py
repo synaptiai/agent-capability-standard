@@ -104,14 +104,17 @@ DEFAULT_MAX_REFUSAL_RATE = 0.2
 
 # The suffix mktemp gives the claim directory, which ends a marker's name.
 _MARKER_SUFFIX = re.compile(r"\.([A-Za-z0-9]+)\Z")
-_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+_UNSAFE = re.compile(rb"[^A-Za-z0-9._-]")
 
 
 def safe(text: str) -> str:
-    """A name as the pre-tool-use hook keeps it in a marker's name:
-    characters outside A-Z, a-z, 0-9, ``.``, ``_`` and ``-`` replaced by
-    ``_``, and at most 120 characters."""
-    return _UNSAFE.sub("_", text)[:120]
+    """A name as the pre-tool-use hook keeps it in a marker's name (``tr -c
+    'A-Za-z0-9._-' '_' | cut -c1-120``): each byte of its UTF-8 form outside
+    A-Z, a-z, 0-9, ``.``, ``_`` and ``-`` replaced by ``_``, and at most 120
+    characters."""
+    return _UNSAFE.sub(b"_", text.encode("utf-8", "surrogateescape"))[:120].decode(
+        "ascii"
+    )
 
 
 @dataclass

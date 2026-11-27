@@ -313,6 +313,34 @@ def test_the_ungated_tools_are_the_pretooluse_hooks() -> None:
     assert set(match.group(1).split()) == monitor.UNGATED_TOOLS
 
 
+@pytest.mark.parametrize(
+    "call_id",
+    ["toolu_01AbC", "toolu/with:odd chars", "toolu_é_ü", "x" * 130, "a.b-c_d"],
+)
+def test_a_call_id_is_kept_safe_as_the_hook_keeps_it(call_id: str) -> None:
+    """The monitor's safe() gives the name the hook's own safe() gives a
+    call id in a used marker's name (as the hook substitutes it), run from
+    the hook's source with the locale the hook sets (LC_ALL=C, byte by
+    byte)."""
+    text = PRETOOLUSE_HOOK.read_text(encoding="utf-8")
+    match = re.search(r"^safe\(\) \{\n.*?^\}\n", text, re.MULTILINE | re.DOTALL)
+    assert match is not None
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            match.group(0) + 'printf "%s" "$(safe "$1")"',
+            "safe",
+            call_id,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    assert result.stdout == monitor.safe(call_id)
+
+
 @pytest.mark.skipif(
     shutil.which("jq") is None or shutil.which("openssl") is None,
     reason="the hook needs jq and openssl",
