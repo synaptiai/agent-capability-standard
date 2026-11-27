@@ -335,7 +335,6 @@ findings file and the PVC review, checked against the tree.
 7. **The PVC review's actions:** 33 P1 and 25 P2.
 8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer implements them.
 9. **Smaller items.**
-   - The Astro advisory in `site/package-lock.json`.
    - The margins of the figure-gap runs.
    - The three workflows the digital-twin example copies.
    - The RFCs' open questions; RFC-0002 is still a Draft.
