@@ -7,6 +7,7 @@ Loads declarative workflow YAML and orchestrates step execution with:
 - Checkpoint auto-creation before mutation steps
 - Conformance tracing (validation mode)
 - Running workflows on the core's executor (``WorkflowRunner`` with a ``Host``)
+- Watching a wait's liveness for a host (``LivenessWatcher``)
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from .engine import (
     WorkflowStepResult,
 )
 from .idempotency import IdempotencyLog
+from .liveness import LivenessWatcher
 from .runner import (
     Host,
     HostCannotServe,
@@ -48,6 +50,7 @@ __all__ = [
     "HostCannotServe",
     "HostResponseError",
     "IdempotencyLog",
+    "LivenessWatcher",
     "OverlapGate",
     "RunArchiveError",
     "RunIncomplete",

@@ -39,6 +39,7 @@ Package 0.1.0 implements the Agent Capability Standard 1.2.0
 | `agents` | Agent manifests (section 5.15.1): `manifestMaxima(manifest, readOnly)`, the highest flags a manifest's capabilities allow (or its read-only ones), and `joinMaxima`; `checkTask(manifest, task)`, the task names a manifest does not declare and the required ones a task lacks (section 5.15.2); `workflowTarget` and `agentsApply`, the version a workflow targets (section 11.5) and whether its `agents` has effect (1.2 or later) |
 | `families` | `modelFamily(modelId)`: the model family a host derives from a model identifier (section 5.15), null when it attests none; `isModelFamily` |
 | `domains` | `isDomainId` and `selectImplementation(domain, available)`: the implementation a host selects for a step's `domain` (section 5.2.4): the domain, else its longest prefix ending before a `.`, else the one for no domain, else `UnsupportedDomainError` (R402 `unsupported_domain`, section 5.19.7) |
+| `liveness` | `LivenessWatcher`: the consecutive missed heartbeats (`push`) or failed probes (`probe`) of one wait (section 5.13), reset by a heartbeat or an answered probe; `response(nowMs)` is `{ kind: 'LivenessLost' }` once `failure_threshold` are missed in a row (the step then fails with R406), and `lostAt` says when, so a host can tell R406 from R401 |
 | `issues` | `issuePath(location)`: a diagnostic's location as one dot-and-bracket path (`review.steps[1].gates[0].when`), for a format that wants one (section 9.8) |
 
 ```ts
