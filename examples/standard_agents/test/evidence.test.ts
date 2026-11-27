@@ -472,6 +472,27 @@ describe('what a grounded call returns holds no secret (security round 5, batch 
     }
   });
 
+  it("returns a control tool's thrown error as a redacted error result (security round 6)", async () => {
+    configureLayer({ secrets: [REG] });
+    try {
+      const t = memoryThread();
+      const done = controlTool({
+        name: 'done',
+        description: 'x',
+        args,
+        execute: async () => {
+          throw new Error(`status push to postgres://a:${REG}@h/d failed with ${GH}`);
+        },
+      });
+      const result = await done.execute(t.state, {});
+      expect(result).toEqual({ status: 'error', error: 'status push to postgres://a:[REDACTED]@h/d failed with [REDACTED]' });
+      expectClean(t, result);
+      expect((await readTrace(t.state)).map((e) => e.status)).toEqual(['executed']);
+    } finally {
+      resetLayer();
+    }
+  });
+
   it('returns a success as the tool gave it (control)', async () => {
     const t = memoryThread();
     const tool = retrieve(async () => ({ data: { note: 'plain' }, confidence: 0.9, evidence_anchors: [] }));

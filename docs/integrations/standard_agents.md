@@ -251,7 +251,8 @@ model family for a child. Two of them touch evidence:
   a composite's state returns that is not a success (a refusal, an R407
   quoting a store's or a secrets function's error, an R402 naming an
   output member, the tool's own error, a nested plain tool's error, a
-  control tool's own error result) is
+  control tool's own error result, or the error a control tool's code
+  throws, which it returns as an error result) is
   redacted the same way before it reaches the runtime, the thread's
   messages and the model; an F502's `shown` arguments have their secrets
   replaced, and its `digest` stays that of the values the approver decides
@@ -739,7 +740,12 @@ export default groundedTool({
   may state another name than the one it is invoked under; and a composite
   running outside an execution (an endpoint, an effect) issues tokens that
   cover nothing. Such a call asks its own approval and checkpoint, and its
-  send and output are still checked against those rules. The binding
+  send and output are still checked against those rules. Those profiles
+  also raise the call's flags and person requirement for what it performs,
+  as they raised the composite's: a call they make need approval is
+  covered only by decisions the composite's call counted that still meet
+  it when the call runs (a plain tool's included), and one that takes no
+  token asks its own approval, of a person where they require one. The binding
   cannot tell it from another call of the tool made at that moment (a
   parallel call, an endpoint's), so that call is checked against them too.
 

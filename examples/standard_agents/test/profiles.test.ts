@@ -3,7 +3,7 @@
 // binding runs on the plain entry, so these tests give `bindingProfiles` a
 // core of their own computing what `CoreContext` computes for the profiles
 // they use; `packages/acs-core` tests the core's answers.
-import { defineTool, type ToolResult } from '@standardagents/spec';
+import { defineTool, type ThreadState, type ToolResult } from '@standardagents/spec';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
@@ -11,7 +11,7 @@ import type { CoreContext, Diagnostic, ProfileFlags, ProfilePolicy } from '@syna
 import { decideApproval } from '../src/acs/approval.js';
 import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { effectiveFlags, type CapabilityId, type DeclaredFlags, type Risk } from '../src/acs/ontology.js';
-import { registerTools, resetLayer } from '../src/acs/layer.js';
+import { configureLayer, registerTools, resetLayer } from '../src/acs/layer.js';
 import { bindingProfiles, confidenceFailure, type ProfileCore } from '../src/acs/profiles.js';
 import { actionRecord, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
@@ -563,6 +563,193 @@ describe("a nested call is covered only by the decisions the composite's call co
     const trace = await readTrace(t.state);
     const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
     expect(trace.find((e) => e.action === 'write')).toMatchObject({ status: 'executed', covered_by: composite.seq });
+  });
+});
+
+describe("a nested call needs the composite's decisions valid when the profiles raise its approval (§5.18.4, §5.21.3)", () => {
+  // Security round 6: a nested call whose own flags need no approval, but
+  // whose capability the profiles applied to the composite (or the layer's)
+  // make need one, was covered by the composite's approval without its
+  // decisions being checked at the nested call, so an approval that had
+  // lapsed by then still covered it. A nested grounded tool was checked so
+  // only when it was given the profiles itself.
+  afterEach(() => resetLayer());
+  const args = z.object({}).passthrough();
+  const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['persist'] } }];
+
+  type Kind = 'grounded' | 'grounded-own' | 'plain';
+  type Where = 'composite' | 'layer';
+
+  /**
+   * `store` (persist, no approval of its own; `grounded-own` is given the
+   * profiles too) and `batch` (invoke, its approval valid for a minute,
+   * `invokes: {store}`, which works `work` ms before its nested call), the
+   * profiles given to `batch` or put in force by the layer; with `deep`,
+   * `batch` reaches `store` through `inner` (invoke, no profiles of its
+   * own). A person approves `batch` at T0, and `batch` runs at T0 + 55 s.
+   */
+  async function scenario(kind: Kind, where: Where, deep: boolean, work: number) {
+    let T = 1_000_000;
+    const now = () => T;
+    const profiles = bindingProfiles(THRESHOLDS, documents);
+    if (where === 'layer') configureLayer({ profiles });
+    const given = where === 'composite' ? { profiles } : {};
+    let stored = 0;
+    const store =
+      kind === 'plain'
+        ? defineTool({
+            description: 'store',
+            args,
+            annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'persist' } },
+            execute: async () => {
+              stored += 1;
+              return { status: 'success', result: JSON.stringify({ stored: true, evidence_anchors: [] }) };
+            },
+          })
+        : groundedTool({
+            name: 'store',
+            capability: 'persist',
+            description: 'store',
+            args,
+            now,
+            ...(kind === 'grounded-own' ? given : {}),
+            execute: async () => {
+              stored += 1;
+              return { stored: true, evidence_anchors: [] };
+            },
+          });
+    const nested: ToolResult[] = [];
+    const inner = groundedTool({
+      name: 'inner',
+      capability: 'invoke',
+      invokes: { store } as never,
+      description: 'inner',
+      args,
+      now,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('store', { key: 'a' }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: (deep ? { inner } : { store }) as never,
+      description: 'batch',
+      args,
+      now,
+      ...given,
+      approval: { expires_ms: 60_000 },
+      execute: async (state) => {
+        T += work;
+        if (deep) await state.invokeTool('inner', {});
+        else nested.push(await state.invokeTool('store', { key: 'a' }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    for (const [n, tool] of Object.entries({ store, inner, batch })) t.tools.set(n, tool as never);
+    registerTools({ store, inner, batch });
+    const asked = await t.tools.get('batch')!.execute(t.state, {});
+    expect(asked.error_code).toBe('F502');
+    await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', T);
+    T += 55_000;
+    const result = await t.tools.get('batch')!.execute(t.state, {});
+    return { result, nested, stored, trace: await readTrace(t.state) };
+  }
+
+  const cases: [Kind, Where, boolean][] = [
+    ['plain', 'composite', false],
+    ['grounded', 'composite', false],
+    ['grounded-own', 'composite', false],
+    ['plain', 'layer', false],
+    ['grounded', 'layer', false],
+    ['plain', 'composite', true],
+    ['grounded', 'composite', true],
+  ];
+  for (const [kind, where, deep] of cases) {
+    const label = `a ${kind} nested call${deep ? ' two composites deep' : ''}, the profiles the ${where}'s`;
+    it(`refuses ${label}, made after the composite's approval lapsed`, async () => {
+      const { result, nested, stored, trace } = await scenario(kind, where, deep, 10_000);
+      expect(result.status).toBe('success');
+      expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+      expect(stored).toBe(0);
+      expect(trace.some((e) => e.action === 'store' && e.status === 'executed')).toBe(false);
+    });
+
+    it(`covers ${label}, while the approval is valid (control)`, async () => {
+      const { nested, stored, trace } = await scenario(kind, where, deep, 1_000);
+      expect(nested.map((r) => r.status)).toEqual(['success']);
+      expect(stored).toBe(1);
+      expect(trace.find((e) => e.action === 'store')).toMatchObject({ status: 'executed' });
+      expect(trace.find((e) => e.action === 'store')?.covered_by).toBeDefined();
+    });
+  }
+});
+
+describe("the flags a composite's profiles raise reach a nested call that takes no token (§5.18.4, §5.21.3)", () => {
+  // Security round 6: a nested grounded call whose arguments the runtime
+  // validated (a zod default) takes no token, so it is checked as a call of
+  // its own; the composite's profiles, which make persist need a person's
+  // approval, did not reach it, and it ran with no approval at all.
+  afterEach(() => resetLayer());
+  const passthrough = z.object({}).passthrough();
+  const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['persist'] } }];
+
+  async function scenario(validated: boolean) {
+    const profiles = bindingProfiles(THRESHOLDS, documents);
+    const storeArgs = z.object({ key: z.string(), tags: z.array(z.string()).default([]) });
+    let stored = 0;
+    const store = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      description: 'store',
+      args: storeArgs,
+      execute: async () => {
+        stored += 1;
+        return { stored: true, evidence_anchors: [] };
+      },
+    });
+    const nested: ToolResult[] = [];
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: { store } as never,
+      description: 'batch',
+      args: passthrough,
+      profiles,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('store', validated ? { key: 'a' } : { key: 'a', tags: [] }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    // The runtime gives a tool its validated arguments (spec ToolDefinition).
+    t.tools.set('store', { execute: (s: ThreadState, a: unknown) => store.execute(s, storeArgs.parse(a)) } as never);
+    t.tools.set('batch', batch as never);
+    registerTools({ store, batch });
+    const asked = await t.tools.get('batch')!.execute(t.state, {});
+    expect(asked.error_code).toBe('F502');
+    await decideApproval(t.state, user('alice'), asked.error_data?.['digest'] as string, 'approved', 2);
+    const result = await t.tools.get('batch')!.execute(t.state, {});
+    return { result, nested, stored, trace: await readTrace(t.state) };
+  }
+
+  it('asks a person for a nested call whose validated arguments take no token', async () => {
+    const { result, nested, stored, trace } = await scenario(true);
+    expect(result.status).toBe('success');
+    expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+    expect(nested[0]?.error).toContain("person's approval");
+    expect(stored).toBe(0);
+    expect(trace.find((e) => e.action === 'store')).toMatchObject({ status: 'refused', code: 'F502', person_required: true });
+  });
+
+  it('covers the nested call whose arguments are unchanged (control)', async () => {
+    const { nested, stored, trace } = await scenario(false);
+    expect(nested.map((r) => r.status)).toEqual(['success']);
+    expect(stored).toBe(1);
+    const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
+    expect(trace.find((e) => e.action === 'store')).toMatchObject({ status: 'executed', covered_by: composite.seq });
   });
 });
 
