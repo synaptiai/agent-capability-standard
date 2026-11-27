@@ -1,0 +1,10 @@
+# Owners of the policy surfaces: the ontology, the domain profiles, the
+# hooks, the Bash classifier and the specification. GitHub requests a review
+# from them on every pull request that changes these paths. The review is
+# required only where a ruleset on main requires code-owner approval.
+/schemas/capability_ontology.yaml @danielbentes @magnusj
+/schemas/profiles/ @danielbentes @magnusj
+/hooks/ @danielbentes @magnusj
+/grounded_agency/capabilities/mapper.py @danielbentes @magnusj
+/spec/ @danielbentes @magnusj
+/.github/CODEOWNERS @danielbentes @magnusj

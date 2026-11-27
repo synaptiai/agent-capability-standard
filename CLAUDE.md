@@ -38,6 +38,18 @@ python tools/validate_canonical_schemas.py
 ```bash
 python tools/validate_rfcs.py
 ```
+An Accepted RFC's header records `**Review window:**` (at least 14 days,
+ending on its `**Date:**`) and `**Accepted by:**` (a maintainer that
+`.github/CODEOWNERS` names); RFC-0001 and RFC-0003 to RFC-0010 are exempt.
+
+### Check the ontology version against the latest release (STANDARD §11.6)
+```bash
+python tools/check_ontology_version.py                   # base: newest vX.Y.Z tag reachable from HEAD
+python tools/check_ontology_version.py --base-ref v2.0.0
+```
+It fails when a safety flag, a layer, a capability or a `requires`,
+`precedes` or `conflicts_with` edge changed and `meta.version` kept the
+release's MAJOR; it needs the tags (CI checks out with `fetch-depth: 0`).
 
 ### Print the deny rules that keep the agent from the layer's records
 ```bash
