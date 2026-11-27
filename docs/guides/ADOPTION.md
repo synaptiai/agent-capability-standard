@@ -35,6 +35,11 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 ```
 
+The commands in this guide run from the root of that clone, with its
+virtual environment active. Where a command acts on a file in your own
+project, it names the file as `<project>/...`, where `<project>` is the
+path to your project.
+
 Stage 3 with the Standard Agents binding also needs Node; the binding's
 guide says how to build it
 ([Standard Agents interoperability](../integrations/standard_agents.md)).
@@ -98,7 +103,8 @@ and writes them only when you agree
 
 **Exit check:** in a session with the plugin and the sandbox set up, an
 edit made with no checkpoint is refused with F501, and
-`python tools/verify_audit_log.py` prints `INTEGRITY CHECK PASSED`.
+`python tools/verify_audit_log.py --log-file <project>/.claude/audit.log`
+prints `INTEGRITY CHECK PASSED`.
 
 ## Stage 3: gate an agent's tool calls with a safety layer (class SL)
 
@@ -126,7 +132,8 @@ pytest tests/test_binding_fixtures.py tests/test_call_fixtures.py
 ```
 
 For the Standard Agents binding, the runners are `npm test` in
-`packages/acs-core/` (after `npm ci` and `npm run build:wasm`) and in
+`packages/acs-core/` (after `npm ci`, `npm run build:wasm` and
+`npm run build`) and in
 `examples/standard_agents/` (after `npm ci`, with the package built by
 `npm run build:ts`); the binding's README gives the full steps.
 
@@ -178,8 +185,13 @@ conflicts between them
 `trust_weights` adjust its static weights; `grounded_agency.trust` computes
 the scores and resolutions.
 
+Keep your profiles in one directory with a copy of
+`schemas/profiles/profile_schema.yaml`; the validator needs that file
+beside the profiles it checks. The tests check the trust model in the
+clone.
+
 ```bash
-python tools/validate_profiles.py
+python tools/validate_profiles.py --profiles-dir <project>/profiles
 pytest tests/test_profiles.py tests/test_trust.py
 ```
 
@@ -190,8 +202,8 @@ error.
 ## Starting points for each domain
 
 Each domain profile in `schemas/profiles/` can start an adoption. Copy the
-profile, and the domain's workflow catalog where one exists, into your
-project, then run stages 1 and 3 on them.
+profile into `<project>/profiles/` and the domain's workflow catalog, where
+one exists, into `<project>/`, then run stages 1, 3 and 5 on them.
 
 | Domain | Profile | Workflow catalog | Domain page |
 |--------|---------|------------------|-------------|
@@ -211,7 +223,7 @@ validation with that header.
 Stage 1, for the healthcare starter:
 
 ```bash
-python tools/validate_workflows.py --catalog healthcare_workflows.yaml --strict
+python tools/validate_workflows.py --catalog <project>/healthcare_workflows.yaml --strict
 ```
 
 Stage 3 with the Python adapter: apply the profile to every call the
@@ -221,7 +233,7 @@ adapter covers. Profiles need `approval="ask"`, the default.
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 
 adapter = GroundedAgentAdapter(
-    GroundedAgentConfig(profiles=["healthcare.yaml"])
+    GroundedAgentConfig(profiles=["profiles/healthcare.yaml"])
 )
 ```
 
