@@ -1550,10 +1550,26 @@ class TestCheckOntologyVersion:
     def _node(ontology: dict, cap: str) -> dict:
         return next(n for n in ontology["nodes"] if n["id"] == cap)
 
-    def test_passes_against_the_latest_release(self) -> None:
-        result = run_validator("check_ontology_version.py")
-        assert result.returncode == 0, result.stdout
-        assert "PASS" in result.stdout
+    @staticmethod
+    def _module(monkeypatch):
+        # The test jobs check out one commit with no tags, so the tag lookup
+        # is tested on a stubbed `git tag` listing, not on this repository's.
+        monkeypatch.syspath_prepend(str(ROOT / "tools"))
+        import check_ontology_version
+
+        return check_ontology_version
+
+    def test_the_base_is_the_newest_release_tag(self, monkeypatch) -> None:
+        module = self._module(monkeypatch)
+        listing = "v1.2.0\nv2.0.0\nv10.0.0-rc1\nv2.0.10\nv9\nvx\n"
+        monkeypatch.setattr(module, "git", lambda *args: listing)
+        assert module.latest_release_tag() == "v2.0.10"
+
+    def test_no_release_tag_is_an_error(self, monkeypatch) -> None:
+        module = self._module(monkeypatch)
+        monkeypatch.setattr(module, "git", lambda *args: "v3.0.0-rc1\n")
+        with pytest.raises(RuntimeError, match="no release tag"):
+            module.latest_release_tag()
 
     def test_passes_with_no_change(self, tmp_path: Path) -> None:
         result = self._run(tmp_path, lambda o: None)
