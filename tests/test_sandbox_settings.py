@@ -362,6 +362,19 @@ def test_macos_paths(project: str, home: str) -> None:
     ]
 
 
+@needs_git
+def test_the_git_directory_records_are_denied_reads(project: str, home: str) -> None:
+    """The checkpoint key's directory is in the sandbox's own read denies,
+    not only in the Read(...) rules Claude Code merges into them."""
+    subprocess.run(["git", "init", "-q", project], check=True, timeout=30)
+    s = _compute(project, home, "linux").settings
+    acs = f"{project}/.git/acs"
+    assert f"Read(/{acs}/**)" in s["permissions"]["deny"]
+    deny_read = s["sandbox"]["filesystem"]["denyRead"]
+    assert acs in deny_read and deny_read[-1] == acs
+    assert {"path": acs, "mode": "deny"} in s["sandbox"]["credentials"]["files"]
+
+
 def test_linux_paths(project: str, home: str) -> None:
     deny_read = _compute(project, home, "linux").settings["sandbox"]["filesystem"][
         "denyRead"

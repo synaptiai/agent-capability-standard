@@ -27,7 +27,8 @@ The settings, every filesystem path literal and absolute:
   entries for the keychains (macOS), ``~/.ssh``, gh's ``hosts.yml``,
   ``~/.git-credentials``, the package registries' and Docker's credential
   files (``~/.npmrc``, ``~/.pypirc``, ``~/.cargo/credentials.toml`` and the
-  like) and the audit key file;
+  like), the audit key file and the git directories' ``acs`` directories,
+  which hold the checkpoint key (also denied by the ``Read(...)`` rules);
 - ``sandbox.credentials.envVars`` deny entries for ``GH_TOKEN``,
   ``GITHUB_TOKEN``, ``AUDIT_HMAC_KEY`` and the registries' publish tokens.
 
@@ -993,6 +994,15 @@ def compute_settings(
         deny.append(rule("Edit", p, directory))
     deny_write: list[str] = list(records["sandbox"]["filesystem"]["denyWrite"])
     deny_write += key_dirs + [p for p, _ in config_files]
+    # The git directories' records hold the checkpoint key: denied to
+    # sandboxed reads by the sandbox's own lists too, so that the denial
+    # does not rest on Claude Code merging the Read(...) rules into them.
+    deny_read = list(creds)
+    for r in records["permissions"]["deny"]:
+        if r.startswith("Read(/") and r.endswith(")"):
+            path = r[len("Read(/") : -1]
+            deny_read.append(path[:-3] if path.endswith("/**") else path)
+    deny_read = _unique(deny_read)
 
     settings: dict[str, Any] = {
         "permissions": {"deny": _unique(deny)},
@@ -1005,11 +1015,11 @@ def compute_settings(
                 "strictAllowlist": True,
             },
             "filesystem": {
-                "denyRead": list(creds),
+                "denyRead": deny_read,
                 "denyWrite": _unique(deny_write),
             },
             "credentials": {
-                "files": [{"path": p, "mode": "deny"} for p in creds],
+                "files": [{"path": p, "mode": "deny"} for p in deny_read],
                 "envVars": [{"name": n, "mode": "deny"} for n in CREDENTIAL_ENV_VARS],
             },
         },

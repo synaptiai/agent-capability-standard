@@ -284,6 +284,154 @@ jobs:
       - name: Run the tests
         run: pytest tests/ --tb=short -rs
 
+  # Attacks on the sandbox boundary under the sandbox runtime's own srt
+  # command, with the settings the setup command computes. The suite needs
+  # no compiled extension, so it runs without the Rust build and without
+  # tests/conftest.py. ACS_BOUNDARY_REQUIRED=1 makes a missing srt or bwrap,
+  # or a sandbox that cannot start, a failure rather than a skip.
+  sandbox-boundary:
+    name: Sandbox boundary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      ACS_BOUNDARY_REQUIRED: "1"
+      SANDBOX_RUNTIME_VERSION: "0.0.82"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+
+      - name: Install what srt needs on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+
+      # Ubuntu 24.04 can refuse unprivileged user namespaces, which
+      # bubblewrap needs, through AppArmor. Lift that only when it is on, and
+      # show whether bubblewrap starts as the runner's user either way.
+      - name: Check that bubblewrap can start
+        if: runner.os == 'Linux'
+        run: |
+          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -r "$f" ]; then
+            echo "kernel.apparmor_restrict_unprivileged_userns=$(cat "$f")"
+            if [ "$(cat "$f")" = 1 ]; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            fi
+          else
+            echo "$f is absent: AppArmor does not restrict user namespaces here"
+          fi
+          bwrap --version
+          if bwrap --ro-bind / / --unshare-user --unshare-net true; then
+            echo "bubblewrap starts as $(id -un)"
+          else
+            echo "::error::bubblewrap cannot create a user namespace as $(id -un), so srt cannot sandbox a command on this runner"
+            exit 1
+          fi
+
+      - name: Install the sandbox runtime
+        run: |
+          npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@$SANDBOX_RUNTIME_VERSION"
+          srt --version
+
+      - name: Install pytest
+        run: pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
+
+      # The metadata route can be tested only where 169.254.169.254
+      # answers without the sandbox. Where it answers here, a skip of that
+      # route becomes a failure.
+      - name: Check whether the metadata address answers
+        run: |
+          code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Metadata: true' http://169.254.169.254/ || true)
+          echo "169.254.169.254 answers with HTTP status: ${code:-none}"
+          if [ -n "$code" ] && [ "$code" != 000 ]; then
+            echo ACS_BOUNDARY_METADATA_REQUIRED=1 >> "$GITHUB_ENV"
+          else
+            echo "::warning::169.254.169.254 does not answer on this runner, so the metadata route is not tested"
+          fi
+
+      - name: Run the boundary suite
+        run: pytest --noconftest -p no:cacheprovider -rs --tb=short tests/test_sandbox_boundary.py
+
+  # The suite's Claude Code tests: headless claude -p runs of a few routes
+  # in the default, acceptEdits and bypassPermissions modes. They need an
+  # Anthropic credential, so the job runs its steps only when the
+  # repository secret ANTHROPIC_API_KEY is set, and passes without them
+  # otherwise (as on a pull request from a fork).
+  sandbox-boundary-claude:
+    name: Sandbox boundary through Claude Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      CLAUDE_CODE_VERSION: "2.1.322"
+    steps:
+      - name: Say why nothing runs
+        if: env.HAS_ANTHROPIC_KEY != 'true'
+        run: echo "The repository secret ANTHROPIC_API_KEY is not set, so Claude Code is not run."
+
+      - uses: actions/checkout@v7
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+
+      - name: Set up Python
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+
+      - name: Install Claude Code and what its sandbox needs
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -r "$f" ] && [ "$(cat "$f")" = 1 ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          if ! bwrap --ro-bind / / --unshare-user --unshare-net true; then
+            echo "::error::bubblewrap cannot create a user namespace as $(id -un), so Claude Code cannot sandbox a command on this runner"
+            exit 1
+          fi
+          # The package's bin/claude.exe is a placeholder until its install
+          # script copies the native binary over it; the script runs here
+          # by name rather than as an npm lifecycle script.
+          npm install -g --ignore-scripts "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
+          claude --version
+          pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
+
+      # A test skips when the model makes no Bash call; a run in which none
+      # passed tested nothing, and fails.
+      - name: Run the Claude Code routes
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ACS_BOUNDARY_CLAUDE: "1"
+        run: |
+          pytest --noconftest -p no:cacheprovider -rs --tb=short -k claude_code \
+            tests/test_sandbox_boundary.py | tee "$RUNNER_TEMP/claude-routes.log"
+          grep -Eq '[1-9][0-9]* passed' "$RUNNER_TEMP/claude-routes.log"
+
   benchmarks:
     name: Benchmark validation
     runs-on: ubuntu-latest
