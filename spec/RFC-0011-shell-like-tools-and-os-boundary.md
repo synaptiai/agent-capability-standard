@@ -570,7 +570,8 @@ its shell-like tools the worst case and takes checkpoints by another route.
    macOS on 2026-11-25, with a second, isolated login whose own
    `settings.json` held the strict sandbox (reported on #141). Every
    sandbox key took effect from the user's file, the network allowlist
-   included. From the project's `.claude/settings.json`, `enabled: false`,
+   included. From the project's settings file (`settings.json` in its `.claude`
+   directory), `enabled: false`,
    `excludedCommands` (even under the user's `allowUnsandboxedCommands:
    false`) and `filesystem.allowWrite` each took effect over the user's
    strict sandbox; `allowUnsandboxedCommands: true`, `strictAllowlist:
