@@ -79,16 +79,26 @@ Code lets them:
   checkpoint runs as a rollback.
 - After each tool call, a hook writes an action record to
   `.claude/audit.log`, each line chained to the one before by an HMAC.
+- Under the strict sandbox, the agent's commands cannot use git's or gh's
+  credentials. A push, a pull request, a merge, a release or an issue goes
+  through the plugin's remote-write tools instead, and each one is a gated
+  change a person approves
+  ([Remote writes](../../hooks/README.md#remote-writes)).
 
 The hooks claim no conformance class. Claude Code leaves gaps they cannot
 close, and [SECURITY.md §5.5](../../spec/SECURITY.md#55-hooks-and-the-safety-layer-class)
 lists them. Until Claude Code's strict sandbox is set up in your user
 settings, the hooks treat every Bash call as a change, so Bash calls are
 refused ([The strict sandbox](../../hooks/README.md#the-strict-sandbox)).
+To set it up, run `/grounded-setup` in Claude Code, in each project you
+use the plugin in. The first time, it gives you a command to run in a
+terminal outside Claude Code; that command shows the settings it would add
+and writes them only when you agree
+([Setting up the sandbox](../../hooks/README.md#setting-up-the-sandbox)).
 
-**Exit check:** in a session with the plugin, an edit made with no
-checkpoint is refused with F501, and `python tools/verify_audit_log.py`
-prints `INTEGRITY CHECK PASSED`.
+**Exit check:** in a session with the plugin and the sandbox set up, an
+edit made with no checkpoint is refused with F501, and
+`python tools/verify_audit_log.py` prints `INTEGRITY CHECK PASSED`.
 
 ## Stage 3: gate an agent's tool calls with a safety layer (class SL)
 
