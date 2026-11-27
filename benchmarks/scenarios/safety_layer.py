@@ -326,6 +326,11 @@ def _secret_forms() -> dict[str, tuple[str, bool]]:
     }
 
 
+# Text written beside a secret in the anchor excerpt and the checkpoint
+# reason; redaction must keep it.
+KEPT_TEXT = ("Authorization:", "Before rotating credential")
+
+
 class SecretRedactionScenario(BenchmarkScenario):
     """Redaction: secrets written to evidence, checkpoint and call records."""
 
@@ -387,7 +392,7 @@ class SecretRedactionScenario(BenchmarkScenario):
             "secret_leak_rate": sum(bool(v) for v in leaked.values()) / n,
             # The non-secret text written beside each secret must survive:
             # a redactor that wiped every record would leak nothing.
-            "benign_text_kept": "api.example.com" in everything,
+            "benign_text_kept": all(text in everything for text in KEPT_TEXT),
             "records_written": records,
             "results": leaked,
         }
