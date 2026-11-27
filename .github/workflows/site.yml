@@ -59,9 +59,10 @@ jobs:
         run: npm ci --ignore-scripts
 
       # Warns, and never fails: an advisory published upstream must not stop
-      # the build or the deploy of main. Each run shows one warning annotation
-      # that names the vulnerable packages, and the run summary lists the
-      # advisories; Dependabot alerts report them as well.
+      # the build or the deploy of main. A run with advisories shows one warning
+      # annotation that names the vulnerable packages, and the run summary lists
+      # them; a run where the audit cannot run shows a warning that says why.
+      # Dependabot alerts report advisories as well.
       - name: Report npm advisories
         run: node scripts/report-audit.mjs
 
