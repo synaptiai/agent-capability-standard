@@ -327,8 +327,8 @@ received message, a recalled memory entry, a tool result, a file in the
 repository) holds text written as instructions, and the model acts on it.
 
 **Mitigations** (decided by code, not by a model):
-- Only a person decides an approval. On a tool-calling host, a permission
-  prompt answered by anything but a person (the host itself, an automatic
+- On a tool-calling host, only a person decides a call's approval: a
+  permission prompt answered by anything but a person (the host itself, an automatic
   mode, a classifier) decides nothing, so injected text cannot approve its
   own call ([STANDARD 1.2.0 §5.18.7](STANDARD-v1.2.0.md#5187-approval-for-calls)).
   The approval shows the arguments the call will run with, and decides
@@ -343,7 +343,11 @@ repository) holds text written as instructions, and the model acts on it.
   mandate would otherwise decide
   ([STANDARD 1.2.0 §5.17](STANDARD-v1.2.0.md#517-sender-identity)).
 - `mutate` and `send` need a checkpoint and an approval, so an injected
-  change can be rolled back and an injected send is put to a person first.
+  change can be rolled back and an injected send is put to an approver
+  first: a person, unless the step names a standing mandate, and even then
+  a person for a step marked always-ask or one an applied profile requires
+  a person for
+  ([STANDARD 1.2.0 §5.14](STANDARD-v1.2.0.md#514-approval)).
 - Repository content does not configure the plugin's hooks: they block
   every call while the project's settings files set an environment
   variable that is not one of Claude Code's own (§5.1).
@@ -352,9 +356,9 @@ repository) holds text written as instructions, and the model acts on it.
 
 Workflow authors apply these through the tainted input gate pattern
 ([WORKFLOW_PATTERNS.md §4.4](../docs/WORKFLOW_PATTERNS.md#44-tainted-input-gate-pattern)):
-the destination and every other argument of the act come from the person's
-inputs, a `constrain` step checks the outgoing action, and the act still
-needs a checkpoint and a person's approval. A `constrain` step is a check a
+the destination comes from the person's inputs, never from the content; a
+payload derived from the content is checked by a `constrain` step before the
+act; and the act still needs a checkpoint and an approval. A `constrain` step is a check a
 model makes, and can itself be misled by the content it reads (§5.4).
 
 **Residual Risk**: Within what these checks allow, injected text can still
