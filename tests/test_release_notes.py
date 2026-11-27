@@ -205,19 +205,50 @@ def test_main_exits_non_zero_rather_than_truncate(
     assert out.out == "" and "over GitHub's 125000" in out.err
 
 
-def test_the_unreleased_section_fits_a_release() -> None:
-    """The [Unreleased] section, the next release's notes, shortens to fit,
-    and each link of its "Before you upgrade" list names an anchor of
-    CHANGELOG.md."""
+def next_section(changelog: str) -> tuple[str, str]:
+    """The section the next release publishes: [Unreleased] while it has
+    entries, else the first section with a body (the release just cut from
+    it, while the new [Unreleased] is still empty)."""
+    for name in re.findall(r"(?m)^## \[([^\]]+)\]", changelog):
+        found = release_notes.find(changelog, name)
+        if found and found[1]:
+            return found
+    raise AssertionError("CHANGELOG.md has no section with entries")
+
+
+def test_next_section_skips_an_empty_unreleased() -> None:
+    assert next_section(CHANGELOG)[0] == "## [v2.0.0] — 2026-10-29"
+    filled = CHANGELOG.replace("## [Unreleased]\n", "## [Unreleased]\n\n- New\n", 1)
+    assert next_section(filled) == ("## [Unreleased]", "- New")
+
+
+def test_the_next_release_fits() -> None:
+    """The next release's section, with its links made absolute as
+    release.yml publishes them, fits a GitHub Release whole or shortened."""
     changelog = (ROOT / "CHANGELOG.md").read_text()
-    found = release_notes.find(changelog, "Unreleased")
-    assert found
-    heading, body = found
-    short = release_notes.shortened(body, "URL")
-    assert short is not None, "no 'Before you upgrade' list in [Unreleased]"
-    assert len(short) + 1 <= release_notes.LIMIT
-    before = short[short.index(release_notes.BEFORE) :]
-    fragments = re.findall(r"\]\(#([^)]+)\)", before)
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    repository = release_notes.plugin_repository(plugin)
+    assert repository
+    heading, body = next_section(changelog)
+    base = f"https://github.com/{repository}/blob/vNEXT/"
+    published = release_notes.render("vNEXT", heading, body, base)
+    assert len(published) <= release_notes.LIMIT
+    assert not re.search(r"\]\((?!https?://|mailto:)", published)
+
+
+def test_each_before_you_upgrade_link_names_an_anchor() -> None:
+    """Each link of a "Before you upgrade" list in CHANGELOG.md, whichever
+    section holds it, names an anchor of CHANGELOG.md."""
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    lines = changelog.splitlines()
+    fragments: list[str] = []
+    for i, line in enumerate(lines):
+        if line.startswith(release_notes.BEFORE):
+            fragments += re.findall(r"\]\(#([^)]+)\)", line)
+            for rest in lines[i + 1 :]:
+                if rest.startswith(("**", "## [")):
+                    break
+                fragments += re.findall(r"\]\(#([^)]+)\)", rest)
     assert fragments
     anchors = set(re.findall(r'<a id="([^"]+)"></a>', changelog))
     assert sorted(set(fragments) - anchors) == []

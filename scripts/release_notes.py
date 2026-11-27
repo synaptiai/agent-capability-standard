@@ -132,6 +132,13 @@ def notes(tag: str, root: Path = ROOT, repository: str | None = None) -> str:
     heading, body = found
     repository = repository or plugin_repository(plugin)
     base = f"https://github.com/{repository}/blob/{tag}/" if repository else ""
+    return render(tag, heading, body, base)
+
+
+def render(tag: str, heading: str, body: str, base: str) -> str:
+    """The Release notes for section ``heading`` with ``body``, with links
+    absolute at ``base`` (empty when no repository is known): the whole
+    section when it fits in LIMIT, else its shortened notes."""
     if base:
         body = absolute(body, base)
         full = f"{body}\n\nSee [CHANGELOG.md]({base}CHANGELOG.md) for every release.\n"
