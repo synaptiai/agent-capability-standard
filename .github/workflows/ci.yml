@@ -19,10 +19,15 @@ env:
   # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
   RUST_MSRV: "1.88.0"
 
+# Each job's timeout-minutes is at least twice its slowest recent run and never
+# under 15 minutes. The jobs that build the Rust core with cargo (clippy and
+# tests, or the WebAssembly module) get 30, as headroom for a cold build. A hung
+# runner is then cut off instead of held for GitHub's default of 360 minutes.
 jobs:
   validate-schemas:
     name: Validate YAML schemas
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -110,6 +115,7 @@ jobs:
   rust-core:
     name: Rust core (fmt, clippy, tests, MSRV)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: core
@@ -153,6 +159,7 @@ jobs:
   cel-differential:
     name: Expressions stay a CEL-compatible profile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -169,6 +176,7 @@ jobs:
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -205,6 +213,7 @@ jobs:
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ["3.14", "3.15"]
@@ -239,6 +248,7 @@ jobs:
     # /bin/bash 3.2 macOS ships or a newer one on PATH (#134).
     name: Tests on macOS (${{ matrix.bash }} bash)
     runs-on: macos-latest
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
@@ -287,6 +297,7 @@ jobs:
   benchmarks:
     name: Benchmark validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -329,6 +340,7 @@ jobs:
   conformance:
     name: Conformance tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -366,6 +378,7 @@ jobs:
   typescript-package:
     name: TypeScript package (type-check, tests, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: packages/acs-core
@@ -419,6 +432,7 @@ jobs:
   standard-agents-binding:
     name: Standard Agents binding (type-check, tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: examples/standard_agents

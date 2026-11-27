@@ -2368,6 +2368,53 @@ here and marked so.
   anchor still shows a cut log. The take hook writes a new marker, and the
   log hook a new head, in `.claude/checkpoints/` before renaming it onto
   the record.
+- Plugin: the `/grounded-setup` command (#179, #182) turns on Claude Code's
+  strict sandbox in the user's settings (`~/.claude/settings.json`, or
+  `$CLAUDE_CONFIG_DIR/settings.json`) for the project it runs in. It shows
+  the change to the `permissions` and `sandbox` members as a diff, asks,
+  then merges it in and leaves every other setting as it is; run again, it
+  changes nothing. It writes: the sandbox on with `failIfUnavailable` and
+  no unsandboxed route (`allowUnsandboxedCommands: false`,
+  `excludedCommands` removed); a network allowlist with
+  `strictAllowlist: true`, from the hosts a domain profile's
+  `allowed_destinations` name (`--profile`) and the package registries of
+  the ecosystems whose manifests the project holds, never a loopback,
+  link-local or metadata name, an IP literal or a name that resolves to the
+  address it spells out (`127.0.0.1.nip.io`), and with every entry
+  already there that is not a host name removed (`*` and `*:443` among
+  them, which match every host); the records' deny rules
+  (`layer_records.py`); read denials for the keychains (macOS), `~/.ssh`,
+  gh's `hosts.yml`, `~/.git-credentials`, `~/.netrc`, the package
+  registries' and Docker's credential files and the audit key file, with
+  `credentials` deny entries for them and for `GH_TOKEN`, `GITHUB_TOKEN`,
+  `AUDIT_HMAC_KEY` and the registries' publish tokens; and write denials
+  for the project's
+  `.claude/settings.json`, `.claude/settings.local.json`,
+  `.claude/hooks/` and `.mcp.json`, the `.claude/settings.local.json` of
+  the repository's top level and of the main checkout's root, the
+  repository's `.mcp.json`, the plugin's hook scripts, the user
+  configuration directory and `~/.claude.json`: the paths the pre-tool-use
+  hook requires for the strict sandbox. Every path is literal and
+  absolute. It creates the audit key file `~/.config/acs/audit.key` (mode
+  600) when there is none, reads the settings file back and checks every
+  key it wrote against Claude Code's documented settings, refuses a
+  settings file that is not strict JSON rather than overwrite it, and on
+  native Windows, which has no sandbox, writes nothing. The plan and
+  `check` name the project's own settings that weaken the sandbox, and
+  `check` fails on them and on a user setting that undoes these (a proxy
+  port, a true `allowAllUnixSockets`, or a `WebFetch(domain:...)` rule for
+  a host the allowlist may not hold), which the setup removes; a project
+  whose settings set `HOME` or `CLAUDE_CONFIG_DIR` is refused. The
+  computation is `grounded_agency/sandbox_settings.py` (standard library
+  only, Python 3.9 or later, run as `/usr/bin/env -i /usr/bin/python3 -I`
+  so that a project's settings cannot choose the interpreter),
+  which also prints the settings alone for managed settings
+  (`hooks/README.md`, "Setting up the sandbox"). The write runs from a
+  terminal outside Claude Code: before the strict sandbox is on, the
+  pre-tool-use hook refuses every Bash call, so the command gives the
+  script's `apply` line to run there, and once it is on, the sandbox
+  keeps commands from writing the user configuration directory. Claude
+  Code is started again after the write.
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only

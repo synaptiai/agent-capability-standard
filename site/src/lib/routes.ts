@@ -106,6 +106,7 @@ export const EXCLUSIONS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /^AGENTS\.md$/, reason: 'agent instructions (llms.txt links it on GitHub)' },
   { pattern: /^\.github\//, reason: 'repository plumbing' },
   { pattern: /^\.claude\//, reason: 'agent configuration and memory' },
+  { pattern: /^commands\//, reason: "the plugin's slash commands: instructions to Claude Code, documented in hooks/README.md" },
   { pattern: /^docs\/(MEDIUM_ARTICLE[^/]*|PROJECT_ARTICLE|TWITTER_THREAD)\.md$/, reason: 'drafts' },
   { pattern: /^docs\/proposals\/GROUNDED_HARNESS_V3\.md$/, reason: 'empty draft' },
 ];
