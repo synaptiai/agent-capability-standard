@@ -6,7 +6,7 @@ proposal. The maintainer decides each one, and may approve the table in one
 pass and override single rows. No RFC is marked as answered until the
 maintainer has approved the table.
 
-The table was checked against `main` at commit 8ec818c2 (2026-11-27). Issue
+The table was checked against `main` at commit 18c38b74 (2026-11-27). Issue
 numbers refer to issues in this repository. Their state was read the same
 day.
 
