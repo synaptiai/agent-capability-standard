@@ -35,8 +35,10 @@ Anomalies (each printed with the lines or call ids it rests on):
   calls run without asking a person.
 - A change of recorded_by.config_sha256 between two lines: the hooks'
   configuration changed during the log.
-- A refusal rate in the adapter's records (rejected over all records) above
-  --max-refusal-rate (default 0.2).
+- A refusal rate in the adapter's records above --max-refusal-rate
+  (default 0.2): the calls with a rejected record over all calls. A call is
+  one call id (a call that runs writes two or more records, a refused call
+  one); a record with no call id counts as a call of its own.
 
 Also reported, without failing: the number of lines by tool, by status and
 by settings; the plugin version of the lines; Bash calls with and without a
@@ -135,6 +137,8 @@ class Report:
     unmatched_markers: list[str] = field(default_factory=list)
     records: int = 0
     refusals: int = 0
+    calls: int = 0
+    refused_calls: int = 0
     seq_gaps: list[dict[str, Any]] = field(default_factory=list)
     violations: list[dict[str, Any]] = field(default_factory=list)
     anomalies: list[dict[str, Any]] = field(default_factory=list)
@@ -159,6 +163,8 @@ class Report:
             "unmatched_markers": self.unmatched_markers,
             "records": self.records,
             "refusals": self.refusals,
+            "calls": self.calls,
+            "refused_calls": self.refused_calls,
             "seq_gaps": self.seq_gaps,
             "violations": self.violations,
             "anomalies": self.anomalies,
@@ -327,13 +333,21 @@ def check_records(
     checkpoint and an approval, the refusal rate, and the sequence gaps."""
     by_call: dict[str, list[dict[str, Any]]] = {}
     last_seq: dict[str, int] = {}
+    refused: set[str] = set()
     for record in records:
         report.records += 1
-        if record.get("status") == "rejected":
+        rejected = record.get("status") == "rejected"
+        if rejected:
             report.refusals += 1
         call = record.get("call_id")
         if isinstance(call, str):
             by_call.setdefault(call, []).append(record)
+            if rejected:
+                refused.add(call)
+        else:
+            # A record with no call id is a call of its own.
+            report.calls += 1
+            report.refused_calls += rejected
         seq = _seq(record.get("action_id"))
         if seq is not None:
             scope, number = seq
@@ -383,13 +397,15 @@ def check_records(
                     "call_id": call if isinstance(call, str) else None,
                 }
             )
-    if report.records and report.refusals / report.records > max_refusal_rate:
+    report.calls += len(by_call)
+    report.refused_calls += len(refused)
+    if report.calls and report.refused_calls / report.calls > max_refusal_rate:
         report.anomalies.append(
             {
                 "rule": "refusal_rate",
-                "refusals": report.refusals,
-                "records": report.records,
-                "rate": round(report.refusals / report.records, 4),
+                "refused_calls": report.refused_calls,
+                "calls": report.calls,
+                "rate": round(report.refused_calls / report.calls, 4),
                 "threshold": max_refusal_rate,
                 "call_id": None,
             }
@@ -453,8 +469,8 @@ def _describe(item: dict[str, Any]) -> str:
         )
     if rule == "refusal_rate":
         return (
-            f"refusal rate {item['rate']:.0%} ({item['refusals']} of "
-            f"{item['records']} records) is above {item['threshold']:.0%}"
+            f"refusal rate {item['rate']:.0%} ({item['refused_calls']} of "
+            f"{item['calls']} calls refused) is above {item['threshold']:.0%}"
         )
     return json.dumps(item)
 
@@ -487,7 +503,10 @@ def print_report(report: Report) -> None:
             f"{len(report.unmatched_markers)}"
         )
     if report.records:
-        print(f"Adapter records: {report.records}, refused: {report.refusals}")
+        print(
+            f"Adapter records: {report.records}, calls: {report.calls}, "
+            f"refused calls: {report.refused_calls}"
+        )
     for gap in report.seq_gaps:
         print(
             f"  sequence gap in {gap['run_id']}: {gap['after']} to {gap['next']} "
@@ -562,8 +581,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--max-refusal-rate",
         type=float,
         default=DEFAULT_MAX_REFUSAL_RATE,
-        help="The refusal rate in the adapter's records above which it is an "
-        f"anomaly (default {DEFAULT_MAX_REFUSAL_RATE})",
+        help="The share of the adapter's calls (by call id) with a rejected "
+        f"record above which it is an anomaly (default {DEFAULT_MAX_REFUSAL_RATE})",
     )
     parser.add_argument(
         "--verify",

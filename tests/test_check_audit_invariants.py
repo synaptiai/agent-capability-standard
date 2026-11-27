@@ -305,12 +305,36 @@ class TestTheAdaptersRecords:
         ]
         path = self.write(tmp_path, records)
         report = monitor.run(None, None, [path])
-        assert [a["rule"] for a in report.anomalies] == ["refusal_rate"]
+        # One refused call of two: the rate is per call, not per record.
+        assert [(a["rule"], a["rate"]) for a in report.anomalies] == [
+            ("refusal_rate", 0.5)
+        ]
+        assert (report.records, report.calls, report.refused_calls) == (3, 2, 1)
         assert monitor.run(None, None, [path], max_refusal_rate=0.5).anomalies == []
         # One record per line reads the same.
         lines = tmp_path / "records.jsonl"
         lines.write_text("".join(json.dumps(r) + "\n" for r in records))
         assert monitor.run(None, None, [lines]).refusals == 1
+
+    def test_one_refused_call_of_three_is_above_the_default_rate(
+        self, tmp_path: Path
+    ) -> None:
+        records = [
+            call_record(1, "Write", "mutate", "asked", "toolu_1"),
+            call_record(2, "Write", "mutate", "refused", "toolu_1"),
+            call_record(3, "Read", "retrieve", "allowed", "toolu_2"),
+            call_record(4, "Read", "retrieve", "ran", "toolu_2"),
+            call_record(5, "Grep", "search", "allowed", "toolu_3"),
+            call_record(6, "Grep", "search", "ran", "toolu_3"),
+        ]
+        path = self.write(tmp_path, records)
+        report = monitor.run(None, None, [path])
+        assert [(a["rule"], a["rate"]) for a in report.anomalies] == [
+            ("refusal_rate", 0.3333)
+        ]
+        result = cli("--records", str(path))
+        assert result.returncode == 1
+        assert "refusal rate 33% (1 of 3 calls refused) is above 20%" in result.stdout
 
     def test_records_that_are_not_json_are_not_run(self, tmp_path: Path) -> None:
         path = tmp_path / "records.json"

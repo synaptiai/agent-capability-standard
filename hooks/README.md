@@ -1708,7 +1708,8 @@ control-only tool, recorded with no capability and `control` true, needs
 neither and is not flagged). It also
 fails on an anomaly: a line recorded with `approval` `off`, a change of
 `config_sha256`, or a refusal rate in the adapter's records above
-`--max-refusal-rate` (default 0.2). A Bash call is gated by its command,
+`--max-refusal-rate` (default 0.2), counted by call: the call ids with a
+`rejected` record over all call ids. A Bash call is gated by its command,
 which the log does not hold, so a Bash call with no marker is counted, not
 flagged. `--verify` adds the checks of `tools/verify_audit_log.py`, with
 `--witness` for the witnesses.
