@@ -840,12 +840,48 @@ def test_holds_credential_lets_prose_pass(text: str) -> None:
     assert not holds_credential({"todos": [{"content": text}]})
 
 
+# The forms the refusal rule reads and redaction does not: a long-prefix
+# token glued after a letter or digit (`xghp_...`). No token starts there
+# for redaction, and the refusal rule reads these prefixes anywhere. Each
+# is pinned in both vector files: refused in credentials.json, kept as
+# written in redact.json.
+_REFUSAL_ONLY = {
+    v["input"]
+    for v in DOC["vectors"]
+    if v["name"].endswith("_glued_after_a_letter")
+    and v["expect"]["output"] == v["input"]
+} & set(BLOCKED)
+
+
+def test_the_refusal_only_forms_are_the_glued_long_prefixes() -> None:
+    """Every long-prefix family has its refusal-only vector; `sk-` has
+    none, since neither rule reads it glued after a letter."""
+    names = {v["name"] for v in _TEXT if v["input"] in _REFUSAL_ONLY}
+    assert names == {
+        f"{family}_glued_after_a_letter"
+        for family in (
+            "aws_key_id",
+            "github_token",
+            "github_pat",
+            "slack_token",
+            "stripe_key",
+            "google_api_key",
+            "gitlab_token",
+            "npm_token",
+            "vault_token",
+            "sendgrid_key",
+            "jwt",
+        )
+    }
+
+
 def test_what_a_refusal_recognises_the_redactor_redacts() -> None:
     """Every credential the refusal rule recognises in text is a secret the
-    same layer redacts (§6.7), except a PEM key's opening line alone: the
-    redactor replaces a key's body, and the line has none."""
+    same layer redacts (§6.7), except a PEM key's opening line alone (the
+    redactor replaces a key's body, and the line has none) and a long-prefix
+    token glued after a letter or digit (_REFUSAL_ONLY)."""
     for text in BLOCKED:
-        if text.startswith("-----BEGIN"):
+        if text.startswith("-----BEGIN") or text in _REFUSAL_ONLY:
             continue
         assert holds_secret(text), text
 
