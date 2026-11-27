@@ -610,10 +610,11 @@ class TestMerge:
         ss.apply_plan(pb, pb.digest, home)
         deny = json.loads(settings.read_text())["permissions"]["deny"]
         assert any(str(a) in r for r in deny) and any(str(b) in r for r in deny)
-        assert (
-            "proxy.golang.org"
-            in json.loads(settings.read_text())["sandbox"]["network"]["allowedDomains"]
-        )
+        domains = json.loads(settings.read_text())["sandbox"]["network"][
+            "allowedDomains"
+        ]
+        # once: a second project's registry is added, not repeated
+        assert domains.count("proxy.golang.org") == 1
 
     def test_no_file_yet(self, tmp_path: Path, project: str, home: str) -> None:
         settings = tmp_path / "cfg" / "settings.json"
