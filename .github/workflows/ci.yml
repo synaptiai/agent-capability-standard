@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# A pull request's runs share one group, so a run for a head that a newer push
+# has replaced is cancelled and does not hold runners the new head's run is
+# waiting for. Every other run (a push to main) has a group of its own: a group
+# holds one pending run and a newer one cancels it, so a shared group for main
+# would drop the CI result of a commit merged between two others. Runs on main
+# are never cancelled and do not wait for each other.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # One Rust toolchain for every job, for the same reason constraints.txt pins
   # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no

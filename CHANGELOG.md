@@ -2368,6 +2368,57 @@ here and marked so.
   anchor still shows a cut log. The take hook writes a new marker, and the
   log hook a new head, in `.claude/checkpoints/` before renaming it onto
   the record.
+- Plugin: an MCP server for remote writes (#185),
+  `grounded_agency/remote_writes.py`, declared in
+  `.claude-plugin/plugin.json` and started as `/usr/bin/env -u
+  DEVELOPER_DIR -u TOOLCHAINS -u SDKROOT /usr/bin/python3 -I` (on macOS
+  `/usr/bin/python3` is a shim that runs the interpreter those variables
+  choose; standard library only, Python 3.9 or later). Its tools are `push`
+  (`branch`, optional `force_with_lease`: the object id the remote branch
+  must still point at), `tag_push` (`tag`; an existing tag is never
+  replaced), `pr_create`, `pr_merge` (`number`, `method`: `merge`,
+  `squash` or `rebase`, optional `match_head_commit`), `release_create`
+  (for a tag that already exists on the remote), `issue_create` and
+  `issue_assign`, one action per call; Claude Code names them
+  `mcp__plugin_agent-capability-standard_remote__<tool>`. The server runs
+  outside the sandbox with the user's own git and gh credentials, which
+  the strict sandbox denies to Bash. It takes no repository argument: the
+  target is the origin a person records with `remote_writes.py record`, in
+  a terminal outside Claude Code, in `~/.config/acs/remotes.json`. The
+  strict sandbox the hook verifies requires writes to the whole of
+  `~/.config/acs/` denied, not only to the audit key file, and the hook
+  refuses (F504) a gated call that names the record or
+  `~/.config/acs/work/`. The record
+  also names the git and gh found on the person's
+  PATH, which are the programs the server runs (it does not search its own
+  PATH). With no record every tool refuses. A local origin must lie
+  outside the project, the temporary directories and Claude Code's plugins
+  directories, since git's local transport runs that repository's own
+  hooks; a recorded program there is refused too, and so is a project
+  directory that holds the home directory. It runs git and gh by argument
+  list, with each option's value in the same argument; it pushes from an
+  empty bare repository that reads the project's objects through
+  `objects/info/alternates`, so the project's git configuration and hooks
+  take no part, with `core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+  `--no-verify` and only the https, ssh and file protocols; it runs gh in
+  an empty directory with `--repo` from the record. Each call works in a
+  new directory under `~/.config/acs/work/`, not in the environment's
+  `TMPDIR`. It checks branch and tag names as `git check-ref-format` does
+  (and runs it), kept to ASCII letters, digits and `. _ / @ + -`, numbers
+  as integers and methods from a fixed set, and refuses a member a tool
+  does not declare. The home directory comes from the password database,
+  the children's PATH is the recorded programs' directories and
+  `/usr/bin:/bin:/usr/sbin:/sbin`, and the children get no `GIT_*`,
+  `GH_REPO`, `GH_HOST`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`,
+  `DEVELOPER_DIR` or `SDKROOT` (a project's settings `env` reaches the
+  server). Each tool is bound as a gated `mutate` (Standard 1.2.0
+  §5.18.1): the pre-tool-use hook asks for a checkpoint and a person's
+  approval for every call and names the call's target in the request
+  (`push branch 'main' to the recorded origin, fast-forward only`); a
+  call whose target looks like a credential, which the request could not
+  show, is refused (F504). The SDK mapper classifies the tools the same way
+  (`remote_writes.binding_records(prefix)` gives the records for a host
+  that names the server otherwise) (`hooks/README.md`, "Remote writes").
 - Plugin: the `/grounded-setup` command (#179, #182) turns on Claude Code's
   strict sandbox in the user's settings (`~/.claude/settings.json`, or
   `$CLAUDE_CONFIG_DIR/settings.json`) for the project it runs in. It shows
