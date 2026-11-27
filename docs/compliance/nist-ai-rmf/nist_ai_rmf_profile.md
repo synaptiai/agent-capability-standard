@@ -271,8 +271,8 @@ flowchart TB
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
 | **ME-2.1** — Evaluation conducted | Conformance test suite validates structural properties; 6 validators check ontology, workflows, profiles, skill refs, transform refs, YAML sync | `scripts/run_conformance.py`, `tools/validate_ontology.py`, `tools/validate_workflows.py`, `tools/validate_profiles.py`, `tools/validate_skill_refs.py`, `tools/validate_transform_refs.py`, `tools/validate_yaml_util_sync.py` | Full |
-| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records every tool call that runs | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
-| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture every tool call that runs, in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
+| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records every tool call that runs | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally; aggregated reporting is a gap (G-05), and a dashboard that shows it is the deployer's (G-06) |
+| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture every tool call that runs, in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are the deployer's (G-06) |
 
 ### 6.3 ME-3: Trustworthy AI Actor Competency
 
@@ -288,7 +288,7 @@ flowchart TB
 
 | Category | Framework Implementation | Evidence | Coverage |
 |----------|--------------------------|----------|----------|
-| **ME-4** | `inquire` capability enables runtime escalation to humans. Stakeholder analysis defines communication channels. Management review process collects measurement feedback quarterly. No automated external feedback collection mechanism. | `skills/inquire/SKILL.md`, `docs/compliance/iso42001/stakeholder_analysis.md`, `docs/compliance/iso42001/management_review.md` | Partial — Structural support exists; automated feedback collection is a gap |
+| **ME-4** | `inquire` capability enables runtime escalation to humans. Stakeholder analysis defines communication channels. Management review process collects measurement feedback quarterly. No automated external feedback collection mechanism. | `skills/inquire/SKILL.md`, `docs/compliance/iso42001/stakeholder_analysis.md`, `docs/compliance/iso42001/management_review.md` | Partial — Structural support exists; automated feedback collection is the deployer's (G-07) |
 
 > **MEASURE Function — Tier Assessment**
 >
@@ -296,8 +296,8 @@ flowchart TB
 > |-----------|-----------|
 > | **Current Tier** | **Tier 2 — Risk Informed** |
 > | **Target Tier** | Tier 3 — Repeatable |
-> | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. However, real-time monitoring dashboards, aggregated reporting, alerting infrastructure, and automated external feedback collection are gaps. These prevent consistent, organization-wide measurement. |
-> | **Key gaps** | Real-time monitoring dashboard (ME-2.3), aggregated evaluation reporting (ME-2.2), automated feedback collection (ME-4) |
+> | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. Aggregated evaluation reporting (ME-2.2, G-05, planned under [#80](https://github.com/synaptiai/agent-capability-standard/issues/80)) is the gap that prevents Tier 3. The real-time dashboard and alerting (ME-2.3, G-06) and automated feedback collection (ME-4, G-07) belong to the deployer, since only a running deployment has the data and the feedback channels. |
+> | **Key gaps** | Aggregated evaluation reporting (ME-2.2). The deployer owns the real-time dashboard (ME-2.3) and automated feedback collection (ME-4) |
 
 ---
 
@@ -463,7 +463,7 @@ MANAGE:  Tier 3 ──G-08───────→  Tier 4
 | GV-1 (Risk management) | Risk Treatment Plan | AIMS-RSK-001 |
 | GV-2 (Accountability) | Competency Framework | AIMS-CMP-001 |
 | GV-2 (Oversight) | Management Review | AIMS-MGR-001 |
-| GV-5 (Stakeholders) | Stakeholder Analysis | AIMS-STK-001 |
+| GV-5 (Stakeholders) | Stakeholder Analysis | AIMS-CTX-001 |
 | MP-2 (Categorization), MP-4 (Risks) | Risk Treatment Plan | AIMS-RSK-001 |
 | ME-2 (Evaluation) | Internal Audit Checklist | AIMS-AUD-001 |
 | MG-1 (Risk response) | Nonconformity Procedure | AIMS-NCR-001 |
@@ -556,7 +556,7 @@ This appendix provides a consolidated inventory of all framework files cited as 
 | `docs/compliance/iso42001/management_review.md` | Management review process (AIMS-MGR-001) | GV-2, MG-4 |
 | `docs/compliance/iso42001/nonconformity_procedure.md` | NCR workflow (AIMS-NCR-001) | MG-1, MG-2 |
 | `docs/compliance/iso42001/ai_policy_template.md` | AI policy template (AIMS-POL-001) | GV-1, GV-4 |
-| `docs/compliance/iso42001/stakeholder_analysis.md` | Stakeholder identification (AIMS-STK-001) | GV-5, MP-5, ME-4 |
+| `docs/compliance/iso42001/stakeholder_analysis.md` | Stakeholder identification (AIMS-CTX-001) | GV-5, MP-5, ME-4 |
 | `docs/compliance/iso42001/internal_audit_checklist.md` | Internal audit programme (AIMS-AUD-001) | ME-2, MG-4 |
 | `docs/compliance/nist-ai-rmf/decommissioning_procedure.md` | Decommissioning procedure (NIST-DCM-001) | GV-1 |
 | `docs/compliance/nist-ai-rmf/third_party_risk_procedure.md` | Third-party AI risk procedure (NIST-TPR-001) | GV-6, MG-3 |

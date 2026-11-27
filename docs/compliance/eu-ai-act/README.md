@@ -35,7 +35,7 @@ This EU AI Act suite complements the [ISO 42001 compliance suite](../iso42001/) 
 | AIMS-MGR-001 (Management Review) | EUAIA-PMM-001 §8, EUAIA-QMS-001 §3.11 | Review cadence and accountability |
 | AIMS-AUD-001 (Internal Audit Checklist) | EUAIA-QMS-001 §3.11 | Audit objectives and programme |
 | AIMS-CMP-001 (Competency Framework) | EUAIA-QMS-001 §3.10, §3.11 | Roles and competencies |
-| AIMS-STK-001 (Stakeholder Analysis) | EUAIA-QMS-001 §3.8 | Stakeholder communication |
+| AIMS-CTX-001 (Stakeholder Analysis) | EUAIA-QMS-001 §3.8 | Stakeholder communication |
 | AIMS-POL-001 (AI Policy Template) | EUAIA-QMS-001 §5 | Policy documentation |
 
 ## Reading Order

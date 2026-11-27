@@ -35,7 +35,7 @@ Give each component the tier of the highest-risk capability it is used through (
 |------|-------------------------------|------------------|--------------------|
 | High | `mutate` or `send`, or it is the model provider | Full questionnaire (section 4), approval by the AI System Owner, a tabletop exercise that uses it (NIST-TTX-001) | Weekly signal review, quarterly reassessment |
 | Medium | `execute`, `invoke`, `delegate`, `synchronize` or `rollback` | Full questionnaire, approval by the AI System Owner | Monthly signal review, reassessment every six months |
-| Low | Capabilities with no mutation, such as `retrieve` or `search` | Short questionnaire (items 1, 2, 5 and 7) | Quarterly signal review, annual reassessment |
+| Low | Any other capability (the Low row of Section 2.3 of the profile), such as `retrieve`, `search` or `persist` | Short questionnaire (items 1, 2, 5 and 7) | Quarterly signal review, annual reassessment |
 
 An unbound tool is High until a binding gives it another capability.
 
