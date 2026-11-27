@@ -390,6 +390,126 @@ class TestPreToolUseExitCodes:
 # ─── PostToolUse Hook Tests ───
 
 
+def injected_command(command: str, **fields: Any) -> dict[str, Any]:
+    """Claude Code's PreSkillShellCommand payload for a shell command a skill
+    injects as it loads (Claude Code 2.1.332 and later)."""
+    payload: dict[str, Any] = {
+        "hook_event_name": "PreSkillShellCommand",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "permission_mode": "default",
+        "tool_use_id": "skill-cmd-1",
+        "command_name": "pr-summary",
+        "command_source": "projectSettings",
+        "invoked_by": "user",
+    }
+    payload.update(fields)
+    return payload
+
+
+def _valid_marker(project: Path) -> Path:
+    marker_dir = project / ".claude"
+    marker_dir.mkdir(exist_ok=True)
+    marker = marker_dir / "checkpoint.ok"
+    now = int(time.time())
+    marker.write_text(
+        json.dumps(
+            {"checkpoint_id": "chk_skill", "created_at": now, "expires_at": now + 1800}
+        )
+    )
+    return marker
+
+
+class TestInjectedSkillCommands:
+    """The pre-tool-use hook on PreSkillShellCommand: a command a skill
+    injects is classified as a Bash call is, and since no person can approve
+    on that event, a gated one is refused before the marker is read."""
+
+    @pytest.mark.parametrize(
+        ("mode", "approval"),
+        [
+            ("default", "ask"),
+            ("acceptEdits", "ask"),
+            ("bypassPermissions", "ask"),
+            ("default", "off"),
+            ("bypassPermissions", "off"),
+        ],
+    )
+    def test_a_gated_injected_command_is_refused_and_uses_no_marker(
+        self, tmp_path: Path, mode: str, approval: str
+    ) -> None:
+        marker = _valid_marker(tmp_path)
+        before = marker.read_text()
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "ACS_HOOK_APPROVAL": approval}
+        result = run_hook(
+            PRETOOLUSE_HOOK,
+            injected_command("touch made.txt", permission_mode=mode),
+            env,
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stdout == ""
+        assert result.stderr.startswith("F502 APPROVAL_REQUIRED: Bash command that ")
+        assert "'pr-summary'" in result.stderr
+        assert marker.read_text() == before
+        used = tmp_path / ".claude" / "checkpoints" / "used"
+        assert not used.exists() or not any(used.iterdir())
+
+    def test_an_injected_powershell_command_is_refused(self, tmp_path: Path) -> None:
+        marker = _valid_marker(tmp_path)
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(
+            PRETOOLUSE_HOOK,
+            injected_command("Get-ChildItem", tool_name="PowerShell"),
+            env,
+        )
+        assert result.returncode == 2
+        assert result.stderr.startswith("F502 APPROVAL_REQUIRED: ")
+        assert marker.exists()
+
+    def test_an_injected_read_passes_under_the_strict_sandbox(
+        self, tmp_path: Path
+    ) -> None:
+        marker = _valid_marker(tmp_path)
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(PRETOOLUSE_HOOK, injected_command("git status"), env)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        assert marker.exists()
+
+    def test_without_the_strict_sandbox_an_injected_read_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        config = tmp_path / "config"
+        config.mkdir()
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "CLAUDE_CONFIG_DIR": str(config)}
+        result = run_hook(PRETOOLUSE_HOOK, injected_command("git status"), env)
+        assert result.returncode == 2
+        assert result.stderr.startswith("F502 APPROVAL_REQUIRED: ")
+        assert "strict sandbox is not verified" in result.stderr
+
+    def test_the_same_call_as_a_tool_call_is_asked(self, tmp_path: Path) -> None:
+        """Without hook_event_name PreSkillShellCommand, the gated call takes
+        the marker and is put to the person, as before."""
+        marker = _valid_marker(tmp_path)
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        payload = injected_command("touch made.txt", hook_event_name="PreToolUse")
+        result = run_hook(PRETOOLUSE_HOOK, payload, env)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["hookSpecificOutput"][
+            "permissionDecision"
+        ] == ("ask")
+        assert not marker.exists()
+
+    def test_hooks_json_runs_the_hook_on_injected_commands(self) -> None:
+        hooks_data = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        groups = hooks_data["hooks"]["PreSkillShellCommand"]
+        assert [g["matcher"] for g in groups] == ["Bash|PowerShell"]
+        (hook,) = groups[0]["hooks"]
+        assert hook["command"].endswith("/hooks/pretooluse_require_checkpoint.sh")
+        assert hook["onFailure"] == "block"
+        assert hook["timeout"] == 30
+
+
 @pytest.fixture
 def log_env(tmp_path: Path) -> dict[str, str]:
     """Environment with CLAUDE_PROJECT_DIR set for log output, and a key
