@@ -917,9 +917,15 @@ class TestAuditKey:
 # ─── The command line ───
 
 
+# The interpreter the command runs, as the command runs it. The test
+# suite's own Python may sit where every user can write (a CI runner's tool
+# cache), which the script refuses to run under.
+RUNNER = ss.INTERPRETER if os.access(ss.INTERPRETER, os.X_OK) else sys.executable
+
+
 def _run(*args: str, env: dict[str, str] | None = None, cwd: str | None = None):
     return subprocess.run(
-        [sys.executable, "-I", *args],
+        [RUNNER, "-I", *args],
         capture_output=True,
         text=True,
         timeout=60,
@@ -1155,7 +1161,16 @@ def test_the_write_line_names_the_interpreter(project: str, home: str) -> None:
         f"To write it: /usr/bin/env -i {ss.INTERPRETER} -I {MODULE.resolve()} apply "
     )
     assert ss.INTERPRETER == "/usr/bin/python3"
-    assert f"Python: {os.path.realpath(sys.executable)}" in plan.stdout
+    # The Python the interpreter actually runs: on macOS /usr/bin/python3 is a
+    # stub that starts the developer tools' Python
+    ran = subprocess.run(
+        [RUNNER, "-I", "-c", "import sys; print(sys.executable)"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    ).stdout.strip()
+    assert f"Python: {os.path.realpath(ran)}" in plan.stdout
 
 
 def test_the_write_line_passes_the_config_dir_on(
