@@ -16,6 +16,22 @@ Setup:
   others are planted unsupported or contradicted claims, listed apart in
   ``planted.json``, which the checker never reads.
 
+What the check reads:
+- Each claim gives, besides its ``text``, the fact it asserts in a
+  structured form: a ``subject``, an ``attribute`` and a ``value``, or a
+  ``relation`` to a second subject (``than``). The check compares these
+  fields only. It does not read the claim's ``text``, so a claim whose text
+  says something other than its fields is judged by its fields.
+- The content of each anchor, evidence item, bound output and action record
+  is given as hand-written ``facts`` in the same form.
+- Neither form is part of the ``explain`` output contract, whose
+  ``premises`` and ``chain`` are plain arrays and whose anchors carry no
+  ``facts``. Running the check on real explain outputs needs a step that
+  extracts the structured claim from its text and the facts from the cited
+  content; that step is open work under issue #163 (HF-103-A).
+- The run's trace is not read; the action records are the only account of
+  what the run did that the check consults.
+
 Baseline: the grounding check alone. It judges an output, not a claim: an
 output it refuses counts as flagging every claim in it, and one it passes
 as flagging none.
