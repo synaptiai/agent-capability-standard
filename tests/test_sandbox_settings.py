@@ -440,6 +440,57 @@ def test_the_records_and_the_settings_files_are_denied(project: str, home: str) 
     assert f"{home}/.config/acs" in write
 
 
+@needs_git
+def test_the_host_configuration_is_denied(project: str, home: str) -> None:
+    """The project's and the repository's .mcp.json, the user configuration
+    directory and, with no CLAUDE_CONFIG_DIR, ~/.claude.json are denied to
+    writes, as the pre-tool-use hook requires for the strict sandbox."""
+    top = Path(project)
+    sub = top / "pkg"
+    sub.mkdir()
+    subprocess.run(["git", "init", "-q", project], check=True, timeout=30)
+    s = _compute(str(sub), home, environ={"HOME": home}).settings
+    deny = s["permissions"]["deny"]
+    write = s["sandbox"]["filesystem"]["denyWrite"]
+    for path in (f"{sub}/.mcp.json", f"{top}/.mcp.json", f"{home}/.claude.json"):
+        assert f"Edit(/{path})" in deny and path in write
+    assert f"Edit(/{home}/.claude/**)" in deny and f"{home}/.claude" in write
+
+    config = os.path.join(home, "config")
+    s = _compute(
+        str(sub), home, environ={"HOME": home, "CLAUDE_CONFIG_DIR": config}
+    ).settings
+    deny = s["permissions"]["deny"]
+    assert f"Edit(/{config}/**)" in deny
+    assert f"Edit(/{home}/.claude/**)" not in deny
+    assert not any(r.endswith("/.claude.json)") for r in deny)
+
+
+@needs_git
+def test_a_projects_mcp_json_is_reported(project: str, home: str) -> None:
+    """A .mcp.json in the project means the hooks gate every Bash call
+    there; the plan and check say so."""
+    subprocess.run(["git", "init", "-q", project], check=True, timeout=30)
+    assert not any(".mcp.json" in w for w in ss._project_weakening(project))
+    Path(project, ".mcp.json").write_text("{}")
+    found = [w for w in ss._project_weakening(project) if ".mcp.json" in w]
+    assert len(found) == 1 and "gate every Bash call" in found[0]
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [{"enableAllProjectMcpServers": True}, {"enabledMcpjsonServers": ["x"]}],
+)
+def test_project_tool_servers_started_unasked_are_reported(
+    setting: dict[str, Any],
+) -> None:
+    assert any("enableAllProjectMcpServers" in w for w in ss._weakening(setting))
+    assert not any(
+        "enableAllProjectMcpServers" in w
+        for w in ss._weakening({"enableAllProjectMcpServers": False})
+    )
+
+
 def test_the_strict_switches(project: str, home: str) -> None:
     s = _compute(project, home).settings["sandbox"]
     assert s["enabled"] is True
@@ -1014,7 +1065,10 @@ def test_the_command_runs_on_the_system_python(project: str, home: str) -> None:
 
     settings = run("settings")
     assert settings.returncode == 0, settings.stderr
-    assert json.loads(settings.stdout) == _compute(project, home, sys.platform).settings
+    assert (
+        json.loads(settings.stdout)
+        == _compute(project, home, sys.platform, environ=env).settings
+    )
     plan = run("plan")
     assert plan.returncode == 0, plan.stderr
     digest = re.search(r"^Digest: ([0-9a-f]{64})$", plan.stdout, re.M)

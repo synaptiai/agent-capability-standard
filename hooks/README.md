@@ -725,7 +725,9 @@ Bash, so every gated call is refused with `F501 CHECKPOINT_REQUIRED:`,
 whose reason lists why the sandbox is not verified (up to six reasons).
 The hook also refuses the agent's own edits to the settings files, so the
 person adds the settings below to their user settings file outside the
-session and starts Claude Code again.
+session, with the setup script run from a terminal (Setting up the sandbox,
+below; `/grounded-setup` prints the command) or by hand, and starts Claude
+Code again.
 
 The hook reads the settings files Claude Code reads, with `jq`:
 
@@ -914,7 +916,9 @@ What the hook cannot see, so cannot detect:
 A plugin cannot change your settings itself. The `/grounded-setup` command
 turns on Claude Code's sandbox as the boundary the hooks rely on, in your
 user settings (`~/.claude/settings.json`, or `settings.json` in the
-directory `CLAUDE_CONFIG_DIR` names). Run it in Claude Code, in the project:
+directory `CLAUDE_CONFIG_DIR` names). Run it in Claude Code, in the
+project; the first time, it gives you a command to run in a terminal
+(below):
 
 ```text
 /grounded-setup [--profile <domain profile file>] [--allow-domain <host>]...
@@ -972,12 +976,18 @@ denied.
 - `settings` prints the computed settings alone, as JSON, for managed
   settings or `--settings`.
 
-Within Claude Code, each run of the script is a Bash call the pre-tool-use
-hook gates: it needs a checkpoint (`git stash create`) and your approval.
-Where neither can be had (a project in no git repository or with no commit
-yet, or a permission mode that puts no call to a person, such as
-`bypassPermissions`), the command gives you the `apply` line to run in a
-terminal instead; there, without `--digest`, it shows the change and asks.
+The first setup runs from a terminal. Until the strict sandbox is on, the
+pre-tool-use hook refuses every Bash call, `git stash create` included
+(The strict sandbox, above), so the command can run nothing and gives you
+the `apply` line to run in a terminal outside Claude Code; there, without
+`--digest`, it shows the change and asks. On a later run, with the sandbox
+on, the plan is a Bash call the hook gates: it needs a checkpoint
+(`git stash create`) and your approval, and where neither can be had (a
+project in no git repository or with no commit yet, or a permission mode
+that puts no call to a person, such as `bypassPermissions`) the command
+gives you the `apply` line instead. The write itself always runs in a
+terminal: the sandbox keeps every command in it from writing to the user
+configuration directory. Start Claude Code again after a write.
 
 ### What it writes
 
@@ -993,15 +1003,18 @@ entries passed with `--settings`.
 | `sandbox.excludedCommands` | removed: a command it names runs outside the sandbox |
 | `sandbox.network.allowedDomains` | the hosts below |
 | `sandbox.network.strictAllowlist` | `true`: a host not on the list is refused in every permission mode. Without it, `bypassPermissions` lets an unlisted host through |
-| `permissions.deny` | the records' rules (above); `Read(...)` and `Edit(...)` for the audit key file and `Edit(.../**)` for its directory; `Edit(...)` for the project's `.claude/settings.json`, `.claude/settings.local.json` and `.claude/hooks/**`, and for the plugin's `hooks/**` |
+| `permissions.deny` | the records' rules (above); `Read(...)` and `Edit(...)` for the audit key file and `Edit(.../**)` for its directory; `Edit(...)` for the project's `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/**` and `.mcp.json`, for the `.claude/settings.local.json` of the repository's top level and of the main checkout's root and the repository's `.mcp.json`, for the plugin's `hooks/**`, for the user configuration directory (`CLAUDE_CONFIG_DIR` or `~/.claude`, as `/**`) and, without `CLAUDE_CONFIG_DIR`, for `~/.claude.json` |
 | `sandbox.filesystem.denyWrite` | the same paths, for a sandbox configured from this list |
 | `sandbox.filesystem.denyRead`, `sandbox.credentials.files` (`deny`) | on macOS `~/Library/Keychains` and `/Library/Keychains`; `~/.ssh`, `~/.config/gh/hosts.yml`, `~/.git-credentials`, `~/.netrc`; the package registries' and Docker's credential files `~/.npmrc`, `~/.yarnrc.yml`, `~/.pypirc`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`, `~/.gem/credentials`, `~/.docker/config.json`, `~/.config/composer/auth.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, `~/.pub-cache/credentials.json`; `~/.config/acs/audit.key`; and each git directory's `acs` directory, which holds the checkpoint key (the records' `Read(...)` rules deny it too, so the sandbox's own list does not depend on Claude Code merging those rules) |
 | `sandbox.credentials.envVars` (`deny`) | `GH_TOKEN`, `GITHUB_TOKEN`, `AUDIT_HMAC_KEY`, and the registries' publish tokens `NPM_TOKEN`, `NODE_AUTH_TOKEN`, `CARGO_REGISTRY_TOKEN`, `GEM_HOST_API_KEY`, `TWINE_PASSWORD`, `UV_PUBLISH_TOKEN`, `POETRY_PYPI_TOKEN_PYPI` |
 
 `permissions.deny` rules cover the file tools and sandboxed commands;
 `sandbox.filesystem` entries cover sandboxed commands only. A project's
-settings files and hook scripts are denied because a command that could
-write them could weaken the sandbox for the next session. The registries'
+settings files and hook scripts, its `.mcp.json`, and the user
+configuration are denied because a command that could write them could
+weaken the sandbox, or start a tool server outside it, in the next
+session. These are the paths the pre-tool-use hook requires (The strict
+sandbox, above). The registries'
 credential files and tokens are denied because the allowlist names those
 registries, and a sandboxed command holding a publish token could send the
 project's files out through them. A path reached
@@ -1096,9 +1109,13 @@ lists such rules.
 - The plan names settings of yours it leaves that weaken the sandbox:
   `allowUnixSockets` entries, `enableWeakerNetworkIsolation`,
   `enableWeakerNestedSandbox`, `allowAppleEvents`,
-  `allowNestedUserNamespaces`, `allowRead` or `allowWrite`, and the
-  `WebFetch(domain:...)` allow rules it keeps. None of these fails the
-  read-back or `check`. `check` fails on a proxy port, a true
+  `allowNestedUserNamespaces`, `allowRead` or `allowWrite`, the
+  `WebFetch(domain:...)` allow rules it keeps, and
+  `enableAllProjectMcpServers: true` or `enabledMcpjsonServers`. None of
+  these fails the read-back or `check`. While any of them but `allowWrite`
+  and the `WebFetch(domain:...)` rules is set (an empty list or `false`
+  aside), the pre-tool-use hook does not verify the strict sandbox and
+  gates every Bash call (The strict sandbox, above). `check` fails on a proxy port, a true
   `allowAllUnixSockets`, or a `WebFetch(domain:...)` rule for a host the
   allowlist may not hold, which a later edit can add back; running the
   command again removes them. An `allowRead` or `allowWrite` entry does not
@@ -1114,6 +1131,11 @@ lists such rules.
   rules have not been tested. `check` fails on each. From either project
   file, `allowUnsandboxedCommands`, `network.strictAllowlist` and
   `network.allowedDomains` had no effect, so they are not reported.
+- The plan and `check` also name a `.mcp.json` in the project directory
+  or at the repository's top level, and `check` fails on it: the tool
+  servers it names run outside the sandbox, so the hook gates every Bash
+  call there unless the directory that holds it is denied to writes, which
+  the command does not do.
 
 ### What a repository can still do, and what stops working
 
