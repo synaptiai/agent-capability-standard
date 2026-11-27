@@ -238,10 +238,10 @@ Other agent frameworks have each added this point, under different names:
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 requires a restore point and a recorded approval before a change, and enforces
 that by wrapping each tool's `execute`, because no hook can do it. That works, and it shows
 the limit described above: the rule holds only for tools written with the
 wrapper. The
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 have the detail.

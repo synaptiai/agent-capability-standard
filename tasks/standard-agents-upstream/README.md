@@ -6,17 +6,48 @@ is the body. They come out of the mapping in
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md).
 
 **Status: not filed.** They are written against 0.2.0 at commit `faccc8b`
-(12 November 2026) and were checked again against `78fa54c` (14 November
-2026): `content/0.2.0` had not changed between the two. Before filing later
-than that, check that the passages they quote are unchanged; the
-specification's maintainers edit 0.2.0 in place. Their community page says
-accepted changes are published "in a new version of the specification", so
-each addition proposed here would apply from that version.
+(12 November 2026). On 27 November 2026 they were checked against
+[`f462a67`](https://github.com/standardagents/spec/commit/f462a673297faed1f849ef1741ddda1e06b6c817),
+the head of `main` that day:
+
+- No file under `content/` changed between `faccc8b` and `f462a67`; the
+  commits between them change the site, the model recommendations and
+  `AGENTS.md`.
+- Every passage the texts quote from `content/0.2.0` is found there, and
+  every `standardagentspec.org/0.2.0` link names a page and a heading that
+  exist.
+- The passages quoted from the published types are unchanged in
+  `@standardagents/spec` 0.45.13, the current release; the texts cite them as
+  0.45.10, the version the mapping was made against.
+- The open upstream proposals were read against the texts. None asks for a
+  change these texts ask for. Pull request
+  [#53](https://github.com/standardagents/spec/pull/53) (cancellation of
+  queued messages, head `33f5262`) edits Client API §12 and §13 and Messages
+  §6, pages text 02 cites; it changes no passage text 02 quotes.
+
+The specification's maintainers edit 0.2.0 in place, so check again on the
+day of filing: compare `content/` between `f462a67` and the head of `main`,
+and read any proposal opened since. Their community page says accepted
+changes are published "in a new version of the specification", so each
+addition proposed here would apply from that version.
 
 ## Filing
 
-The issues link to this repository's `main` (the reference binding and the
-integration document), so file them once this work is merged.
+Texts 01, 07, 08 and 09 link the reference binding and the integration
+document at one commit of this repository, so that each issue keeps showing
+what its text describes. They are pinned to `8ec818c`, the head of `main` on
+27 November 2026. On the day of filing, set them to the head of `main`
+first:
+
+```bash
+git fetch origin main
+sha=$(git rev-parse origin/main)
+sed -i.bak -E "s#(synaptiai/agent-capability-standard/(tree|blob))/[0-9a-f]{40}/#\1/$sha/#g" \
+  tasks/standard-agents-upstream/[0-9][0-9]-*.md && rm tasks/standard-agents-upstream/*.bak
+```
+
+The links then show the binding and the integration document as they stand
+at that commit. Commit the changed texts with the filing results.
 
 ```bash
 tasks/standard-agents-upstream/file-issues.sh          # lists what would be filed
@@ -34,7 +65,7 @@ already exists, and prints each new issue's address.
 | [03](03-tool-call-identity.md) | Let a tool know which call it is serving | Lets a tool's own records (evidence, audit, idempotency keys) be tied to the stored tool result | One optional property |
 | [04](04-tool-result-contract.md) | Specify what a tool's `execute` returns, and give results a field for metadata | Gives refusal codes and evidence a defined place that is not model-facing text | Text, plus one optional field |
 | [05](05-annotations.md) | Annotations: allow them on agents and prompts, pass a tool's to its hooks, and say whom the rule binds | Lets a composed agent carry a classification, and lets a hook read a tool's | Three optional fields, one reworded sentence |
-| [06](06-editorial-inconsistencies.md) | Ten inconsistencies in the 0.2.0 text | None directly; found while checking references | Editorial |
+| [06](06-editorial-inconsistencies.md) | Eleven inconsistencies in the 0.2.0 text | None directly; found while checking references | Editorial |
 | [07](07-unoffered-tool-call.md) | State what a runtime does with a tool call the request did not offer | Decides whether a prompt's tool list, `toolChoice: 'none'` and `hidden` are boundaries a runtime enforces. A read-only prompt, a guard tool and a gated delegation all rest on it | Two sentences, no API change |
 | [08](08-child-creation-from-code.md) | Specify the lifecycle operations code calls to create and message a child | The injected `subagent_create` has no `execute` to wrap, so a delegation that must be checked first has to be created from code, and the text does not give the call | One subsection, two sentences |
 | [09](09-execution-concurrency-and-flow-id.md) | Say what may run alongside an execution of a thread, and when `flowId` changes | The binding's records are read and rewritten in a store with no conditional write, and its checkpoint rule is keyed on `flowId` | Text only |

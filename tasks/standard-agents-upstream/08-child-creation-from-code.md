@@ -161,10 +161,10 @@ child reads its creation `arguments` from `state.arguments`; the child's
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 enforces its rules by wrapping each tool's `execute`, and `subagent_create`
 is injected by the runtime and has no `execute` to wrap. A delegation that
 is to be checked first has to be created from a wrapped tool or a handler,
 and the binding composes no child today. The
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 have the detail.

@@ -1,8 +1,8 @@
-# Ten inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels)
+# Eleven inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels, version ranges)
 
 Small corrections found while reading 0.2.0 closely. Each is a place where
 two passages disagree, so an implementer cannot tell which to follow. Items 1
-to 3 are mechanical; 4 to 10 need a decision.
+to 3 and 11 are mechanical; 4 to 10 need a decision.
 
 ## 1. The Runtime page has two sections numbered 14
 
@@ -158,3 +158,22 @@ Runtime §7.3.1 and Packaging also name only subagent relationships.
 **Suggested fix:** say in one place whether adding an exposed agent to a
 prompt as a handoff activates its `parentHooks`, and make the four passages
 agree.
+
+## 11. The Examples page pins a range that excludes the current package
+
+[Examples §8](https://standardagentspec.org/0.2.0/getting-started/examples#8-packaging)
+gives this `package.json`:
+
+```jsonc
+"@standardagents/openrouter": "^0.44.0",
+"@standardagents/spec": "^0.44.0"
+```
+
+For a `0.x` version a caret range admits only the same minor version, so
+`^0.44.0` means `>=0.44.0 <0.45.0`. Both packages are published at 0.45.13,
+which the range excludes, so a package copied from the example does not
+install the current packages. The Packaging page's example uses a different form,
+`"@standardagents/spec": ">=0.2.0"` in `peerDependencies`.
+
+**Suggested fix:** use the current minor version in the Examples page
+(`^0.45.0`), or one range form in both examples.

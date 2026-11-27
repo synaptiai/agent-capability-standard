@@ -1235,7 +1235,7 @@ conformance impact). The texts are in this repository under
 | **What a runtime does with a tool call the request did not offer.** Such a call, and any call under `toolChoice: 'none'`, is not executed and gets an error result; the same for a model's lifecycle call that targets a hidden relationship | A prompt's tool list and `hidden` as boundaries. A read-only prompt, a guard tool and a gated delegation rest on it |
 | **The lifecycle operations code calls to create and message a child.** The call, its arguments, how the caller gets the new reference, what a child without a side A prompt accepts, and which user a child thread has | A delegation that is checked first: the injected `subagent_create` has no `execute` to wrap, so the child has to be created from code |
 | **What may run alongside an execution, and when `flowId` changes.** A definition of a flow, what is serialized with a running execution, and a `flowId` that is unique per execution | Records that are read and rewritten without a conditional write, and a checkpoint rule keyed on `flowId` |
-| **Editorial.** Ten places where two passages disagree, such as two sections numbered 14 on the Runtime page | Nothing for grounding; found while checking references |
+| **Editorial.** Eleven places where two passages disagree, such as two sections numbered 14 on the Runtime page, or where an example pins a version range that excludes the current package | Nothing for grounding; found while checking references |
 
 The nine come out of 83 findings about the specification, none of which
 stops a grounded agent from being built and 29 of which leave a rule
