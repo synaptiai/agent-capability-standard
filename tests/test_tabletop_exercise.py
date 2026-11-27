@@ -43,6 +43,7 @@ BAD = "overwritten by the agent\n"
 # The codes and commands of the template, as it writes them.
 F501 = "F501 CHECKPOINT_REQUIRED"
 F502 = "F502 APPROVAL_REQUIRED"
+ASK_WRITE = "F502 APPROVAL_REQUIRED: Write (capability 'mutate') requires approval"
 TAKE_CHECKPOINT = 'git stash create "checkpoint: before rewrite"'
 USED_NAME = "used/<checkpoint_id>.<call_id>."
 AGENT_RESTORE = "git stash apply <commit>"
@@ -51,6 +52,10 @@ RESTORE_INDEX = "git restore --source=<commit>^2 --staged -- notes.txt"
 CHECK_RESTORED = "git diff --quiet <commit> -- notes.txt"
 VERIFY_LOG = "python tools/verify_audit_log.py"
 FIND_WRITE = "jq -c 'select(.tool == \"Write\") | {timestamp, status, call_id}' .claude/audit.log"
+FIND_MARKER = 'ls .claude/checkpoints/used/ | grep -F ".<call_id>."'
+READ_COMMIT = (
+    "jq -r .commit .claude/checkpoints/used/<checkpoint_id>.<call_id>.<suffix>"
+)
 
 _GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -158,6 +163,7 @@ def test_the_template_names_every_code_and_command_the_exercise_runs() -> None:
     for expected in (
         F501,
         F502,
+        ASK_WRITE,
         TAKE_CHECKPOINT,
         USED_NAME,
         AGENT_RESTORE,
@@ -166,6 +172,8 @@ def test_the_template_names_every_code_and_command_the_exercise_runs() -> None:
         CHECK_RESTORED,
         VERIFY_LOG,
         FIND_WRITE,
+        FIND_MARKER,
+        READ_COMMIT,
         "bypassPermissions",
     ):
         assert expected in text, expected
@@ -188,7 +196,7 @@ def test_an_approved_write_is_traced_to_its_checkpoint_and_undone(
     assert asked.returncode == 0, asked.stderr
     decision = json.loads(asked.stdout)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "ask"
-    assert decision["permissionDecisionReason"].startswith(F502)
+    assert decision["permissionDecisionReason"].startswith(ASK_WRITE)
     assert not (project / ".claude" / "checkpoint.ok").exists()
     used = sorted((project / ".claude" / "checkpoints" / "used").iterdir())
     assert [p.name.rsplit(".", 1)[0] for p in used] == [f"{commit}.toolu_tt_03"]
@@ -224,12 +232,20 @@ def test_an_approved_write_is_traced_to_its_checkpoint_and_undone(
     assert row["call_id"] == call_id
     assert row["status"] == "executed"
     assert row["timestamp"]
-    (marker_file,) = (project / ".claude" / "checkpoints" / "used").glob(
-        f"*.{call_id}.*"
+    found = _shell(project, FIND_MARKER.replace("<call_id>", call_id))
+    assert found.returncode == 0, found.stderr
+    (marker_name,) = found.stdout.splitlines()
+    checkpoint_id, marker_call_id, suffix = marker_name.split(".")
+    assert checkpoint_id == commit
+    assert marker_call_id == call_id
+    read = _shell(
+        project,
+        READ_COMMIT.replace("<checkpoint_id>", checkpoint_id)
+        .replace("<call_id>", call_id)
+        .replace("<suffix>", suffix),
     )
-    assert marker_file.name.startswith(f"{commit}.{call_id}.")
-    restore_point = json.loads(marker_file.read_text())["commit"]
-    assert restore_point == commit
+    assert read.returncode == 0, read.stderr
+    assert read.stdout.strip() == commit
 
     # Step 5: the agent's own restore is a rollback, but git refuses it over
     # the changed file; the operator restores from their terminal.
@@ -248,13 +264,22 @@ def test_an_approved_write_is_traced_to_its_checkpoint_and_undone(
 
     # Step 6: the restore is checked and the log verifies.
     assert _shell(project, CHECK_RESTORED.replace("<commit>", commit)).returncode == 0
-    valid, total, errors = verify_log(
+    verified = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "verify_audit_log.py")],
+        cwd=project,
+        env={**os.environ, "AUDIT_HMAC_KEY": KEY},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    total, valid, errors = verify_log(
         project / ".claude" / "audit.log",
         KEY,
         head_path=project / ".claude" / "audit.head",
     )
     assert errors == []
-    assert valid == total == 1
+    assert (total, valid) == (1, 1)
 
 
 def test_the_same_write_is_refused_where_no_person_can_approve(project: Path) -> None:
