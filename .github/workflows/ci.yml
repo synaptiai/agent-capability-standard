@@ -19,8 +19,10 @@ env:
   # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
   RUST_MSRV: "1.88.0"
 
-# Each job's timeout-minutes is about two to three times its usual run, so a
-# hung runner is cut off instead of held for GitHub's default of 360 minutes.
+# Each job's timeout-minutes is at least twice its slowest recent run and never
+# under 15 minutes. The jobs that build the Rust core with cargo (clippy and
+# tests, or the WebAssembly module) get 30, as headroom for a cold build. A hung
+# runner is then cut off instead of held for GitHub's default of 360 minutes.
 jobs:
   validate-schemas:
     name: Validate YAML schemas

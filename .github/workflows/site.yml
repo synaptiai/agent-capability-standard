@@ -29,8 +29,9 @@ concurrency:
   group: site-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Each job's timeout-minutes is about two to three times its usual run, so a
-# hung runner is cut off instead of held for GitHub's default of 360 minutes.
+# Each job's timeout-minutes is at least twice its slowest recent run and never
+# under 15 minutes, so a hung runner is cut off instead of held for GitHub's
+# default of 360 minutes.
 jobs:
   build:
     name: Build the site
