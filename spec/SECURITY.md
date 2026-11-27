@@ -322,15 +322,51 @@ The reference implementations enforce this by code:
 
 #### 2.2.1 Prompt Injection
 
-**Scenario**: Malicious input tricks the agent into executing unintended actions.
+**Scenario**: Content the agent reads (a retrieved page, a search result, a
+received message, a recalled memory entry, a tool result, a file in the
+repository) holds text written as instructions, and the model acts on it.
 
-**Mitigations**:
-- Typed contracts validate input structure
-- Gates can block suspicious patterns
-- Audit trails enable forensic analysis
-- Checkpoint enables rollback of compromised actions
+**Mitigations** (decided by code, not by a model):
+- Only a person decides an approval. On a tool-calling host, a permission
+  prompt answered by anything but a person (the host itself, an automatic
+  mode, a classifier) decides nothing, so injected text cannot approve its
+  own call ([STANDARD 1.2.0 §5.18.7](STANDARD-v1.2.0.md#5187-approval-for-calls)).
+  The approval shows the arguments the call will run with, and decides
+  that call alone.
+- A destination policy fails a `send` to a destination it does not allow
+  with F504, before anyone is asked
+  ([STANDARD 1.2.0 §4.4.2](STANDARD-v1.2.0.md#442-transmissions); §2.2.9).
+- The always-ask mark: on `receive`, `delegate` and `synchronize`, an item
+  whose sender has a trust class listed in `always_ask_trust_classes`, or
+  no identity or trust class, marks every step that reads it, and a marked
+  step that requires approval is asked of a person even where a standing
+  mandate would otherwise decide
+  ([STANDARD 1.2.0 §5.17](STANDARD-v1.2.0.md#517-sender-identity)).
+- `mutate` and `send` need a checkpoint and an approval, so an injected
+  change can be rolled back and an injected send is put to a person first.
+- Repository content does not configure the plugin's hooks: they block
+  every call while the project's settings files set an environment
+  variable that is not one of Claude Code's own (§5.1).
+- Typed contracts check the structure of inputs, and the audit trail
+  records each call for later analysis.
 
-**Residual Risk**: Prompt injection is primarily a runtime concern. The standard provides structure but not content filtering.
+Workflow authors apply these through the tainted input gate pattern
+([WORKFLOW_PATTERNS.md §4.4](../docs/WORKFLOW_PATTERNS.md#44-tainted-input-gate-pattern)):
+the destination and every other argument of the act come from the person's
+inputs, a `constrain` step checks the outgoing action, and the act still
+needs a checkpoint and a person's approval. A `constrain` step is a check a
+model makes, and can itself be misled by the content it reads (§5.4).
+
+**Residual Risk**: Within what these checks allow, injected text can still
+steer the model: a send to an allowed destination, or a change a person
+approves without noticing what it does. Standard 1.2.0 has no rule that
+content a step reads never changes a layer's configuration or counts as a
+person's decision; the always-ask mark does not cover `retrieve`, `search`,
+`observe` or `recall`; and the grounding check
+([STANDARD 1.2.0 §5.20](STANDARD-v1.2.0.md#520-grounding)) runs on a
+step's output after the host has acted, so it cannot stop an injected send.
+These are planned for Standard 1.3.0
+([#169](https://github.com/synaptiai/agent-capability-standard/issues/169)).
 
 #### 2.2.2 Incorrect Identity Merges
 

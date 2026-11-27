@@ -435,6 +435,59 @@ review:
     5. plan(actionable) → changes
 ```
 
+### 4.4 Tainted Input Gate Pattern
+
+**Purpose**: Act on retrieved content without letting it give instructions.
+
+Content a step reads from outside the person's request is data: a retrieved page, a search result, a received message, a recalled memory entry, a tool result. It can be summarised, compared or quoted. It does not choose a destination, a recipient, a command or an approval.
+
+The ontology orders `constrain` before `generate` and `send`, and `verify` after `send`, so the check before the act is `constrain` and `verify` checks the effect. [`examples/tainted_input_gate.workflow_catalog.yaml`](../examples/tainted_input_gate.workflow_catalog.yaml) holds the pattern as a workflow (`tainted_input_summary`) that CI validates in strict mode.
+
+
+```yaml
+tainted_input_gate:
+  description: Check retrieved content and the outgoing action before acting
+  capabilities:
+    - retrieve       # Get the untrusted content
+    - constrain      # Check the content, then the action
+    - generate       # Produce the output from the content
+    - checkpoint     # Save state before the act
+    - send           # Act, after a person approves
+    - verify         # Check the effect
+    - audit          # Record what was checked
+
+  flow:
+    1. retrieve(source) → content
+    2. constrain(content, content_rules) → flagged
+    3. generate(purpose, content, flagged) → output
+    4. constrain(output, destination, request_rules) → allowed
+    5. checkpoint(state) → recovery
+    6. send(destination, output) → sent
+    7. verify(sent, destination) → confirmed
+    8. audit(flagged, allowed, sent, confirmed) → record
+```
+
+The structure enforces some of the pattern's checks, and a model judges the others:
+
+- **Enforced.** The destination is bound from the workflow's inputs, never from a reference to the retrieved content. The send needs a checkpoint and a person's approval, and the approval shows the destination and the payload ([STANDARD 1.2.0 §5.14](../spec/STANDARD-v1.2.0.md#514-approval)); on a tool-calling host only a person decides ([§5.18.7](../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)). With a destination policy in force, a send to a destination it does not allow fails with F504 before anyone is asked ([§4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)). The gate on the send stops the run unless the second `constrain` step reported `compliant: true`.
+- **Judged.** Both `constrain` steps are checks a model makes, and the first one reads the untrusted content itself, so injected text can mislead it. They lower the chance that injected text reaches the output. They do not replace the enforced checks.
+
+```mermaid
+---
+title: Tainted input gate
+---
+flowchart TB
+  accDescr: Retrieved content is checked by constrain and used only as data by generate; a second constrain checks the output and the destination the person gave; the send needs a checkpoint and a person's approval and does not run when the check failed; verify checks the effect and audit records it.
+  src["retrieve: untrusted content"] -->|data| c1["constrain: flag text addressed to the agent"]
+  c1 --> gen["generate: output"]
+  person["Person: purpose, destination"] --> gen
+  gen --> c2{"constrain: output and destination"}
+  c2 -->|not compliant| stop["Stop: nothing is sent"]
+  c2 -->|compliant| cp["checkpoint"]
+  cp --> act["send, after approval"]
+  act --> ver["verify, audit"]
+```
+
 ---
 
 ## 5. Optimization Patterns
@@ -891,7 +944,7 @@ description: What the pattern does and when to use it
 | Analysis | analyze, diagnose, profile |
 | Planning | strategize, prioritize, schedule |
 | Execution | process, migrate, execute-verify-retry |
-| Validation | validate, test, review |
+| Validation | validate, test, review, tainted input gate |
 | Optimization | optimize, refine, mitigate |
 | Coordination | orchestrate, handoff, consensus |
 | Compound | research, build, monitor |
