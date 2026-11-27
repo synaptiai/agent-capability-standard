@@ -108,9 +108,16 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #         a program git runs, a partial clone, a repository with submodules,
 #         or git cannot say): mutate;
 #       - anything else: mutate.
-#   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
-#     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
-#     cannot know that an unknown tool only reads).
+#   - The plugin's typed remote writes (REMOTE_WRITE_TOOLS: push, tag_push,
+#     pr_create, pr_merge, release_create, issue_create, issue_assign of its
+#     MCP server, grounded_agency/remote_writes.py): bound as mutate
+#     (§5.18.1), and the approval request names the call's target; a
+#     call whose target (a branch, tag, number, method, login or object id)
+#     the request could not show, because the secret scan finds a
+#     credential in it, is refused (F504 CONSTRAINT_VIOLATED).
+#   - Any other tool (Monitor, PowerShell, ExitWorktree, every other MCP
+#     tool, a tool this hook does not know): unbound, so mutate (§5.18.2: a
+#     layer cannot know that an unknown tool only reads).
 #
 # Rules.
 #   - persist (§5.18.10, §6.7): the data a call of a tool on PERSIST_TOOLS
@@ -147,8 +154,11 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #     path a text of at most 4096 bytes names is resolved as the system
 #     resolves a path), or the directory that holds them (the
 #     project's .claude, its git directory's acs/), is refused (F504
-#     CONSTRAINT_VIOLATED): only these hooks write them. The texts read are
-#     a file tool's path, a Bash command and a Skill call's arguments, and
+#     CONSTRAINT_VIOLATED): only these hooks write them. So is a call that
+#     names the remote-write server's record or work directories
+#     (~/.config/acs/remotes.json, ~/.config/acs/work/), which choose the
+#     origin and the git and gh that server runs outside the sandbox. The
+#     texts read are a file tool's path, a Bash command and a Skill call's arguments, and
 #     every string and member name of any other tool's input but Agent's
 #     and Task's (an MCP filesystem server's path, a shell server's
 #     command). Then the
@@ -497,6 +507,73 @@ plain_name() {
 }
 # END plain-name
 
+
+# The plugin's typed remote writes: the tools of its MCP server
+# (grounded_agency/remote_writes.py), named as Claude Code names a plugin
+# server's tools, each bound as mutate (§5.18.1; tests/test_remote_writes.py
+# keeps this list equal to the server's).
+REMOTE_WRITE_PREFIX="mcp__plugin_agent-capability-standard_remote__"
+REMOTE_WRITE_TOOLS=(push tag_push pr_create pr_merge release_create issue_create issue_assign)
+
+# One argument of a remote write's call, as its approval request shows it:
+# quoted when it is 1 to 200 ASCII letters, digits or . _ / @ + - (the
+# server refuses any other branch, tag, number, method, login or object id;
+# REF_CHARACTERS in remote_writes.py, kept equal by a test) and the secret
+# scan finds no credential in it; else a note that it is not shown. A value
+# of that class shaped like a credential, which the server would accept, is
+# refused before the request is made (remote_write_hidden), so every target
+# the server acts on is shown.
+remote_write_value() {
+  local value status=0
+  value=$(printf '%s' "$payload" | jq -r --arg k "$1" '.tool_input[$k] | if type == "string" then . elif type == "number" then tostring else "" end' 2>/dev/null) || value=""
+  if [ -n "$value" ] && (LC_ALL=C; [[ "$value" =~ ^[A-Za-z0-9._/@+-]{1,200}$ ]]); then
+    (set +o pipefail; secret_in "$value") || status=$?
+    if [ "$status" = 1 ]; then
+      printf "'%s'" "$value"
+      return 0
+    fi
+  fi
+  printf '%s' '(a value not shown)'
+}
+
+# Whether a remote write's call has an argument that remote_write_value
+# would not show although the server accepts it: a value of the shown class
+# in which the secret scan finds a credential (or cannot answer).
+remote_write_hidden() {
+  local key value status
+  for key in branch force_with_lease tag head base number method assignee; do
+    value=$(printf '%s' "$payload" | jq -r --arg k "$key" '.tool_input | if type == "object" then .[$k] else null end | if type == "string" then . elif type == "number" then tostring else "" end' 2>/dev/null) || value=""
+    if [ -n "$value" ] && (LC_ALL=C; [[ "$value" =~ ^[A-Za-z0-9._/@+-]{1,200}$ ]]); then
+      status=0
+      (set +o pipefail; secret_in "$value") || status=$?
+      [ "$status" = 1 ] || return 0
+    fi
+  done
+  return 1
+}
+
+# What a remote write's call does, for its approval request: one push, tag,
+# pull request, merge, release or issue, on the origin recorded for the
+# project.
+remote_write_target() {
+  local lease
+  case "$1" in
+    push)
+      lease=$(printf '%s' "$payload" | jq -r '.tool_input | if type == "object" and has("force_with_lease") then "yes" else "" end' 2>/dev/null) || lease="yes"
+      if [ -n "$lease" ]; then
+        printf 'force-push branch %s to the recorded origin, only while it is at %s' "$(remote_write_value branch)" "$(remote_write_value force_with_lease)"
+      else
+        printf 'push branch %s to the recorded origin, fast-forward only' "$(remote_write_value branch)"
+      fi
+      ;;
+    tag_push) printf 'push tag %s to the recorded origin' "$(remote_write_value tag)" ;;
+    pr_create) printf 'open a pull request from %s into %s on the recorded origin' "$(remote_write_value head)" "$(remote_write_value base)" ;;
+    pr_merge) printf 'merge pull request %s by %s on the recorded origin' "$(remote_write_value number)" "$(remote_write_value method)" ;;
+    release_create) printf 'create a release for tag %s on the recorded origin' "$(remote_write_value tag)" ;;
+    issue_create) printf 'open an issue on the recorded origin' ;;
+    issue_assign) printf 'assign %s to issue %s on the recorded origin' "$(remote_write_value assignee)" "$(remote_write_value number)" ;;
+  esac
+}
 
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
@@ -1036,9 +1113,10 @@ classify_bash() {
 #     of the git directories' records; writes to the project and local
 #     settings files, the project's .claude/hooks, this hook's own
 #     directory, the user configuration directory and, without
-#     CLAUDE_CONFIG_DIR, ~/.claude.json; reads and writes of the audit key
-#     file (~/.config/acs/audit.key); reads of ~/.ssh, gh's hosts.yml,
-#     ~/.git-credentials and, on macOS, the keychains; and writes to a
+#     CLAUDE_CONFIG_DIR, ~/.claude.json; writes to ~/.config/acs/ (the audit
+#     key, the remote-write record and its work directories) and reads of
+#     the audit key file (~/.config/acs/audit.key); reads of ~/.ssh, gh's
+#     hosts.yml, ~/.git-credentials and, on macOS, the keychains; and writes to a
 #     directory that holds a .mcp.json (the project directory, the
 #     repository's top level), or to the .mcp.json path there where there
 #     is none;
@@ -1405,10 +1483,11 @@ sandbox_verify() {
   fi
   hooks_dir="$PHYSICAL"
   sandbox_need Edit d "$hooks_dir" || ok=0
-  # The audit key file, and the user's credentials: ssh's keys, gh's and
-  # git's tokens and, on macOS, the keychains.
+  # The directory of the audit key and the remote-write server's record
+  # (writes), the audit key file (reads), and the user's credentials: ssh's
+  # keys, gh's and git's tokens and, on macOS, the keychains.
   for f in "$home_written" "$home_physical"; do
-    sandbox_need Edit f "$f/.config/acs/audit.key" || ok=0
+    sandbox_need Edit d "$f/.config/acs" || ok=0
     sandbox_need Read f "$f/.config/acs/audit.key" || ok=0
     sandbox_need Read d "$f/.ssh" || ok=0
     sandbox_need Read f "$f/.config/gh/hosts.yml" || ok=0
@@ -1875,6 +1954,12 @@ shown_tool=$(plain_name "$tool_name")
 # (§5.18.2), and its refusals and its approval request name no capability.
 unbound=0
 unseen=0
+remote_write=""
+for entry in "${REMOTE_WRITE_TOOLS[@]}"; do
+  if [ "$tool_name" = "${REMOTE_WRITE_PREFIX}${entry}" ]; then
+    remote_write=$entry
+  fi
+done
 case "$tool_name" in
   Write | Edit | MultiEdit | NotebookEdit)
     capability=mutate
@@ -1905,7 +1990,7 @@ case "$tool_name" in
     ;;
   *)
     capability=mutate
-    unbound=1
+    [ -n "$remote_write" ] || unbound=1
     ;;
 esac
 
@@ -2153,6 +2238,7 @@ RECORD_TEXTS_JQ='
     end;
   def mode: if .tool_name == "Bash" or .tool_name == "Skill" then "W" elif file_tool then "P" else "B" end;
   def records: test("checkpoint\\.ok|audit\\.head|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
+  def remote_record: test("\\.config/+(\\./+)*acs/+(\\./+)*(remotes\\.json|work)([^a-z0-9._-]|$)"; "i");
   def lexical: ascii_downcase | split("/")
     | reduce .[] as $s ([]; if $s == "" or $s == "." then . elif $s == ".." then (if length > 0 then .[:-1] else . end) else . + [$s] end)
     | join("/");
@@ -2161,13 +2247,18 @@ records_named=$(printf '%s' "$payload" | jq -r "$RECORD_TEXTS_JQ"'
   texts as $t
   | if ($t | length) > 4096 or ([$t[] | utf8bytelength | select(. <= 4096)] | add // 0) > 65536 then "over"
     elif any($t[]; records or (length <= 4096 and (lexical | records))) then "named"
+    elif any($t[]; remote_record or (length <= 4096 and (lexical | remote_record))) then "remote"
     else "no" end' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
 records_refusal="F504 CONSTRAINT_VIOLATED: ${shown_tool} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
 case "$records_named" in
   no) ;;
   over) block "F504 CONSTRAINT_VIOLATED: ${shown_tool}'s input holds more than 4096 strings and member names, or more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
+  remote) block "F504 CONSTRAINT_VIOLATED: ${shown_tool} names the remote-write server's record (~/.config/acs/remotes.json) or its work directories (~/.config/acs/work/), which choose the origin and the git and gh that server runs outside the sandbox; a person records the origin outside Claude Code (hooks/README.md, Remote writes)." ;;
   *) block "${records_refusal}." ;;
 esac
+if [ -n "$remote_write" ] && remote_write_hidden; then
+  block "F504 CONSTRAINT_VIOLATED: ${shown_tool}: an argument of the call (a branch, tag, number, method, login or object id) looks like a credential, so the approval request cannot show it to the person who approves the call; the call is refused."
+fi
 
 # The character $'...' gives for the escape just after the backslash at $2
 # in $1, into ANSI_CHAR (as bash decodes it: \a \b \e \E \f \n \r \t \v \\
@@ -2852,8 +2943,20 @@ sandbox_note() {
   fi
   printf ' %s' "$(sandbox_unverified_text)"
 }
+# The setup script's apply line, for the person to run in a terminal: the
+# script beside this hook's directory, every path quoted for the shell, and
+# CLAUDE_CONFIG_DIR passed on as /grounded-setup passes it.
+setup_apply_line() {
+  local here root config=""
+  here="${BASH_SOURCE[0]:-$0}"
+  case "$here" in */*) here="${here%/*}" ;; *) here=. ;; esac
+  root="$(cd "$here/.." 2>/dev/null && pwd -P)" || root=""
+  [ -n "$root" ] || root="<plugin>"
+  [ -z "${CLAUDE_CONFIG_DIR:-}" ] || config="$(printf 'CLAUDE_CONFIG_DIR=%q ' "$CLAUDE_CONFIG_DIR")"
+  printf '/usr/bin/env -i %s/usr/bin/python3 -I %q apply --project %q' "$config" "$root/grounded_agency/sandbox_settings.py" "$project_dir"
+}
 sandbox_unverified_text() {
-  printf '%s' "Claude Code's strict sandbox is not verified for this call (${SANDBOX_REASON:-unknown}), so every Bash call, git stash create included, is a gated mutate and no checkpoint can be taken through Bash. The person can turn it on outside this session: add the settings in hooks/README.md (The strict sandbox) to the user settings file (~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR), then start Claude Code again. This hook refuses those edits from the agent."
+  printf '%s' "Claude Code's strict sandbox is not verified for this call (${SANDBOX_REASON:-unknown}), so every Bash call, git stash create included, is a gated mutate and no checkpoint can be taken through Bash. The person can turn it on outside this session: in a terminal outside Claude Code, run $(setup_apply_line) (hooks/README.md, Setting up the sandbox; /grounded-setup gives the same line), which shows the change and asks before it writes the settings in hooks/README.md (The strict sandbox) to the user settings file (~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR), or add them there by hand; then start Claude Code again. This hook refuses those edits from the agent."
 }
 
 if [ ! -e "$marker" ]; then
@@ -2981,6 +3084,8 @@ rmdir "$claim"
 
 if [ "$unbound" = 1 ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+elif [ -n "$remote_write" ]; then
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': $(remote_write_target "$remote_write")) requires approval; it runs only if this call is approved."
 elif [ "$unseen" = 1 ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
 elif [ "$tool_name" = Bash ] && [ "${SANDBOX_ESCAPE:-}" = 1 ]; then

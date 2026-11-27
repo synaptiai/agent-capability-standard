@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# A pull request's runs share one group, so a run for a head that a newer push
+# has replaced is cancelled and does not hold runners the new head's run is
+# waiting for. Every other run (a push to main) has a group of its own: a group
+# holds one pending run and a newer one cancels it, so a shared group for main
+# would drop the CI result of a commit merged between two others. Runs on main
+# are never cancelled and do not wait for each other.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # One Rust toolchain for every job, for the same reason constraints.txt pins
   # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no
@@ -19,10 +29,15 @@ env:
   # Oldest rustc the crate supports (core/Cargo.toml `rust-version`).
   RUST_MSRV: "1.88.0"
 
+# Each job's timeout-minutes is at least twice its slowest recent run and never
+# under 15 minutes. The jobs that build the Rust core with cargo (clippy and
+# tests, or the WebAssembly module) get 30, as headroom for a cold build. A hung
+# runner is then cut off instead of held for GitHub's default of 360 minutes.
 jobs:
   validate-schemas:
     name: Validate YAML schemas
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -116,6 +131,7 @@ jobs:
   rust-core:
     name: Rust core (fmt, clippy, tests, MSRV)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: core
@@ -159,6 +175,7 @@ jobs:
   cel-differential:
     name: Expressions stay a CEL-compatible profile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -175,6 +192,7 @@ jobs:
   lint:
     name: Lint & type-check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -211,6 +229,7 @@ jobs:
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ["3.14", "3.15"]
@@ -245,6 +264,7 @@ jobs:
     # /bin/bash 3.2 macOS ships or a newer one on PATH (#134).
     name: Tests on macOS (${{ matrix.bash }} bash)
     runs-on: macos-latest
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
@@ -290,9 +310,144 @@ jobs:
       - name: Run the tests
         run: pytest tests/ --tb=short -rs
 
+  # Attacks on the sandbox boundary under the sandbox runtime's own srt
+  # command, with the settings the setup command computes. The suite needs
+  # no compiled extension, so it runs without the Rust build and without
+  # tests/conftest.py. ACS_BOUNDARY_REQUIRED=1 makes a missing srt or bwrap,
+  # or a sandbox that cannot start, a failure rather than a skip.
+  sandbox-boundary:
+    name: Sandbox boundary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The suite took 8 to 13.5 minutes on macOS and about 2 on Linux, locally.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      ACS_BOUNDARY_REQUIRED: "1"
+      SANDBOX_RUNTIME_VERSION: "0.0.82"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+
+      - name: Install what srt needs on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+
+      - name: Install the sandbox runtime
+        run: |
+          npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@$SANDBOX_RUNTIME_VERSION"
+          srt --version
+
+      # On Linux this lifts Ubuntu's AppArmor restrictions on the user
+      # namespaces srt makes; on both systems it runs srt once and fails
+      # with srt's own message when it cannot start a sandbox.
+      - name: Check that srt can start a sandbox
+        run: bash .github/scripts/sandbox-runner-setup.sh
+
+      - name: Install pytest
+        run: pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
+
+      # The metadata route can be tested only where 169.254.169.254
+      # answers without the sandbox. Where it answers here, a skip of that
+      # route becomes a failure.
+      - name: Check whether the metadata address answers
+        run: |
+          code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Metadata: true' http://169.254.169.254/ || true)
+          echo "169.254.169.254 answers with HTTP status: ${code:-none}"
+          if [ -n "$code" ] && [ "$code" != 000 ]; then
+            echo ACS_BOUNDARY_METADATA_REQUIRED=1 >> "$GITHUB_ENV"
+          else
+            echo "::warning::169.254.169.254 does not answer on this runner, so the metadata route is not tested"
+          fi
+
+      - name: Run the boundary suite
+        run: pytest --noconftest -p no:cacheprovider -rs --tb=short tests/test_sandbox_boundary.py
+
+  # The suite's Claude Code tests: headless claude -p runs of a few routes
+  # in the default, acceptEdits and bypassPermissions modes. They need an
+  # Anthropic credential, so the job runs its steps only when the
+  # repository secret ANTHROPIC_API_KEY is set, and passes without them
+  # otherwise (as on a pull request from a fork).
+  sandbox-boundary-claude:
+    name: Sandbox boundary through Claude Code
+    runs-on: ubuntu-latest
+    # The Claude Code tests took about 5 minutes locally, plus the install.
+    timeout-minutes: 20
+    env:
+      HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      CLAUDE_CODE_VERSION: "2.1.332"
+      SANDBOX_RUNTIME_VERSION: "0.0.82"
+    steps:
+      - name: Say why nothing runs
+        if: env.HAS_ANTHROPIC_KEY != 'true'
+        run: echo "The repository secret ANTHROPIC_API_KEY is not set, so Claude Code is not run."
+
+      - uses: actions/checkout@v7
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+
+      - name: Set up Python
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+
+      - name: Install Claude Code and what its sandbox needs
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+          # The package's bin/claude.exe is a placeholder until its install
+          # script copies the native binary over it; the script runs here
+          # by name rather than as an npm lifecycle script.
+          npm install -g --ignore-scripts "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
+          claude --version
+          pip install "pytest>=8.4.2,<10" "pytest-asyncio>=1.0,<2"
+
+      # Claude Code's sandbox on Linux is the same runtime: srt here shows
+      # whether the runner lets it start, with srt's own message if not.
+      - name: Check that the sandbox can start
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        run: |
+          npm install -g --ignore-scripts "@anthropic-ai/sandbox-runtime@$SANDBOX_RUNTIME_VERSION"
+          bash .github/scripts/sandbox-runner-setup.sh
+
+      # A test skips when the model makes no Bash call; a run in which none
+      # passed tested nothing, and fails.
+      - name: Run the Claude Code routes
+        if: env.HAS_ANTHROPIC_KEY == 'true'
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ACS_BOUNDARY_CLAUDE: "1"
+        run: |
+          pytest --noconftest -p no:cacheprovider -rs --tb=short -k claude_code \
+            tests/test_sandbox_boundary.py | tee "$RUNNER_TEMP/claude-routes.log"
+          grep -Eq '[1-9][0-9]* passed' "$RUNNER_TEMP/claude-routes.log"
+
   benchmarks:
     name: Benchmark validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -335,6 +490,7 @@ jobs:
   conformance:
     name: Conformance tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -372,6 +528,7 @@ jobs:
   typescript-package:
     name: TypeScript package (type-check, tests, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: packages/acs-core
@@ -425,6 +582,7 @@ jobs:
   standard-agents-binding:
     name: Standard Agents binding (type-check, tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: examples/standard_agents
