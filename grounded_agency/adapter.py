@@ -80,6 +80,7 @@ from .state.redaction import DEFAULT_REDACTOR, Redactor
 from .state.snapshots import FileSnapshotStore
 from .utils.project_settings import refused_project_env
 from .utils.sandbox import (
+    CHECKED_PERMISSION_MODES,
     CREDENTIAL_NAME,
     BoundaryPaths,
     boundary_faults,
@@ -1831,8 +1832,18 @@ class GroundedAgentAdapter:
         if tool_name == "Bash" and not self._bash_boundary_held(call):
             return self.mapper.bash_worst_case()
         return self.mapper.map_tool(
-            tool_name, tool_input if isinstance(tool_input, dict) else {}, cwd
+            tool_name,
+            tool_input if isinstance(tool_input, dict) else {},
+            cwd,
+            boundary=self._kept_boundary(tool_name, call),
         )
+
+    def _kept_boundary(self, tool_name: str, call: str | None) -> bool | None:
+        """For a Bash call, whether the boundary held when the PreToolUse
+        hook classified it (False for a call it kept nothing of), so that a
+        later classification of the call uses that decision; None for any
+        other tool."""
+        return self._bash_boundary_held(call) if tool_name == "Bash" else None
 
     def _kept_call_dir(self, call: str | None) -> str | None:
         """The directory the PreToolUse hook classified ``call`` in (what it
@@ -2529,6 +2540,15 @@ class GroundedAgentAdapter:
         # it honours from each: one this layer has not checked leaves the
         # boundary unverified (STANDARD 1.2.0 section 5.18.3).
         faults.extend(cli_faults(wrapped))
+        # So does a permission mode it has not checked; the PreToolUse hook
+        # checks the mode each call runs in as well (the session's mode can
+        # change).
+        mode = getattr(wrapped, "permission_mode", None)
+        if mode is not None and mode not in CHECKED_PERMISSION_MODES:
+            faults.append(
+                f"the options' permission_mode {mode!r} is a mode this layer "
+                f"has not checked"
+            )
         faults.extend(code_faults)
         faults.extend(source_faults(project_dir, sources, env))
         digest = _options_digest(wrapped)
@@ -2975,20 +2995,29 @@ class GroundedAgentAdapter:
                     if tool_name == "Bash"
                     else None
                 )
-                boundary = bash_args is not None and mapper.boundary_holds(bash_args)
+                # Section 5.18.3: whether the boundary holds is decided once
+                # for the call, in the permission mode it runs in, and both
+                # its classification now and after it ran use that decision.
+                boundary: bool | None = None
+                if bash_args is not None:
+                    boundary = mapper.boundary_holds(
+                        bash_args,
+                        input_data.get("permission_mode") or options_mode or "default",
+                    )
                 try:
-                    mapping = mapper.map_tool(tool_name, tool_input, cwd)
+                    mapping = mapper.map_tool(
+                        tool_name, tool_input, cwd, boundary=boundary
+                    )
                 except Exception:
                     logger.exception(
                         "Could not classify %s; treating it as unbound", tool_name
                     )
                     mapping = UNCLASSIFIED_TOOL
+                    boundary = False if boundary is not None else None
                 if isinstance(call, str):
                     checked_under[call] = mapping
-                    if bash_args is not None:
-                        self._note_bash_boundary(
-                            call, boundary and mapper.boundary_holds(bash_args)
-                        )
+                    if boundary is not None:
+                        self._note_bash_boundary(call, boundary)
 
                 if mapping.control:
                     try:
@@ -3570,7 +3599,11 @@ class GroundedAgentAdapter:
                 cwd = checked.cwd if checked is not None else None
                 if checked is not None and checked.asked_at is not None:
                     requested = min(requested, checked.asked_at)
-                mapping0 = mapper.map_tool(tool_name, input_data, cwd)
+                # A Bash call keeps the boundary its PreToolUse hook decided.
+                kept_boundary = self._kept_boundary(tool_name, holder)
+                mapping0 = mapper.map_tool(
+                    tool_name, input_data, cwd, boundary=kept_boundary
+                )
                 if mapping0.control:
                     return allow(input_data), input_data
 
@@ -3712,7 +3745,9 @@ class GroundedAgentAdapter:
                 # again, and one whose binding changed is checked again
                 # under the new one, and refused where it requires approval
                 # (the decision was asked under the other).
-                mapping_now = mapper.map_tool(tool_name, input_data, cwd)
+                mapping_now = mapper.map_tool(
+                    tool_name, input_data, cwd, boundary=kept_boundary
+                )
                 if mapping_now != mapping0:
                     refusal = self._changed_binding_refusal(
                         mapping_now, tool_name, holder, input_data
@@ -3750,7 +3785,9 @@ class GroundedAgentAdapter:
                 mapping1 = mapping_now
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
-                    mapping1 = mapper.map_tool(tool_name, args1, cwd)
+                    mapping1 = mapper.map_tool(
+                        tool_name, args1, cwd, boundary=kept_boundary
+                    )
                     refusal = (
                         self._secret_refusal(mapping1, tool_name, holder, args1)
                         or self._destination_refusal(mapping1, tool_name, holder, args1)

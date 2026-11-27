@@ -318,7 +318,9 @@ class TestTheAdaptersRecorder:
         printed = stash(project)
         held = [False]
         monkeypatch.setattr(
-            ToolCapabilityMapper, "boundary_holds", lambda self, tool_input: held[0]
+            ToolCapabilityMapper,
+            "boundary_holds",
+            lambda self, tool_input, permission_mode=None: held[0],
         )
 
         async def run() -> None:
@@ -341,6 +343,50 @@ class TestTheAdaptersRecorder:
 
         asyncio.run(run())
         assert not adapter.checkpoint_tracker.has_valid_checkpoint()
+        assert "checkpoint" not in adapter._executed
+
+    def test_the_boundary_is_decided_once_per_call(
+        self, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The PreToolUse hook checks the boundary once for a call and
+        classifies it, and keeps it for after the call, from that one
+        result: a boundary that holds at its first check and fails at the
+        next is not counted as held for a call another check gave the worst
+        case (here the first check fails, and every later one holds)."""
+        project, _, adapter, pre, posts = self._setup(tmp_path)
+        (project / "a.txt").write_text("project change\n")
+        printed = stash(project)
+        checks: list[bool] = []
+
+        def boundary_holds(
+            self: Any, tool_input: Any, permission_mode: str | None = None
+        ) -> bool:
+            # The first check fails; every later one holds.
+            checks.append(bool(checks))
+            return checks[-1]
+
+        monkeypatch.setattr(ToolCapabilityMapper, "boundary_holds", boundary_holds)
+
+        async def run() -> None:
+            adapter.create_checkpoint(["*"], "held by the call")
+            await pre(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": STASH},
+                    "cwd": str(project),
+                    "tool_use_id": "toolu_1",
+                },
+                "toolu_1",
+                None,
+            )
+            assert checks == [False]
+            for hook in posts:
+                await hook(bash_post(project, printed), "toolu_1", None)
+
+        asyncio.run(run())
+        assert not adapter._bash_boundary_held("toolu_1")
+        active = adapter.checkpoint_tracker.get_active_checkpoint()
+        assert active is None or active.metadata.get("commit") != printed
         assert "checkpoint" not in adapter._executed
 
     def test_control_the_project_takes_one(self, tmp_path: Path, outside: Path) -> None:

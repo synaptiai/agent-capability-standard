@@ -49,11 +49,13 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ..sandbox_settings import _refused_entry
 from .git import SAFE_GIT_OPTIONS, safe_git_environment
 from .project_settings import PROJECT_SETTINGS_FILES, _read_regular_file
 
 __all__ = [
     "CHECKED_CLI_VERSIONS",
+    "CHECKED_PERMISSION_MODES",
     "CREDENTIAL_ENV_VARS",
     "BoundaryPaths",
     "boundary_faults",
@@ -70,6 +72,7 @@ __all__ = [
     "git_toplevel",
     "linked_files",
     "managed_settings_files",
+    "mode_faults",
     "mcp_server_lists",
     "parse_settings",
     "pattern_faults",
@@ -131,14 +134,6 @@ _HOME_CREDENTIALS: tuple[str, ...] = (
 # Characters a permission rule or the sandbox reads as a pattern or as the
 # rule's own syntax: a path holding one is not read literally.
 _PATTERN = re.compile(r"[*?\[\]{}()\\]")
-
-# Hosts no allowlist entry may name: loopback, link-local and the cloud
-# metadata address reach services on this machine or the instance's
-# credentials, and a wildcard alone allows every host.
-_LOCAL_HOST = re.compile(
-    r"(?i)^(\*|localhost|.*\.localhost|.*\.local|metadata(\..*)?|"
-    r"\[.*\]|[0-9.]+|.*:.*)$"
-)
 
 
 @dataclass(frozen=True)
@@ -693,6 +688,19 @@ def directory_faults(document: Any, where: str) -> list[str]:
     return []
 
 
+def mode_faults(document: Any, where: str) -> list[str]:
+    """A ``permissions.defaultMode`` of the settings object ``document``
+    outside :data:`CHECKED_PERMISSION_MODES`: a session may start in it,
+    and a hook input that names no mode would not show it."""
+    present, value = _get(document, "permissions", "defaultMode")
+    if present and value not in CHECKED_PERMISSION_MODES:
+        return [
+            f"{where}permissions.defaultMode is "
+            f"{json.dumps(value, default=str)}, a mode this layer has not checked"
+        ]
+    return []
+
+
 def pattern_faults(paths: BoundaryPaths) -> list[str]:
     """Each path of ``paths`` the CLI would not read literally in a rule
     or sandbox entry (one holding ``*``, ``?``, brackets, braces,
@@ -713,6 +721,18 @@ def pattern_faults(paths: BoundaryPaths) -> list[str]:
 # bundles, whose settings schema these checks follow; constraints.txt pins
 # that SDK for CI.
 CHECKED_CLI_VERSIONS: frozenset[str] = frozenset({"2.1.321"})
+
+# The Claude Code permission modes in which this layer knows which settings
+# sources the CLI reads and which values it honours from each (STANDARD
+# 1.2.0 section 5.18.3 makes the mode part of what a layer must know). The
+# boundary tests ran the routes the CLI decides itself (the escape
+# argument, excluded commands, the network allowlist) in these three modes,
+# under Claude Code 2.1.332 (RFC-0011, open question 5). `plan`, `auto`,
+# `dontAsk` and any mode this layer does not know were not tested: in them
+# a Bash call gets its worst case.
+CHECKED_PERMISSION_MODES: frozenset[str] = frozenset(
+    {"default", "acceptEdits", "bypassPermissions"}
+)
 
 
 def cli_faults(options: Any) -> list[str]:
@@ -762,8 +782,10 @@ def boundary_faults(
     excludes no command, opens no weaker mode, socket, Mach service, Apple
     Events or proxy of its own, reads and writes no path beyond its defaults
     (no ``allowRead``, no ``allowWrite``), refuses every host not on its
-    allowlist, which names no loopback, link-local, IP or wildcard-only
-    host, keeps every credential file of ``paths`` unreadable, every variable of
+    allowlist, which names only hosts the setup command would list
+    (:func:`~grounded_agency.sandbox_settings.check_host`: no loopback,
+    link-local, metadata or local-use name, no IP literal in any spelling,
+    no one-label name, no wildcard but a leading ``*.``), keeps every credential file of ``paths`` unreadable, every variable of
     ``paths`` unset and every ``denyWrite`` path of ``paths`` in its
     ``filesystem.denyWrite``, and the ``permissions.deny`` rules hold every
     rule :func:`deny_rules` gives for ``paths``. With ``destination_policies`` (a destination
@@ -785,9 +807,18 @@ def boundary_faults(
             faults.append("sandbox.network.allowedDomains is not a list of names")
         else:
             for domain in domains:
-                if _LOCAL_HOST.fullmatch(domain.strip()):
+                # The grammar the setup command lists hosts by: a dotted DNS
+                # name whose last label is alphabetic, with at most a leading
+                # "*." wildcard, and no loopback, link-local, metadata or
+                # local-use name. An IP literal in any spelling (hex included),
+                # a one-label name (with a trailing dot too) and a wildcard that
+                # is not a leading "*." fail it: they may reach this machine, the
+                # instance's credentials, or every host.
+                why = _refused_entry(domain)
+                if why is not None:
                     faults.append(
-                        f"sandbox.network.allowedDomains names {json.dumps(domain, default=str)}"
+                        f"sandbox.network.allowedDomains names "
+                        f"{json.dumps(domain, default=str)}: {why}"
                     )
             if domains and destination_policies:
                 faults.append(
@@ -981,6 +1012,7 @@ def source_faults(
         )
         found.extend(directory_faults(document, f"{path}: "))
         found.extend(env_faults(document, f"{path}: "))
+        found.extend(mode_faults(document, f"{path}: "))
         sandbox = document.get("sandbox")
         if sandbox is None:
             continue

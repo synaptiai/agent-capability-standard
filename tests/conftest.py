@@ -153,14 +153,17 @@ def bash_under_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     and with no boundary every Bash call is its worst case. For tests of
     the classifier itself; ``tests/test_adapter_sandbox.py`` tests when the
     adapter verifies the boundary. A call that sets
-    ``dangerouslyDisableSandbox`` is still the worst case."""
+    ``dangerouslyDisableSandbox``, or one in a permission mode outside
+    ``CHECKED_PERMISSION_MODES``, is still the worst case."""
     from grounded_agency.capabilities.mapper import ToolCapabilityMapper
+    from grounded_agency.utils.sandbox import CHECKED_PERMISSION_MODES
 
     monkeypatch.setattr(
         ToolCapabilityMapper,
         "boundary_holds",
-        lambda self, tool_input: (
+        lambda self, tool_input, permission_mode=None: (
             tool_input.get("dangerouslyDisableSandbox", False) is False
+            and (permission_mode is None or permission_mode in CHECKED_PERMISSION_MODES)
         ),
     )
 

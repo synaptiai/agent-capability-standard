@@ -179,7 +179,9 @@ def create_checkpoint_recorder(
         boundary_held: Whether the operating-system boundary held when the
             PreToolUse hook classified a Bash call, by call id (STANDARD
             1.2.0 section 5.18.3: the boundary is verified before the call
-            runs). A Bash call for which it returns False takes none. The
+            runs). A Bash call for which it returns False takes none; one
+            for which it returns True is classified with the boundary held,
+            as that hook classified it, without checking it again. The
             adapter passes what its PreToolUse hook kept.
 
     Returns:
@@ -218,7 +220,16 @@ def create_checkpoint_recorder(
                 and not boundary_held(tool_use_id or input_data.get("tool_use_id"))
             ):
                 return {}
-            mapping = classify.map_tool(tool_name, tool_input, cwd)
+            # A Bash call is classified as the PreToolUse hook classified it:
+            # the boundary held then (checked above).
+            mapping = classify.map_tool(
+                tool_name,
+                tool_input,
+                cwd,
+                boundary=(
+                    True if tool_name == "Bash" and boundary_held is not None else None
+                ),
+            )
             if "checkpoint" not in mapping.capabilities:
                 return {}
             tool_response = input_data.get("tool_response")

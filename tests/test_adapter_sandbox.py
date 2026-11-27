@@ -26,6 +26,7 @@ from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig, layer_rec
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
 from grounded_agency.utils import sandbox as sandbox_module
 from grounded_agency.utils.sandbox import (
+    CHECKED_PERMISSION_MODES,
     CREDENTIAL_ENV_VARS,
     boundary_faults,
     flag_settings,
@@ -373,6 +374,11 @@ WEAKENINGS: list[tuple[str, Any]] = [
     ("network.allowedDomains", ["169.254.169.254"]),
     ("network.allowedDomains", ["*"]),
     ("network.allowedDomains", ["metadata.google.internal"]),
+    ("network.allowedDomains", ["localhost."]),
+    ("network.allowedDomains", ["0x7f000001"]),
+    ("network.allowedDomains", ["foo.local."]),
+    ("network.allowedDomains", ["*.*"]),
+    ("network.allowedDomains", [""]),
     ("network.allowedDomains", "pypi.org"),
     ("filesystem.disabled", True),
     ("filesystem.allowRead", ["~/.ssh"]),
@@ -785,6 +791,89 @@ async def test_the_hook_asks_for_ls_only_without_the_boundary(
     decision = out["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny"
     assert decision["permissionDecisionReason"].startswith("F501")
+
+
+async def _hook_on(
+    adapter: GroundedAgentAdapter, wrapped: Any, project: Path, **extra: Any
+) -> dict[str, Any]:
+    """The adapter's PreToolUse hook on `git stash create`, with the hook
+    input's members ``extra``."""
+    (hook,) = [
+        fn
+        for entry in wrapped.hooks["PreToolUse"]
+        for fn in entry.hooks
+        if getattr(fn, "_grounded_adapter", None) is adapter
+    ]
+    return await hook(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git stash create"},
+            "tool_use_id": "t1",
+            "cwd": str(project),
+            **extra,
+        },
+        "t1",
+        None,
+    )
+
+
+@pytest.mark.parametrize("mode", ["plan", "auto", "dontAsk", "someFutureMode"])
+async def test_a_mode_not_checked_is_the_worst_case(
+    tmp_path: Path, project: Path, mode: str
+) -> None:
+    """STANDARD 1.2.0 section 5.18.3: the layer knows which sources the CLI
+    reads and which values it honours only for the modes of
+    CHECKED_PERMISSION_MODES. In any other mode, named by the hook input,
+    `git stash create` is Bash's worst case: it needs a checkpoint (F501),
+    and is kept as a call the boundary did not hold for."""
+    assert mode not in CHECKED_PERMISSION_MODES
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project))
+    assert _relaxed(adapter)
+    out = await _hook_on(adapter, wrapped, project, permission_mode=mode)
+    decision = out["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert decision["permissionDecisionReason"].startswith("F501")
+    assert not adapter._bash_boundary_held("t1")
+
+
+@pytest.mark.parametrize("mode", sorted(CHECKED_PERMISSION_MODES))
+async def test_a_checked_mode_relaxes(tmp_path: Path, project: Path, mode: str) -> None:
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project))
+    assert await _hook_on(adapter, wrapped, project, permission_mode=mode) == {}
+    assert adapter._bash_boundary_held("t1")
+
+
+async def test_options_in_a_mode_not_checked_are_not_verified(
+    tmp_path: Path, project: Path
+) -> None:
+    """Options that start the session in a mode outside the set leave the
+    boundary unverified, and a hook input that names no mode falls back to
+    the options' mode."""
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project, permission_mode="plan"))
+    assert not _relaxed(adapter)
+    out = await _hook_on(adapter, wrapped, project)
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("F501")
+
+
+def test_a_default_mode_not_checked_in_a_settings_file_is_not_verified(
+    tmp_path: Path, project: Path
+) -> None:
+    _write(
+        project / ".claude" / "settings.json", {"permissions": {"defaultMode": "plan"}}
+    )
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project, setting_sources=["project"]))
+    assert not _relaxed(adapter)
+    _write(
+        project / ".claude" / "settings.json",
+        {"permissions": {"defaultMode": "acceptEdits"}},
+    )
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project, setting_sources=["project"]))
+    assert _relaxed(adapter)
 
 
 def test_options_with_no_settings_or_sandbox_field(
