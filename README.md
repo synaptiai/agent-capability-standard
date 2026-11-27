@@ -429,15 +429,14 @@ async with ClaudeSDKClient(options) as client:
 
 See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for the full integration guide.
 
-**Install the Python package:**
+**Install the Python package:** it is not on PyPI yet. Install it from a clone; the install compiles its Rust core, so it needs Python >= 3.14 and Rust >= 1.88:
 
 ```bash
-pip install grounded-agency
-# Or with SDK support:
-pip install grounded-agency[sdk]
+git clone https://github.com/synaptiai/agent-capability-standard.git
+cd agent-capability-standard && pip install -e ".[sdk]"
 ```
 
-The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.88).
+To adopt the standard in stages, from the validator in CI to a safety layer and an executor, see the [adoption guide](docs/guides/ADOPTION.md).
 
 ---
 
