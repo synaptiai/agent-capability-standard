@@ -117,7 +117,10 @@ planned anyway.
 ## RFC-0002: cross-session agent reliability (Draft, #104)
 
 RFC-0002 is a Draft, so its questions are part of its own design. Each row
-states the answer the RFC could take when it goes forward.
+states the answer the RFC could take when it goes forward. RFC-0002 and
+issue #151 name #104 as its tracking issue, but #104 could not be read on
+2026-11-27: it resolves to no issue, pull request or discussion of this
+repository.
 
 | Q | Question | Proposed disposition | Suggested answer |
 |---|----------|----------------------|------------------|

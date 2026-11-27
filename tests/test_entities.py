@@ -138,6 +138,7 @@ def test_the_merge_vectors_cover_every_reason() -> None:
     }
     assert split - {None} == {
         "too_few_entities",
+        "invalid_entity",
         "invalid_entity_id",
         "unknown_class",
         "class_mismatch",

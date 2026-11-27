@@ -1095,6 +1095,27 @@
         "ok": false,
         "reason": "class_mismatch"
       }
+    },
+    {
+      "name": "child_not_a_record",
+      "about": "A record the split gives must be an entity record, not a bare id.",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        "person:acme/hr/employee/12345-b"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity"
+      }
     }
   ]
 }
