@@ -2466,6 +2466,36 @@ here and marked so.
   script's `apply` line to run there, and once it is on, the sandbox
   keeps commands from writing the user configuration directory. Claude
   Code is started again after the write.
+- Tests: boundary tests that attack the sandbox (#186). They run each
+  route under the sandbox runtime's `srt` command (0.0.82) with the
+  settings `/grounded-setup` computes, and as a control without the
+  sandbox, where it must succeed: writes to each of the layer's records,
+  to the user's and the project's settings files and hook scripts and
+  outside the project (through links, renames of a parent and a record
+  absent at the start), reads of the audit key, the checkpoint key,
+  credential files, token variables and (macOS) the keychain, an unlisted
+  host, local and private addresses and the metadata address, a push to a
+  repository outside the project and over HTTP, and a merge or release
+  through a stand-in `gh`. The records, keys and credential files are
+  also attacked under the setup's `sandbox` keys alone, without the
+  permission rules. A hard link made before the command starts gets past
+  the sandbox on both platforms; the tests mark it as an expected failure.
+  They also record that the runtime ignores a misspelled key, skips a glob
+  on Linux, and shares `/tmp/claude` and `~/.npm/_logs` with the host
+  (`~/.claude/debug` too, which the setup's denial of the user
+  configuration directory takes back). Claude Code tests run routes through `claude -p` in the
+  default, `acceptEdits` and `bypassPermissions` modes, with controls for
+  the audit-log deny rule, `strictAllowlist`, the escape parameter and
+  `excludedCommands`, and with the settings at user scope under a project
+  or command-line settings file that turns the sandbox off, excludes a
+  command or widens the write scope (each gets through, and is marked as
+  an expected failure). New CI jobs run the suite on Ubuntu and macOS on
+  every pull request, and a third runs the Claude Code tests when the
+  repository secret `ANTHROPIC_API_KEY` is set (`hooks/README.md`, "The
+  boundary tests").
+- `/grounded-setup` denies sandboxed reads of each git directory's `acs`
+  directory, which holds the checkpoint key, in `sandbox.filesystem.denyRead`
+  and `sandbox.credentials.files`, as well as by the `Read(...)` rules.
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
