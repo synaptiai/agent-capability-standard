@@ -249,6 +249,29 @@ The reference implementations enforce this by code:
   configuration's `auth` member, a name ending in `_pass`, other vendors'
   token formats, and a JSON escape of any other character; a host
   registers such a credential it holds.
+- Where a token starts, and signed URLs. The Python and TypeScript
+  redactors read a prefix-shaped token (an AWS access key id; a GitHub,
+  Slack, `sk-`, Stripe, Google, GitLab, npm, Vault or SendGrid token; a
+  JWT) where the character before it is not an ASCII letter or digit: after
+  `_`, `-`, `.`, `/`, `:` or a quote. A token in an MCP tool's name
+  (`mcp__srv__ghp_...`) is replaced with its prefix kept
+  (`mcp__srv__[REDACTED]`), in the adapter's call records, their audit
+  records and its diagnostics, and in the binding's trace and the audit
+  records exported from it. A token glued after a letter or digit
+  (`xghp_...`) is not redacted. The Python and TypeScript refusal rule
+  reads the longer prefixes anywhere, so such a glued token is still
+  refused, and reads `sk-` only where a token starts, since its two
+  letters end common words: `feature/task-12345-update-readme-file` and
+  `risk-assessment-for-the-quarter-2026` are not refused. A signed URL's
+  signature is redacted and refused: the value, of 16 or more characters,
+  of an `X-Amz-Signature` (S3 SigV4), `X-Goog-Signature` (Cloud Storage),
+  `sig` (Azure SAS) or `Signature` (S3 SigV2, CloudFront) query parameter,
+  read after `?` or `&` as themselves, percent-encoded (`%3F`, `%26`) or as
+  their JSON escapes, so prose such as `signature=` is kept; whoever holds
+  a signed URL can use it until it expires. The plugin's shell scan
+  (`hooks/secret_scan.sh` and its copies) does not take these two rules:
+  it reads `sk-` anywhere, so it refuses those two slugs, and it refuses
+  no signed URL by its signature.
 - The Python evidence store reads metadata nested too deep for it as JSON
   text redacted first, while its structure can still be read, and keeps it
   whole: a cut could keep part of a secret no redactor then recognises.

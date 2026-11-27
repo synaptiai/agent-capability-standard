@@ -297,6 +297,29 @@ _LONG_RUNS = [
     "a:\\/\\/b:",
     "token\\u003d",
     "\\/",
+    # Prefix-shaped tokens start after `_` and `-` as well (not after an
+    # ASCII letter or digit), and a JWT's run is read to its first `eyJ`
+    # after `_` or `-`; a signed URL's signature is read after `?` or `&`
+    # in any of their forms, and its value stops at each.
+    "_eyJ",
+    "a_eyJ",
+    "_eyJ-",
+    "eyJ_",
+    "_ghp_",
+    "_github_pat_",
+    "_sk-",
+    "-sk-a",
+    "_xoxb-",
+    "_AKIA",
+    "_glpat-",
+    "_SG.a",
+    "&sig=",
+    "?sig=a",
+    "&sig=a%3F",
+    "?Signature=a%26",
+    "&X-Amz-Signature=",
+    "%3FX-Goog-Signature%3D",
+    "\\u0026sig\\u003da",
 ]
 
 
@@ -865,14 +888,20 @@ def test_layer_refuses_persist_data_that_holds_a_credential(
 
 
 @pytest.mark.parametrize(
-    "name",
+    ("name", "secret"),
     [
-        "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
-        "mcp__srv__hk_live_9f8e7d6c5b4a39281706",
+        ("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "ghp_aBc"),
+        ("mcp__srv__hk_live_9f8e7d6c5b4a39281706", "hk_live"),
+        # Unregistered tokens glued after `_` (#148): a token starts after
+        # any character that is not an ASCII letter or digit.
+        ("mcp__srv__ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "ghp_aBc"),
+        ("mcp__srv__AKIAQ7ZX2M4K9T3B8N5W", "AKIAQ7ZX"),
+        ("mcp__srv__sk-proja1B2a1B2a1B2a1B2a1B2a1B2", "sk-proj"),
+        ("mcp__srv__eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_DEF-123", "eyJhbG"),
     ],
 )
 def test_layer_redacts_a_tool_name_that_holds_a_secret(
-    tmp_path: Path, name: str
+    tmp_path: Path, name: str, secret: str
 ) -> None:
     """The name of a call is the model's (or an MCP server's): its call
     record, the audit record exported from it and the diagnostic hold the
@@ -891,7 +920,7 @@ def test_layer_redacts_a_tool_name_that_holds_a_secret(
         + json.dumps([[d.message, d.location] for d in adapter.diagnostics])
         + json.dumps(adapter.export_action_records("s"))
     )
-    assert "ghp_aBc" not in kept and "hk_live" not in kept
+    assert secret not in kept
     (record,) = adapter.export_action_records("s")
     assert "[REDACTED]" in record["tool"]
     assert record["intent"] == f"{record['tool']} call"
