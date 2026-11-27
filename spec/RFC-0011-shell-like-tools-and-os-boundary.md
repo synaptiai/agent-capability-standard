@@ -1,8 +1,8 @@
 # RFC-0011: Shell-like tools and the operating-system boundary
 
-**Status:** Draft
+**Status:** Accepted
 **Target:** Standard v1.2.0
-**Date:** 2026-11-25
+**Date:** 2026-11-27
 **Tracking issue:** [#178](https://github.com/synaptiai/agent-capability-standard/issues/178)
 
 ## Summary
@@ -25,11 +25,9 @@ performing only its worst case (§5.18.2), says that an unverified boundary
 gives the worst case rather than a refusal (§5.18.8), adds a criterion and
 a member to the conformance statement (§10.4,
 `tests/conformance/calls/schema/statement.schema.json`), and lists the
-change in Appendix D. It is a Draft: decision 7 quotes the text it
-proposes, and `spec/STANDARD-v1.2.0.md` carries that text marked as
-proposed by this RFC, binding a claim of class SL once the RFC is Accepted.
-The maintainer decides when it is Accepted, which waits on the reference
-layers meeting it.
+change in Appendix D. Decision 7 quotes the text `spec/STANDARD-v1.2.0.md`
+carries. The rule binds every claim of class SL; both reference layers that
+claim the class meet it.
 
 ## Motivation
 
@@ -285,10 +283,9 @@ call or gives it the worst case, and the existing refusals (F501, F502,
 F504) follow from the worst case. No validator reads a statement, so no new
 code is needed.
 
-### 7) Proposed normative text
+### 7) Normative text
 
-Each passage below is quoted word for word from `spec/STANDARD-v1.2.0.md`,
-which carries it marked as proposed by this RFC.
+Each passage below is quoted word for word from `spec/STANDARD-v1.2.0.md`.
 
 **§2**, two rows in the table of terms of tool-calling hosts, after
 *Execution boundary*:
@@ -308,7 +305,7 @@ actions:
 > performing `checkpoint`.
 
 **§5.18.3**, the paragraph *Classifiers*, followed by the new paragraphs
-*Shell-like tools*, the boundary and its table, and *Status of this rule*:
+*Shell-like tools*, and the boundary and its table:
 
 > **Classifiers.** A layer MAY classify each call of a tool from its
 > arguments (`classifier` names how), as a call whose `method` argument is
@@ -378,11 +375,6 @@ actions:
 > reach the hosts on the allowlist, but not the layer's records, the
 > credentials or a process outside the boundary; a change it makes within
 > the write scope has no checkpoint.
->
-> **Status of this rule.** Every passage of this Standard on shell-like
-> tools or the operating-system boundary (§2, §5.18.2, this section, §5.18.8,
-> §10.4 and D.8) is proposed by RFC-0011, a Draft, and binds a claim of class
-> SL once RFC-0011 is Accepted.
 
 **§5.18.8**, the start of the item *Fail closed*:
 
@@ -413,10 +405,9 @@ and the sentence on what is stated rather than tested ends:
 > and that an operating-system boundary it declares holds (§5.18.3).
 
 **Appendix D** gains D.8, *Shell-like tools and the operating-system
-boundary (RFC-0011, Draft)*:
+boundary (RFC-0011)*:
 
-> **Proposed for 1.2.0** (binds a claim of class SL once RFC-0011 is
-> Accepted; binds safety layers, not workflows):
+> **New in 1.2.0** (binds safety layers, not workflows):
 >
 > - A call of a shell-like tool gets the tool's worst case unless the layer's
 >   conformance statement declares an operating-system boundary for the tool
@@ -436,19 +427,15 @@ boundary (RFC-0011, Draft)*:
 >   `shell_tools`; a class SL criterion for classifying calls (§10.4)
 > - The terms shell-like tool and operating-system boundary (§2)
 
-### 8) When the rule binds, and how a layer records a gap
+### 8) How a layer records a gap
 
-The Standard's text carries the rule now, with a paragraph in §5.18.3
-saying that every passage on shell-like tools or the operating-system
-boundary binds a claim of class SL once this RFC is Accepted. Until then a
-claim of class SL is judged without it.
-
-§10.4's list of what a layer does not apply (`not_applied` in the
-statement schema) covers the rule for shell-like tools as well as the
-checks of §5.18.10, and a layer that lists anything there does not conform.
-Neither reference layer lists anything there: the Python adapter meets the
-rule (below), and `spec/CONFORMANCE.md` states that neither lists
-anything.
+The rule binds every claim of class SL. §10.4's list of what a layer does
+not apply (`not_applied` in the statement schema) covers the rule for
+shell-like tools as well as the checks of §5.18.10, and a layer that lists
+anything there does not conform. Neither reference layer lists anything
+there: the Python adapter meets the rule and the Standard Agents binding
+covers no shell-like tool (below), and `spec/CONFORMANCE.md` states that
+neither lists anything.
 
 ## Backward compatibility
 
@@ -470,19 +457,27 @@ What each reference layer does:
 - **The Python SDK adapter** offers Claude Code's Bash. `wrap_options()`
   turns on Claude Code's sandbox with the four properties in the options
   it builds, unless they carry a sandbox of their own, and adds deny rules
-  for the layer's records. Its classifier relaxes a Bash call (a read-only
-  command, `git stash create`, a restore of a recorded checkpoint, a local
-  file change) only while it has verified, in the options it built and in
-  the other settings files the CLI loads, that the sandbox has each
-  property; every other Bash call gets the worst case. Its statement
-  declares that sandbox for Bash, and `"none"` for Monitor, PowerShell,
-  Skill, Agent and Task, which it gives one worst case whatever their
-  arguments.
+  for the layer's records (#184). Its classifier relaxes a Bash call (a
+  read-only command, `git stash create`, a restore of a recorded
+  checkpoint, a local file change) only while it has verified, in the
+  options it built and in the other settings files the CLI loads, that the
+  sandbox has each property, and only for the CLI its Agent SDK bundles in
+  a version whose settings it checks (Claude Code 2.1.321); every other
+  Bash call gets the worst case. A Bash call the pre-tool-use check gave
+  the worst case is the worst case when it reports back too: it takes no
+  checkpoint. Its statement declares that sandbox for Bash, and `"none"`
+  for Monitor, PowerShell, Skill, Agent and Task, which it gives one worst
+  case whatever their arguments.
 - **The Standard Agents binding** covers no shell-like tool and applies no
   classifier: a binding with a `classifier` gets its worst case. Its
   statement declares `{}`. It conforms unchanged.
 - **The plugin's Claude Code hooks** do not claim class SL and have no
-  statement. Issue #180 brings their Bash relaxation under the same rule.
+  statement. Their pre-tool-use hook relaxes a Bash call only under
+  Claude Code's strict sandbox, which it verifies from the managed, user,
+  project and local settings files (#180), and `/grounded-setup` writes
+  those settings to the user's settings file (#179). The hook cannot read
+  settings given when Claude Code starts, so it does not verify the
+  effective configuration as §5.18.3 requires (open question 3).
 
 A layer that adopts the rule either declares a boundary, verifies it as
 decision 3 states and keeps relaxing where it holds, or gives every call of
@@ -506,7 +501,10 @@ its shell-like tools the worst case and takes checkpoints by another route.
   checks the statement against the mapper: Monitor and PowerShell get an
   unbound tool's worst case, Skill, Agent and Task one gated mapping
   whatever their arguments, and Bash is relaxed only in options the
-  adapter wrapped with its sandbox.
+  adapter wrapped with its sandbox. Its tests also check that a CLI that
+  `cli_path` names, or a bundled CLI of a version it has not checked,
+  leaves the boundary unverified, and that a `git stash create` its
+  pre-tool-use check gave the worst case takes no checkpoint.
 - The binding fixture `offered_classified_tool_counts` names its classified
   tool `batch` instead of `shell`: a fixture cannot say whether a tool is
   shell-like, and under §5.18.2 a shell-like tool with no boundary would not
@@ -514,11 +512,12 @@ its shell-like tools the worst case and takes checkpoints by another route.
 - No binding or call-sequence fixture is added. A fixture cannot run a
   process under operating-system confinement. §10.4 lists the boundary
   among what is stated rather than tested.
-- The boundary itself is tested by the layers that declare one: tests that
-  try, each through several spellings, to write the records, read
-  credentials, reach an unlisted host and leave the boundary through an
-  escape argument or an excluded command, under each platform's sandbox
-  (issue #186).
+- The boundary itself is tested by the layers that declare one:
+  `tests/test_sandbox_boundary.py` tries, each through several spellings,
+  to write the records, read credentials, reach an unlisted host and leave
+  the boundary through an escape argument or an excluded command, under
+  the sandbox runtime on macOS (Seatbelt) and Linux (bubblewrap), in CI,
+  with a control in which each route succeeds without the sandbox (#186).
 
 ## Alternatives considered
 
@@ -558,9 +557,6 @@ its shell-like tools the worst case and takes checkpoints by another route.
   layer with no boundary conforms by giving the worst case, and a layer
   that cannot verify one is in the same position. The worst case still
   runs only with a checkpoint and approval.
-- **Recording a layer's gap in `not_applied` while the RFC is a Draft.**
-  Rejected: under the text that binds today such a layer conforms;
-  decision 8 says when the rule binds.
 - **Naming an unreadable configuration source as a host gap.** Rejected: a
   host gap is a case where a call runs without the layer's decision; here
   the layer decides, and an unverified boundary would let it relax on a
@@ -570,25 +566,50 @@ its shell-like tools the worst case and takes checkpoints by another route.
 
 1. **User scope.** Do sandbox settings in a user's own settings file take
    effect, the network settings in particular, and can a project's settings
-   file override them? The test of the boundary ran with settings given at
-   start and in the project's files, not in a user's file. The answer decides
-   where a layer's setup writes the settings and which sources a layer must
-   read to verify them.
+   file override them? **Answered** by a test with Claude Code 2.1.332 on
+   macOS on 2026-11-25, with a second, isolated login whose own
+   `settings.json` held the strict sandbox (reported on #141). Every
+   sandbox key took effect from the user's file, the network allowlist
+   included. From the project's `.claude/settings.json`, `enabled: false`,
+   `excludedCommands` (even under the user's `allowUnsandboxedCommands:
+   false`) and `filesystem.allowWrite` each took effect over the user's
+   strict sandbox; `allowUnsandboxedCommands: true`, `strictAllowlist:
+   false`, an `allowedDomains` entry and an `Edit` allow rule over a deny
+   rule had no effect. Only managed settings rank above a project's file.
+   So a layer's setup writes the settings to the user's file
+   (`/grounded-setup`, #179), and a layer reads the project's and the local
+   files as well, to detect the three overrides (#180, and the adapter's
+   check of the files its options load).
 2. **Platforms without a sandbox.** On a host with no operating-system
    sandbox (native Windows, a host that cannot start one), every shell call
    gets the worst case. Should the Standard name containers or virtual
    machines as the expected boundary there, or leave the mechanism to the
-   statement?
+   statement? Open: #216.
 3. **Configuration a layer cannot see.** The plugin's hooks cannot read
    settings given when Claude Code starts, and hooks get no environment
    variable that says the sandbox is on. Under decision 3 the hooks then
-   never verify the boundary. Is a host mechanism that reports the effective
-   sandbox to the layer needed, or should such a source be ruled out by the
-   layer's setup?
+   never verify the boundary. The boundary tests confirmed the gap: a
+   command-line `--settings` file's `excludedCommands` let a command run
+   outside the sandbox under the setup's user settings. Is a host mechanism
+   that reports the effective sandbox to the layer needed, or should such a
+   source be ruled out by the layer's setup? Open: #217. The Python adapter
+   does not have this gap: it supplies the `--settings` value itself and
+   reads the other sources the CLI loads.
 4. **The plugin's checkpoint route.** The plugin takes checkpoints only
-   through Bash's `git stash create`, which is a classified shell call. A
-   plugin that gives every Bash call the worst case needs another route to a
-   checkpoint, such as a checkpoint tool it serves.
-5. **Linux and other permission modes.** The boundary was tested on macOS
-   only, and in one permission mode. The properties are the same on Linux;
-   whether Claude Code's Linux sandbox meets each of them is to be tested.
+   through Bash's `git stash create`, which is a classified shell call. It
+   relaxes that call only under the strict sandbox it verifies (#180);
+   without it, no checkpoint can be taken and every gated call is refused
+   with F501. Should the plugin serve a checkpoint tool, or count the host's
+   own checkpoints, so that a session without the sandbox can still take
+   one? Open: #218.
+5. **Linux and other permission modes.** **Partly answered.** The sandbox
+   runtime that Claude Code uses on Linux (srt 0.0.82, bubblewrap) refused
+   every write, credential and network route of the boundary tests, in
+   containers and in CI on `ubuntu-latest` on 2026-11-27, except a hard
+   link made before a command starts, which both Seatbelt and bubblewrap
+   let through and the layers refuse instead. Under Claude Code 2.1.332 on
+   macOS the routes Claude Code decides itself (the escape argument,
+   excluded commands, the precedence of settings files, the network
+   callback) were tested in the default, `acceptEdits` and
+   `bypassPermissions` modes. Claude Code itself has not been run on Linux,
+   and `plan` mode has not been tested. Open: #186.

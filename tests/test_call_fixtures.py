@@ -158,7 +158,7 @@ def test_the_statement_matches_the_adapter(
     assert "other MCP servers" not in without
     assert "PostToolUse hook checks the result of any other" in without
     assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
-    # Section 5.18.3 (RFC-0011, Draft): Bash runs under the sandbox the
+    # Section 5.18.3 (RFC-0011): Bash runs under the sandbox the
     # adapter turns on and verifies; the other shell-like tools of Claude
     # Code declare no boundary, and get one worst case whatever their input.
     shell = statement["shell_tools"]

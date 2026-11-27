@@ -1,5 +1,5 @@
 """A live session under the adapter's default sandbox (STANDARD 1.2.0
-section 5.18.3, as RFC-0011 proposes it).
+section 5.18.3, RFC-0011).
 
 Opt-in: it starts the Claude Code CLI the Agent SDK bundles, which needs a
 logged-in Claude Code or an API key, so it runs only with

@@ -31,7 +31,7 @@ RFCs were accepted; for a released version, its release date.
 
 | Version | Date | Status |
 |---------|------|--------|
-| [1.2.0](STANDARD-v1.2.0.md) | 2026-11-15 | Candidate Standard (unreleased) |
+| [1.2.0](STANDARD-v1.2.0.md) | 2026-11-27 | Candidate Standard (unreleased) |
 | [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Standard (released with plugin 2.0.0) |
 | [1.0.0](STANDARD-v1.0.0.md) | 2026-01-24 | Supported (released with plugin 1.0.0) |
 
@@ -40,8 +40,9 @@ Standard 1.2.0 is accepted by
 [RFC-0006](RFC-0006-host-protocol-approval-and-runs.md),
 [RFC-0007](RFC-0007-delegation-catalogs-and-diagnostics.md),
 [RFC-0008](RFC-0008-evidence-grounding-and-secrets.md),
-[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
-[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md). It adds:
+[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md),
+[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md) and
+[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md). It adds:
 
 - rules for a safety layer over the tool calls a model chooses, with a
   host-neutral tool binding record and a conformance class for safety layers;
@@ -57,13 +58,10 @@ Standard 1.2.0 is accepted by
   destination policies, and memory scopes;
 - domain profiles applied by executors, safety layers and validators, the
   trust arithmetic, ontology versions and the schema dialect of capability
-  contracts.
-
-Its text also carries the rule that
-[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md), a Draft, proposes
-for shell-like tools: a safety layer gives every call of a shell, an
-interpreter or a REPL the tool's worst case unless the call runs under an
-operating-system boundary the layer declares and verifies.
+  contracts;
+- a rule for shell-like tools: a safety layer gives every call of a shell,
+  an interpreter or a REPL the tool's worst case unless the call runs under
+  an operating-system boundary the layer declares and verifies.
 
 [Appendix D](STANDARD-v1.2.0.md#appendix-d-changes-from-110) of the 1.2.0 text
 lists every change from 1.1.0.
@@ -91,8 +89,8 @@ and targets a later 1.x version.
 title: The Standard's versions
 ---
 flowchart LR
-  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the released Standard; 1.2.0, accepted through RFC-0005 to RFC-0010, is a Candidate Standard; RFC-0002 is a draft for a later 1.x version.
-  v10["1.0.0: Supported"] --> v11["1.1.0: Standard, via RFC-0003 and RFC-0004"] --> v12["1.2.0: Candidate Standard, via RFC-0005 to RFC-0010"] --> v1x["Later 1.x: RFC-0002 in draft"]
+  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the released Standard; 1.2.0, accepted through RFC-0005 to RFC-0011, is a Candidate Standard; RFC-0002 is a draft for a later 1.x version.
+  v10["1.0.0: Supported"] --> v11["1.1.0: Standard, via RFC-0003 and RFC-0004"] --> v12["1.2.0: Candidate Standard, via RFC-0005 to RFC-0011"] --> v1x["Later 1.x: RFC-0002 in draft"]
 ```
 
 ## Plugin and tools

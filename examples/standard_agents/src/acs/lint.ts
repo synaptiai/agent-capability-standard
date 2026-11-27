@@ -100,7 +100,9 @@ function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
  *   the prompt offers no tool of that capability, is V102 (error): the model
  *   could never get the call accepted. A host that takes checkpoints itself
  *   (`hostTakesCheckpoints`), or an offered tool whose binding names a
- *   `classifier`, counts as performing it.
+ *   `classifier`, counts as performing it. A shell-like tool performs only
+ *   its worst case where no operating-system boundary is declared for it
+ *   (§5.18.2); the binding covers none, and this lint cannot tell one.
  *
  * A tool defined here is checked with the flags it computed, those its
  * domain profiles and the layer's raise included (§5.21.3), which its

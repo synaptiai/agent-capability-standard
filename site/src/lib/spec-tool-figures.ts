@@ -76,8 +76,6 @@ export function classificationCaption(rows: ClassRow[]): string {
 export interface ShellFlow {
   /** The cases the section lists in which the boundary is unverified for a call. */
   unverified: number;
-  /** True while the section says the rule is proposed by a Draft RFC. */
-  draft: string | null;
 }
 
 const SHELL_PHRASES = [
@@ -102,8 +100,7 @@ export function shellFlow(text: string, where: string): ShellFlow {
   const items = list.children.map((li) => squash(toString(li)));
   if (!items[0]!.startsWith('a source is one the layer can neither read nor supply itself')) throw new Error(`${where}: §5.18.3's list no longer starts with the unreadable source case`);
   if (!items.at(-1)!.includes('the call gets the worst case, not R407')) throw new Error(`${where}: §5.18.3's list no longer ends with "the call gets the worst case, not R407"`);
-  const status = /Status of this rule\. .{0,400}? is proposed by (RFC-\d{4}), a Draft/.exec(sectionProse(text, where));
-  return { unverified: items.length, draft: status ? status[1]! : null };
+  return { unverified: items.length };
 }
 
 /**
@@ -130,8 +127,7 @@ export function shellSteps(f: ShellFlow): { start: string; checks: { question: s
 export function shellFlowCaption(f: ShellFlow): string {
   return (
     `A call of a shell-like tool gets the tool's worst case unless both checks pass. ` +
-    `The boundary is unverified in each of the ${plural(f.unverified, 'case', 'cases')} listed above, the last of which is a verification that fails or cannot be completed: that call gets the worst case, not R407.` +
-    (f.draft ? ` The rule is proposed by ${f.draft}, a Draft.` : '')
+    `The boundary is unverified in each of the ${plural(f.unverified, 'case', 'cases')} listed above, the last of which is a verification that fails or cannot be completed: that call gets the worst case, not R407.`
   );
 }
 

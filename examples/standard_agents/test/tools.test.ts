@@ -175,8 +175,11 @@ describe('the offered-tool checks', () => {
     const { checkpoint_config: _cp, ...withoutCheckpoint } = tools;
     expect(lintPromptTools('p', withoutCheckpoint).map((d) => d.code)).toEqual(['V102']);
     expect(lintPromptTools('p', withoutCheckpoint, { hostTakesCheckpoints: true })).toEqual([]);
-    const shell = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', classifier: 'shell' } } };
-    expect(lintPromptTools('p', { ...withoutCheckpoint, shell })).toEqual([]);
+    // Not a shell-like tool: under §5.18.2 a shell-like tool with no
+    // declared operating-system boundary performs only its worst case, and
+    // the binding covers none (its statement's `shell_tools` is `{}`).
+    const batch = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', classifier: 'batch' } } };
+    expect(lintPromptTools('p', { ...withoutCheckpoint, batch })).toEqual([]);
   });
 
   it('report an unbound tool as W617 and keep KEYS intact', () => {

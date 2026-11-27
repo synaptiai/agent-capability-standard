@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/statement.schema.json",
   "title": "Safety-layer conformance statement (Agent Capability Standard 1.2.0, section 10.4)",
-  "description": "What a safety layer states about itself for class SL (section 10.4): what it covers, its scope and boundaries, the operating-system boundary of each shell-like tool, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, the covered calls whose results carry no capability output, and any check of section 5.18.10, or the rule for shell-like tools of section 5.18.3, it does not apply. The rule for shell-like tools and the member shell_tools are proposed by RFC-0011, a Draft, and bind a claim of class SL once RFC-0011 is Accepted.",
+  "description": "What a safety layer states about itself for class SL (section 10.4): what it covers, its scope and boundaries, the operating-system boundary of each shell-like tool, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, the covered calls whose results carry no capability output, and any check of section 5.18.10, or the rule for shell-like tools of section 5.18.3, it does not apply.",
   "type": "object",
   "required": [
     "layer",
@@ -88,7 +88,7 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "not_applied": {
-      "description": "Each check of section 5.18.10, or the rule for shell-like tools of section 5.18.3 once RFC-0011 is Accepted, the layer does not apply, with what follows from it. A layer with any does not conform to class SL until it applies them.",
+      "description": "Each check of section 5.18.10, or the rule for shell-like tools of section 5.18.3, the layer does not apply, with what follows from it. A layer with any does not conform to class SL until it applies them.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     }

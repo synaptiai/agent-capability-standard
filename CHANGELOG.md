@@ -7,8 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 Standard 1.2.0 (Candidate Standard) and capability ontology 2.2.0, accepted
-by RFC-0005 to RFC-0010 and carrying the rule for shell-like tools that
-RFC-0011, a Draft, proposes, with their implementation: the reference validator
+by RFC-0005 to RFC-0011, with their implementation: the reference validator
 and executor, the Python SDK, the plugin's hooks and skills, the new
 TypeScript package `@synaptiai/acs-core` and the Standard Agents binding.
 They resolve the findings of the Standard Agents mapping, which this release
@@ -136,8 +135,13 @@ here and marked so.
 - Python SDK, `wrap_options()`: Bash runs under Claude Code's sandbox by
   default, and the Bash classifier relaxes a call (a read-only command,
   `git stash create`, a recorded restore, a local change without `send`)
-  only while that sandbox is verified for it (STANDARD 1.2.0 §5.18.3, as
-  RFC-0011 proposes it). Where the options carry no sandbox of their own,
+  only while that sandbox is verified for it (STANDARD 1.2.0 §5.18.3,
+  RFC-0011), and only for the CLI the Agent SDK bundles in a version whose
+  settings the adapter checks (Claude Code 2.1.321, bundled with
+  `claude-agent-sdk` 0.2.180): with `cli_path`, or another SDK release,
+  every Bash call is its worst case. A Bash call the pre-tool-use check
+  gave the worst case takes no checkpoint when it reports back, even where
+  the sandbox is verified by then. Where the options carry no sandbox of their own,
   `wrap_options()` sets a strict one: on, refusing to start when it cannot
   sandbox (`failIfUnavailable`), no unsandboxed commands, no excluded
   commands, a network allowlist of
@@ -2257,9 +2261,8 @@ here and marked so.
   Appendix D.7. The entries on domain profiles, trust, entity ids, cited
   versions and WebAssembly below implement it.
 - Standard 1.2.0, shell-like tools and the operating-system boundary
-  ([RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft):
-  the text it proposes for §2, §5.18.2, §5.18.3, §5.18.8, §10.4 and D.8,
-  which binds a claim of class SL once RFC-0011 is Accepted. A safety
+  ([RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md)): the
+  text of §2, §5.18.2, §5.18.3, §5.18.8, §10.4 and D.8. A safety
   layer gives every call of a shell-like tool (a shell, an interpreter, a
   REPL, or a tool that runs code its arguments supply) the tool's worst
   case unless its conformance statement declares an operating-system
@@ -2584,8 +2587,7 @@ here and marked so.
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
   command, `git stash create`, a restore of a recorded checkpoint) only
   under Claude Code's strict sandbox, which it verifies for the call from
-  the settings files it can read (#180; Standard 1.2.0 §5.18.3 as RFC-0011
-  proposes it): from user or managed settings, `sandbox.enabled`,
+  the settings files it can read (#180; Standard 1.2.0 §5.18.3, RFC-0011): from user or managed settings, `sandbox.enabled`,
   `failIfUnavailable` and `network.strictAllowlist` true and
   `allowUnsandboxedCommands` false, no excluded commands, `allowRead` or
   other route out of the sandbox, an allowlist of DNS names only (no IP

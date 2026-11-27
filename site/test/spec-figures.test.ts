@@ -531,7 +531,6 @@ describe('§5.18.3 classification figures', () => {
     const items = sec.filter((l) => l.startsWith('- ')).length;
     const f = C.shellFlow(text, STD);
     expect(f.unverified).toBe(items);
-    expect(f.draft).toBe(/is proposed by (RFC-\d{4}), a Draft/.exec(sec.join(' '))?.[1] ?? null);
     expect(() => C.shellFlow(text.replace('the call gets the worst case, not R407', 'the call gets R407'), STD)).toThrow(/not R407/);
     expect(() => C.shellFlow(text.replace('Any classification other than the worst case relaxes', 'A classification relaxes'), STD)).toThrow(/no longer says/);
   });

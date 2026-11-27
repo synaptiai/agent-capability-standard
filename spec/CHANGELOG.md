@@ -4,14 +4,13 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 
 ## v1.2.0 (Candidate Standard, unreleased)
 
-### Added — Standard v1.2.0 (Candidate Standard), RFC-0005 to RFC-0010, and RFC-0011 (Draft)
+### Added — Standard v1.2.0 (Candidate Standard), RFC-0005 to RFC-0011
 - **[STANDARD-v1.2.0](STANDARD-v1.2.0.md)** with ontology 2.2.0. Every change
   is backward compatible: a workflow valid under 1.1.0 is valid under 1.2.0
   and runs the same way unless its host opts in to a new feature, and a
   change that would invalidate a 1.1 workflow is phased in as a warning.
   v1.0.0 and v1.1.0 remain supported. Appendix D of v1.2.0 lists every
-  change; D.1 to D.7 follow the RFCs below, all six Accepted, and D.8
-  follows RFC-0011, a Draft:
+  change; D.1 to D.8 follow the RFCs below, all seven Accepted:
   - **[RFC-0005](RFC-0005-tool-calling-hosts.md)**, tool-calling hosts
     (§5.18, D.1): tool bindings, unbound and composite tools, checkpoints
     and approval over calls, refusals and records, text-only results, the
@@ -42,10 +41,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
     and validators, the trust score and conflict resolution, ontology
     versions, version declaration with the start operation's `header`, and
     the contract schema dialect.
-  - **[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md)** (Draft),
+  - **[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md)**,
     shell-like tools and the operating-system boundary (§2, §5.18.2,
-    §5.18.3, §5.18.8, §10.4, D.8), which binds a claim of class SL once
-    RFC-0011 is Accepted: a layer gives every call of a shell-like tool (a
+    §5.18.3, §5.18.8, §10.4, D.8): a layer gives every call of a shell-like tool (a
     shell, an interpreter, a REPL, or a tool that runs code its arguments
     supply) the tool's worst case unless its conformance statement declares
     an operating-system boundary for the tool and the layer has verified by

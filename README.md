@@ -9,7 +9,7 @@
 
 **Documentation:** [acs.synapti.ai](https://acs.synapti.ai/) has the specification, a page for every capability, workflow and domain, and search. Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
 
-> **Versioning:** The spec version tracks the standard itself: v1.2.0 is a Candidate Standard, accepted by RFC-0005 to RFC-0010 and not yet released; [v1.1.0](spec/STANDARD-v1.1.0.md) is the released Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) is Supported. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version tracks the standard itself: v1.2.0 is a Candidate Standard, accepted by RFC-0005 to RFC-0011 and not yet released; [v1.1.0](spec/STANDARD-v1.1.0.md) is the released Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) is Supported. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -133,9 +133,8 @@ as before. It adds:
   layers, SL ([§10.4](spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)),
   which the [Python SDK adapter](docs/integrations/claude_agent_sdk.md) and
   the [Standard Agents binding](docs/integrations/standard_agents.md) claim.
-  The Standard also carries the rule that
-  [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), a Draft,
-  proposes: a layer gives every call of a shell-like tool (a shell, an
+  The Standard also carries the rule of
+  [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md): a layer gives every call of a shell-like tool (a shell, an
   interpreter) the tool's worst case unless the call runs under an
   operating-system boundary the layer declares and verifies. The adapter
   runs Bash under Claude Code's sandbox by default and relaxes a Bash call
@@ -553,4 +552,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](s
 
 ---
 
-**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0010, not yet released); v1.1.0, released 2026-10-28, is the released Standard; v1.0.0, released 2026-01-24, is Supported. [GOVERNANCE](spec/GOVERNANCE.md#standard-versions) defines these statuses.
+**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0011, not yet released); v1.1.0, released 2026-10-28, is the released Standard; v1.0.0, released 2026-01-24, is Supported. [GOVERNANCE](spec/GOVERNANCE.md#standard-versions) defines these statuses.

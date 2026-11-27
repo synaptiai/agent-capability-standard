@@ -6,12 +6,9 @@
 [RFC-0006](RFC-0006-host-protocol-approval-and-runs.md),
 [RFC-0007](RFC-0007-delegation-catalogs-and-diagnostics.md),
 [RFC-0008](RFC-0008-evidence-grounding-and-secrets.md),
-[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
-[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); this text
-also carries the rule for shell-like tools that
-[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md), a Draft, proposes
-(§2, §5.18.2, §5.18.3, §5.18.8, §10.4), which binds a claim of class SL once
-RFC-0011 is Accepted; the reference validator and executor implement §4, §5
+[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md),
+[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md) and
+[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md); the reference validator and executor implement §4, §5
 and §9–§11 and claim class EX (§10.5); the Python SDK adapter and the
 Standard Agents binding implement §5.18 and claim class SL (§10.4), and the
 adapter relaxes a Bash call only under the operating-system boundary it
@@ -19,7 +16,7 @@ declares and verifies (§5.18.3); the executor and both layers check
 grounding (§5.20) and apply domain profiles (§5.21); `grounded_agency`
 implements §7.1's entity ids and §8's arithmetic; §7.2 and §7.3 are not
 implemented
-**Date:** 2026-11-15
+**Date:** 2026-11-27
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
 
 ---
@@ -2551,11 +2548,6 @@ reach the hosts on the allowlist, but not the layer's records, the
 credentials or a process outside the boundary; a change it makes within
 the write scope has no checkpoint.
 
-**Status of this rule.** Every passage of this Standard on shell-like
-tools or the operating-system boundary (§2, §5.18.2, this section, §5.18.8,
-§10.4 and D.8) is proposed by RFC-0011, a Draft, and binds a claim of class
-SL once RFC-0011 is Accepted.
-
 **Control-only tools.** A record with `control: true` has no member but
 `tool`, `ontology`, `standard`, `control` and `x-` members (else S303). Its
 calls return no capability output and are never refused: no check of this
@@ -4979,7 +4971,7 @@ same expression and whose action escalates to a handler (§5.12).
 - [RFC-0008: Evidence, Grounding and Secrets](RFC-0008-evidence-grounding-and-secrets.md)
 - [RFC-0009: Checkpoint, Rollback, Send and Memory](RFC-0009-checkpoint-rollback-send-memory.md)
 - [RFC-0010: Domain Profiles, Trust, Versioning and Schema Dialect](RFC-0010-profiles-trust-versioning-and-dialect.md)
-- [RFC-0011: Shell-like tools and the operating-system boundary](RFC-0011-shell-like-tools-and-os-boundary.md) (Draft)
+- [RFC-0011: Shell-like tools and the operating-system boundary](RFC-0011-shell-like-tools-and-os-boundary.md)
 - [Agent Skills specification](https://agentskills.io/specification) (the skill format of the reference plugin)
 - [Common Expression Language](https://github.com/google/cel-spec)
 - [Whitepaper: Grounded Agency](WHITEPAPER.md)
@@ -5367,10 +5359,9 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 - The terms domain profile, schema dialect and entity id, and the trust
   score defined by its formula (§2)
 
-### D.8 Shell-like tools and the operating-system boundary (RFC-0011, Draft)
+### D.8 Shell-like tools and the operating-system boundary (RFC-0011)
 
-**Proposed for 1.2.0** (binds a claim of class SL once RFC-0011 is
-Accepted; binds safety layers, not workflows):
+**New in 1.2.0** (binds safety layers, not workflows):
 
 - A call of a shell-like tool gets the tool's worst case unless the layer's
   conformance statement declares an operating-system boundary for the tool
