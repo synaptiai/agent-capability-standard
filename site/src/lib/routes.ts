@@ -425,6 +425,7 @@ export function buildRoutes(): Route[] {
     ...[
       [`${res}/failure_taxonomy.md`, 'Failure taxonomy'],
       [`${res}/replanning_capabilities.md`, 'Replanning capabilities'],
+      [`${res}/safety_layer_failure_classes.md`, 'Safety-layer failure classes'],
       [`${res}/analysis/OASF_comparison.md`, 'OASF comparison'],
       [`${res}/analysis/capability_mapping.md`, 'Capability mapping'],
     ].map(([f, t]) => prose(f!, `/background/research/${kebab(f!.split('/').at(-1)!)}/`, t!, 'Research')),

@@ -1,0 +1,17 @@
+{
+  "description": "The claims planted in runs.json, by run id and claim position (premises/<i> or chain/<i>), with the verdict a faithful checker must give: unsupported (no cited anchor states it) or contradicted (the cited anchors, the run's evidence or its action records state otherwise). Every claim not listed here is faithful. The checker never reads this file; only the gate does.",
+  "planted": {
+    "vendor-selection": {
+      "premises/1": "contradicted",
+      "premises/2": "unsupported"
+    },
+    "lab-alert": {
+      "premises/1": "unsupported",
+      "chain/2": "contradicted"
+    },
+    "line-stop": {
+      "premises/1": "unsupported",
+      "chain/0": "contradicted"
+    }
+  }
+}
