@@ -1000,6 +1000,19 @@ here and marked so.
   release that carries this is a MAJOR version (3.0.0). No workflow,
   ontology or schema changes. The `layer` frontmatter key is removed from
   the 13 skills that had it (the ontology gives a capability's layer).
+- Plugin hooks (released with plugin 3.0.0, Changed): without Claude
+  Code's strict sandbox, every Bash call needs a checkpoint and approval,
+  read-only commands included, and `git stash create` and a restore are
+  gated calls too, so no checkpoint can be taken through Bash and every
+  gated call is refused with F501 until the sandbox is set up. The hook
+  also refuses the agent's own edits to the settings files, so add the
+  strict sandbox, the deny rules and the credential denials listed in
+  `hooks/README.md` (The strict sandbox) to `~/.claude/settings.json`
+  yourself, outside Claude Code, and start it again. The hook verifies them
+  from the managed, user, project and local settings files; a project or
+  local file that turns the sandbox off, excludes a command, widens what it
+  can write or read, or names a command that runs outside it turns the
+  relaxation off.
 - Plugin hooks (released with plugin 3.0.0, Added): while a file under the
   git directory's `acs/` has a hard link outside the records, the
   PreToolUse hook blocks every call with F504, reads included; while a file
@@ -2404,6 +2417,28 @@ here and marked so.
   that names the server otherwise) (`hooks/README.md`, "Remote writes").
 
 ### Changed
+- Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
+  command, `git stash create`, a restore of a recorded checkpoint) only
+  under Claude Code's strict sandbox, which it verifies for the call from
+  the settings files it can read (#180; Standard 1.2.0 §5.18.3 as RFC-0011
+  proposes it): from user or managed settings, `sandbox.enabled`,
+  `failIfUnavailable` and `network.strictAllowlist` true and
+  `allowUnsandboxedCommands` false, no excluded commands, `allowRead` or
+  other route out of the sandbox, an allowlist of DNS names only (no IP
+  literal, loopback or metadata host), the token variables denied, and
+  denials of writes to the layer's records, the settings files, the user
+  configuration directory, the hook scripts, the audit key and the
+  project's `.mcp.json`, and of reads of the audit key, `~/.ssh`, gh's and
+  git's token files and the keychains; neither
+  `enableAllProjectMcpServers` nor `enabledMcpjsonServers` in any scope;
+  no project or local file changing the sandbox other than to narrow it,
+  allowing `Edit` or `Read`, or naming a command that runs outside it; and
+  a call that does not set `dangerouslyDisableSandbox`. Every other Bash
+  call is a gated `mutate`, and its refusal lists why and where the
+  settings are described. The
+  hook cannot see `--settings` or `--setting-sources` given when Claude
+  Code starts, and no environment variable tells a hook the sandbox is on
+  (`hooks/README.md`, `spec/SECURITY.md` §5.5).
 - The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and
   ontology 2.2.0, key `checkpoint_policy` by capability id or `"*"`, and
   list anchor kinds as `required_anchor_types`. The documentation and the

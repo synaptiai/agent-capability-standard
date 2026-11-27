@@ -301,7 +301,11 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   and the hooks and MCP servers a subagent's definition names, run with no
   hook seeing them)`. Loading the checkpoint skill takes no checkpoint: run
   `git stash create` first.
-- `Bash`: a command over 4096 bytes is `mutate`, decided before anything
+- `Bash`: every call is `mutate` unless the hook verifies Claude Code's
+  strict sandbox for it ([The strict sandbox](#the-strict-sandbox), below);
+  without it, `git stash create` and a restore are `mutate` too, so no
+  checkpoint can be taken through Bash. Under it, the classes below apply.
+  A command over 4096 bytes is `mutate`, decided before anything
   else is done with it, so no reading runs into the hook's time limit (a
   command padded with 50,000 blanks once took 44 seconds to trim). A command
   with any of `` ; & | < > $ ` ( ) { } \ `` or a line
@@ -709,6 +713,203 @@ anchor is not kept) until it is removed.
 The hooks write a new marker and a new head in `.claude/checkpoints/`, and
 new entries, keys and anchors in `acs/`, then rename them onto the record,
 so no file a hook writes is outside the rules before it becomes a record.
+
+### The strict sandbox
+
+The pre-tool-use hook lets a Bash call run with less than the worst case
+(a read-only command with no checkpoint or approval, `git stash create` as
+a checkpoint, a restore of a recorded checkpoint as a rollback) only when
+Claude Code runs it under an operating-system boundary the hook has
+verified for that call (STANDARD 1.2.0 §5.18.3, as RFC-0011 proposes it).
+Otherwise the call is a gated `mutate`: it needs a checkpoint marker and
+approval. Without the strict sandbox no checkpoint can be taken through
+Bash, so every gated call is refused with `F501 CHECKPOINT_REQUIRED:`,
+whose reason lists why the sandbox is not verified (up to six reasons).
+The hook also refuses the agent's own edits to the settings files, so the
+person adds the settings below to their user settings file outside the
+session and starts Claude Code again.
+
+The hook reads the settings files Claude Code reads, with `jq`:
+
+| Scope | Files |
+|-------|-------|
+| Managed | `managed-settings.json`, then `managed-settings.d/*.json` (not hidden, in name order), in `/Library/Application Support/ClaudeCode/` on macOS and `/etc/claude-code/` on Linux |
+| User | `settings.json` in `CLAUDE_CONFIG_DIR`, else in `~/.claude/` |
+| Project | `.claude/settings.json` in the project directory |
+| Local | `.claude/settings.local.json` in the project directory, at the repository's top level and at the main checkout's root (Claude Code reads it there in a git repository and a worktree) |
+
+A file that exists must be a regular file that parses as a JSON object;
+otherwise the sandbox is not verified. In a user or managed file, the
+`sandbox`, `permissions`, `env` and `hooks` keys must have the types Claude
+Code accepts (booleans, lists of strings, `credentials` lists of objects,
+port numbers, objects), since Claude Code ignores a whole file with a value
+of the wrong type. Where a managed source the hook does not read is
+present, the sandbox is not verified either: the macOS managed preferences
+domain `com.anthropic.claudecode` (in `/Library/Managed Preferences/`), the
+server-managed settings cache (`remote-settings.json` in the user settings
+directory), and, under WSL, the Windows policy chain. The system is decided
+from files only the system installs (`/System/Library/CoreServices` on
+macOS, `/proc/version` on Linux), and `OSTYPE` must agree with it, since
+bash takes `OSTYPE` from the environment. On a system other than macOS and
+Linux, Claude Code has no sandbox.
+
+The conditions count only from user and managed settings, merged as Claude
+Code merges them (managed over user, lists joined), so no repository file
+can make a call more relaxed:
+
+- `sandbox.enabled: true`, `sandbox.failIfUnavailable: true`,
+  `sandbox.allowUnsandboxedCommands: false` and
+  `sandbox.network.strictAllowlist: true`;
+- none of `sandbox.excludedCommands`, `sandbox.filesystem.disabled`,
+  `sandbox.filesystem.allowRead`, `sandbox.network.allowAllUnixSockets`,
+  `allowUnixSockets`, `allowLocalBinding`, `allowMachLookup`,
+  `httpProxyPort` or `socksProxyPort`, `sandbox.allowAppleEvents`,
+  `allowNestedUserNamespaces`, `enableWeakerNestedSandbox` or
+  `enableWeakerNetworkIsolation` (an empty list or `false` is fine): each
+  runs a command outside the sandbox, lets a sandboxed command reach a
+  process outside it, routes around the network allowlist, or (`allowRead`)
+  reopens a path that a deny closes;
+- every `sandbox.network.allowedDomains` entry a dotted DNS name in lower
+  case whose last label is alphabetic, optionally with `*.` before it and
+  `:port` after it, and not a loopback, link-local, metadata or local-use
+  name (`localhost`, `*.local`, `*.internal`, `metadata.goog`, ...): an IP
+  literal, a one-label name or `*` opens a route to a process outside the
+  boundary or to every host;
+- `sandbox.credentials.envVars` entries `{"name": ..., "mode": "deny"}` for
+  `GH_TOKEN` and `GITHUB_TOKEN`, and for `AUDIT_HMAC_KEY` while it is set;
+- a denial of each of these paths:
+  - writes to the records, and reads of the git directories' records, as
+    `grounded_agency/layer_records.py` gives them for the project (above);
+  - writes to the project's `.claude/settings.json` and every local
+    settings file in the table, the project's `.claude/hooks/`, the
+    plugin's hooks directory (where the running hook is, links resolved),
+    the user configuration directory (`CLAUDE_CONFIG_DIR` or `~/.claude`:
+    the user settings, plugins, agents, commands, skills and, with
+    `CLAUDE_CONFIG_DIR`, `.claude.json`) and, without `CLAUDE_CONFIG_DIR`,
+    `~/.claude.json` (the user's tool servers): a command that writes them
+    changes what the next session, hook or tool server runs;
+  - reads and writes of the audit key file, `~/.config/acs/audit.key`;
+  - reads of the user's credentials: `~/.ssh/`, `~/.config/gh/hosts.yml`,
+    `~/.git-credentials` and, on macOS, `~/Library/Keychains/` and
+    `/Library/Keychains/`;
+  - writes to the project directory, where it holds a `.mcp.json` (and to
+    the repository's top level, where that holds one): the tool servers it
+    names run outside the sandbox from code in the repository; where there
+    is none, writes to the `.mcp.json` path itself, so that no sandboxed
+    command can create one for the next session to start;
+- neither `enableAllProjectMcpServers: true` nor `enabledMcpjsonServers`:
+  either starts the tool servers a `.mcp.json` names with no prompt.
+
+A path is denied by a `permissions.deny` rule written `Tool(//<absolute
+path>)` for a file, or `Tool(//<directory>/**)` for a directory or for any
+directory that holds the path (`Edit` for writes, `Read` for reads), or by
+an entry of `sandbox.filesystem.denyWrite` (writes) or `denyRead` (reads)
+that is the absolute path or a directory that holds it, written literally.
+Home paths count under the home directory as written and as resolved;
+project paths under the project directory as written and as resolved, as
+for the records. The plugin's hooks directory changes with each plugin
+version, so a rule over a directory above it (the plugin cache) keeps
+covering it. A rule or entry written another way (`~/`, `./`, a relative
+path, another glob, a bare tool name) does not count. Under
+`allowManagedPermissionRulesOnly` in managed settings, only managed rules
+and entries count. A user `settings.json` that is a symbolic link means the
+sandbox is not verified: a rule on its path does not protect the file it
+leads to.
+
+The project's and the local settings can only weaken the sandbox, and the
+user-scope test showed that they do: a project's `sandbox.enabled: false`,
+`excludedCommands` (even under the user's `allowUnsandboxedCommands:
+false`) and `filesystem.allowWrite` each took effect over a strict user
+sandbox, and so does an `Edit(...)` allow rule, which Claude Code merges
+into `filesystem.allowWrite`. So in a project or local file:
+
+- `sandbox` may hold only `enabled: true`, `failIfUnavailable: true`,
+  `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`, an empty
+  `excludedCommands`, `filesystem.denyWrite` and `denyRead`,
+  `network.deniedDomains`, `network.strictAllowlist: true`, and
+  `credentials.envVars` and `files` whose entries all have `"mode":
+  "deny"`;
+- `permissions` may hold no `additionalDirectories` and no `Edit` or `Read`
+  allow rule;
+- nothing may name a command or tool server that runs outside the sandbox:
+  `hooks` (other than an empty object), `statusLine`, `fileSuggestion`,
+  `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`,
+  `otelHeadersHelper`, `enableAllProjectMcpServers: true` or
+  `enabledMcpjsonServers`;
+- the local files outside the project directory may set in `env` only the
+  variables the check of the project's own env lets through (above): the
+  hooks and commands run with their env too.
+
+Anything else there (`enabled: false`, an excluded command, `allowWrite`,
+`allowRead`, an `allowedDomains` list) means the sandbox is not verified.
+Only managed settings keep a repository from changing the sandbox.
+
+A call whose input sets `dangerouslyDisableSandbox` to anything other than
+`false` is a gated `mutate` whatever the settings; under the strict sandbox
+its refusal says to run it without the parameter. The hook does not decide
+from a command's text whether it matches an excluded command: any
+`excludedCommands` entry means no Bash call is relaxed.
+
+The settings that meet these conditions for the project, with deny rules
+for its records, come from `grounded_agency/layer_records.py` (above) and
+the rules this section lists; written by hand, they look like this (paths
+absolute, for each project and plugin copy):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": {"allowedDomains": ["example.com"], "strictAllowlist": true},
+    "filesystem": {
+      "denyWrite": ["/Users/me/.claude", "/Users/me/.claude.json"],
+      "denyRead": ["/Users/me/.ssh", "/Users/me/.config/gh/hosts.yml",
+                   "/Users/me/.git-credentials", "/Users/me/Library/Keychains",
+                   "/Library/Keychains"]
+    },
+    "credentials": {"envVars": [{"name": "GH_TOKEN", "mode": "deny"},
+                                {"name": "GITHUB_TOKEN", "mode": "deny"},
+                                {"name": "AUDIT_HMAC_KEY", "mode": "deny"}]}
+  },
+  "permissions": {"deny": ["...the rules layer_records.py prints...",
+                           "Edit(//Users/me/project/.claude/settings.json)",
+                           "Edit(//Users/me/project/.claude/settings.local.json)",
+                           "Edit(//Users/me/project/.claude/hooks/**)",
+                           "Edit(//Users/me/project/.mcp.json)",
+                           "Edit(//<plugin hooks directory>/**)",
+                           "Read(//Users/me/.config/acs/audit.key)",
+                           "Edit(//Users/me/.config/acs/audit.key)"]}
+}
+```
+
+The check runs only for a call the classifier reads as other than
+`mutate`, and for the text of a refusal. The hooks run nothing from, and
+read nothing in, the directories the Linux sandbox runtime shares with the
+host (`/tmp/claude`, `~/.claude/debug`): every temporary file they make is
+in the records' directories.
+
+What the hook cannot see, so cannot detect:
+
+- settings given with `--settings` when Claude Code starts (they rank above
+  user, project and local settings), and sources left out with
+  `--setting-sources`. A person who starts Claude Code with weaker settings
+  that way is not detected;
+- that the sandbox is on: hooks run outside it, and Claude Code gives them
+  no environment variable that says so (sandboxed commands see
+  `SANDBOX_RUNTIME`, hooks do not);
+- a value of the wrong type outside the keys it type-checks, which makes
+  Claude Code skip the whole file, and a change since Claude Code loaded a
+  file;
+- whether the sandbox works on this system: `failIfUnavailable` makes
+  Claude Code refuse to start where it does not;
+- a program put on `PATH` by a local settings file at the repository's top
+  level or the main checkout's root: such a file means the sandbox is not
+  verified, but the hook's own programs (`jq`, `git`) are found on that
+  `PATH` before the hook reads the file, as for any variable Claude Code
+  sets before a hook runs;
+- credential files other than those listed above (registry tokens, cloud
+  credentials): deny them too, with `denyRead`.
 
 ## Remote writes
 

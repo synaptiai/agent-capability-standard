@@ -51,7 +51,12 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #     no hook sees those commands, and any skill or agent name may be a
 #     project's (a project's definition replaces a built-in one of the same
 #     name), so the call takes the worst case (§5.18.3).
-#   - Bash: a command over 4096 bytes is not read: mutate (checked first, so
+#   - Bash: every class below but mutate relaxes the call, so holds only
+#     where Claude Code's strict sandbox is verified for the call from the
+#     settings files (sandbox_strict, in strict-sandbox below) and the call
+#     does not set dangerouslyDisableSandbox: else the call is mutate, git
+#     stash create and a restore included. A command over 4096 bytes is not
+#     read: mutate (checked first, so
 #     no reading of it can run long). A command with any of ; & | < > $ ` ( )
 #     { } \ or a line break may be more than one simple command or expand
 #     something: mutate. Otherwise its words are read as bash reads them, as
@@ -1035,6 +1040,644 @@ classify_bash() {
   echo mutate
 }
 
+# BEGIN strict-sandbox
+# Whether Claude Code's sandbox, as the settings files this hook can read
+# configure it, is the strict one under which a Bash call classified other
+# than mutate may run relaxed (STANDARD 1.2.0 §5.18.3, RFC-0011: a shell call
+# gets its worst case unless the layer verifies an operating-system boundary
+# from the effective configuration). Status 0: strict. Status 1: not, with
+# the reasons in SANDBOX_REASON. Every failure to read or decide is status 1,
+# never R407: the call then gets the worst case (a gated mutate).
+#
+# The sources (Claude Code's documented paths and order):
+#   - managed: <dir>/managed-settings.json, then <dir>/managed-settings.d/*.json
+#     (not hidden, in name order), merged, where <dir> is
+#     /Library/Application Support/ClaudeCode on macOS and /etc/claude-code
+#     on Linux (the system decided from files only it installs; OSTYPE, which
+#     bash takes from the environment, must agree). A source this hook does
+#     not read (the macOS managed preferences domain com.anthropic.claudecode,
+#     the server-managed settings cache <config dir>/remote-settings.json,
+#     the Windows policy chain under WSL) is present: not strict.
+#   - user: <config dir>/settings.json, the config dir being CLAUDE_CONFIG_DIR,
+#     else ~/.claude.
+#   - project: <project>/.claude/settings.json; local:
+#     .claude/settings.local.json in the project directory, the repository's
+#     top level and the main checkout's root (Claude Code reads it there in a
+#     git repository, and the project directory's from earlier versions).
+# A file that exists must be a regular file jq parses as a JSON object, and
+# in a user or managed file the sandbox, permissions, env and hooks keys must
+# have the types Claude Code accepts (it ignores a file with a wrong one).
+#
+# Every condition that makes the sandbox strict counts only from user or
+# managed settings (merged as Claude Code merges them: managed over user,
+# lists joined), so no repository file can make a call more relaxed:
+#   - sandbox.enabled, failIfUnavailable and network.strictAllowlist true,
+#     allowUnsandboxedCommands false;
+#   - no excludedCommands, filesystem.disabled, filesystem.allowRead,
+#     allowAllUnixSockets, allowUnixSockets, allowLocalBinding,
+#     allowMachLookup, allowAppleEvents, allowNestedUserNamespaces,
+#     enableWeakerNestedSandbox, enableWeakerNetworkIsolation, httpProxyPort
+#     or socksProxyPort (each a route outside the sandbox or around its
+#     network allowlist, or, allowRead, a reopening of a denied path);
+#   - every network.allowedDomains entry a dotted DNS name whose last label
+#     is alphabetic, not a loopback, link-local, metadata or local-use name
+#     (the setup command's rule);
+#   - sandbox.credentials.envVars deny entries for GH_TOKEN and GITHUB_TOKEN,
+#     and for AUDIT_HMAC_KEY while it is set;
+#   - a denial of: writes to the layer's records (the paths
+#     grounded_agency/layer_records.py gives, sandbox_need below) and reads
+#     of the git directories' records; writes to the project and local
+#     settings files, the project's .claude/hooks, this hook's own
+#     directory, the user configuration directory and, without
+#     CLAUDE_CONFIG_DIR, ~/.claude.json; reads and writes of the audit key
+#     file (~/.config/acs/audit.key); reads of ~/.ssh, gh's hosts.yml,
+#     ~/.git-credentials and, on macOS, the keychains; and writes to a
+#     directory that holds a .mcp.json (the project directory, the
+#     repository's top level), or to the .mcp.json path there where there
+#     is none;
+#   - neither enableAllProjectMcpServers true nor enabledMcpjsonServers
+#     (tool servers a .mcp.json names would start with no prompt). A denial is a permissions.deny rule
+#     Tool(//<absolute path>) for a file, Tool(//<dir>/**) for a directory
+#     or for a directory that holds the path, or an entry of
+#     sandbox.filesystem.denyWrite (writes) or denyRead (reads) that is the
+#     path or a directory that holds it, written literally; a rule written
+#     any other way (~/, ./, a relative path, another glob, a bare tool
+#     name) does not count. With allowManagedPermissionRulesOnly in managed
+#     settings, only managed rules and entries count.
+# Project and local settings can only weaken: their sandbox may hold only
+# enabled true, failIfUnavailable true, allowUnsandboxedCommands false,
+# autoAllowBashIfSandboxed, an empty excludedCommands,
+# filesystem.denyWrite and denyRead, network.deniedDomains,
+# network.strictAllowlist true and credentials.envVars and files whose
+# entries all deny; their permissions no additionalDirectories and no Edit
+# or Read allow rule (Claude Code merges Edit allow rules into
+# filesystem.allowWrite); none of hooks (but an empty object), statusLine,
+# fileSuggestion, apiKeyHelper, awsAuthRefresh, awsCredentialExport,
+# otelHeadersHelper, enableAllProjectMcpServers or enabledMcpjsonServers
+# (commands and tool servers that run outside the sandbox); and the local
+# files outside the project directory no env variable the check of the
+# project's env (project_layer_settings) refuses. Anything else there
+# (enabled false, an excluded command, allowWrite or allowRead, a network
+# allowlist) is not strict.
+#
+# What this hook cannot see: settings given with --settings or limited with
+# --setting-sources when Claude Code starts, a type error outside the keys it
+# checks, or a change since Claude Code loaded a file; and no environment
+# variable tells a hook that the sandbox is on (hooks/README.md).
+#
+# The directories of the managed settings files, the macOS managed
+# preferences files and the server-managed cache's name (tests substitute
+# these lines).
+SANDBOX_MANAGED_DARWIN='/Library/Application Support/ClaudeCode'
+SANDBOX_MANAGED_LINUX='/etc/claude-code'
+SANDBOX_MDM_DIR='/Library/Managed Preferences'
+SANDBOX_REASON=""
+SANDBOX_CHECKED=""
+SANDBOX_ESCAPE=""
+SANDBOX_NEED=""
+SANDBOX_PHYSICAL=""
+SANDBOX_WRITTEN=""
+
+# Adds the denial a path needs ($1: Edit or Read, $2: d for a directory, f
+# for a file, $3: the absolute path, $4: why, when the refusal should say)
+# to SANDBOX_NEED, one to a line. Fails on a path no literal rule can name
+# (a character a permission rule reads as a pattern, or a control
+# character), as layer_records.py refuses it.
+sandbox_need() {
+  case "$3" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$3" in
+    *[\*\?\[\]\{\}\(\)\\]* | *[[:cntrl:]]*) return 1 ;;
+  esac
+  SANDBOX_NEED="${SANDBOX_NEED}$1	$2	$3	${4:-}"$'\n'
+}
+
+# sandbox_need for $3 and, where it lies under the project's physical path
+# and the project directory is written another way, for the same path under
+# the written one (a rule and a path are compared as text).
+sandbox_need_both() {
+  sandbox_need "$1" "$2" "$3" "${4:-}" || return 1
+  if [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ]; then
+    case "$3" in
+      "${SANDBOX_PHYSICAL%/}"/*)
+        sandbox_need "$1" "$2" "${SANDBOX_WRITTEN%/}/${3#"${SANDBOX_PHYSICAL%/}"/}" "${4:-}" || return 1
+        ;;
+    esac
+  fi
+}
+
+# The directories in $1 (no symbolic link followed, hidden ones included),
+# into SUBDIRS, one to a line.
+sandbox_subdirs() {
+  local e
+  SUBDIRS=""
+  [ -d "$1" ] && [ ! -L "$1" ] || return 0
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    if [ -d "$e" ] && [ ! -L "$e" ]; then
+      SUBDIRS="${SUBDIRS}${e}"$'\n'
+    fi
+  done
+}
+
+# The git directories git keeps in $1, as layer_records.py lists them: each
+# linked worktree's (worktrees/<name>) and each submodule's (modules/<path>,
+# and a submodule's own worktrees and submodules in turn), into
+# SANDBOX_GIT_DIRS, one to a line.
+sandbox_modules() {
+  local d list
+  sandbox_subdirs "$1"
+  list="$SUBDIRS"
+  while [ -n "$list" ]; do
+    d="${list%%$'\n'*}"
+    list="${list#*$'\n'}"
+    if [ -f "$d/HEAD" ] && [ ! -L "$d/HEAD" ]; then
+      SANDBOX_GIT_DIRS="${SANDBOX_GIT_DIRS}${d}"$'\n'
+      sandbox_linked "$d"
+    else
+      sandbox_modules "$d"
+    fi
+  done
+}
+sandbox_linked() {
+  sandbox_subdirs "$1/worktrees"
+  SANDBOX_GIT_DIRS="${SANDBOX_GIT_DIRS}${SUBDIRS}"
+  sandbox_modules "$1/modules"
+}
+
+sandbox_strict() {
+  if [ -n "$SANDBOX_CHECKED" ]; then
+    [ "$SANDBOX_CHECKED" = strict ]
+    return
+  fi
+  SANDBOX_CHECKED=not
+  sandbox_verify || return 1
+  SANDBOX_CHECKED=strict
+}
+
+sandbox_verify() {
+  local system config managed user gd lines git_dir common top list f key kind ok=1 scope i=0 home_written home_physical hooks_dir verdict
+  local -a jq_args local_files
+  SANDBOX_REASON=""
+  SANDBOX_NEED=""
+  # The system, from files only the system installs (bash takes OSTYPE
+  # from the environment when it is set there, so it only has to agree).
+  if [ -d /System/Library/CoreServices ]; then
+    system=darwin
+  elif [ -r /proc/version ]; then
+    system=linux
+  else
+    system=other
+  fi
+  case "$system:${OSTYPE:-}" in
+    other:* | darwin:darwin* | linux:linux*) ;;
+    *)
+      SANDBOX_REASON="OSTYPE (${OSTYPE:-unset}) does not name this system ($system)"
+      return 1
+      ;;
+  esac
+  case "$system" in
+    darwin)
+      managed="$SANDBOX_MANAGED_DARWIN"
+      ;;
+    linux)
+      managed="$SANDBOX_MANAGED_LINUX"
+      lines=""
+      if [ -r /proc/version ]; then lines=$(< /proc/version) || lines=""; fi
+      case "$lines" in
+        *[Mm]icrosoft* | *WSL*)
+          SANDBOX_REASON="under WSL, Claude Code may read the Windows managed policy, which this hook cannot read"
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      SANDBOX_REASON="Claude Code has no sandbox on this system (${OSTYPE:-unknown})"
+      return 1
+      ;;
+  esac
+  if [ -z "${HOME:-}" ]; then
+    SANDBOX_REASON="HOME is not set, so the user settings cannot be found"
+    return 1
+  fi
+  config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  case "$config" in
+    /*) ;;
+    *)
+      SANDBOX_REASON="CLAUDE_CONFIG_DIR is not an absolute path"
+      return 1
+      ;;
+  esac
+  config="${config%/}"
+  user="$config/settings.json"
+  # A rule names the user settings file's path, not a link's target.
+  if [ -L "$user" ]; then
+    SANDBOX_REASON="the user settings file $user is a symbolic link, which a rule on its path does not protect"
+    return 1
+  fi
+  if [ -e "$config/remote-settings.json" ] || [ -L "$config/remote-settings.json" ]; then
+    SANDBOX_REASON="server-managed settings are cached ($config/remote-settings.json), which this hook does not read"
+    return 1
+  fi
+  if [ "$system" = darwin ]; then
+    # The machine's profile, and any user's (no program names the user).
+    for f in "$SANDBOX_MDM_DIR/com.anthropic.claudecode.plist" "$SANDBOX_MDM_DIR"/*/com.anthropic.claudecode.plist; do
+      if [ -e "$f" ] || [ -L "$f" ]; then
+        SANDBOX_REASON="a managed preferences profile ($f) sets Claude Code's policy, which this hook does not read"
+        return 1
+      fi
+    done
+  fi
+
+  # The project directory as written (absolute, with no . or .. segment and
+  # no run of slashes, as layer_records.py makes it) and physical.
+  SANDBOX_WRITTEN="$project_dir"
+  while [ "$SANDBOX_WRITTEN" != / ] && [[ "$SANDBOX_WRITTEN" == */ ]]; do SANDBOX_WRITTEN="${SANDBOX_WRITTEN%/}"; done
+  case "$SANDBOX_WRITTEN/" in
+    /*) ;;
+    *)
+      SANDBOX_REASON="the project directory is not an absolute path"
+      return 1
+      ;;
+  esac
+  case "$SANDBOX_WRITTEN/" in
+    *//* | */./* | */../*)
+      SANDBOX_REASON="the project directory's path holds . or .. or a run of slashes"
+      return 1
+      ;;
+  esac
+  if ! physical_dir "$SANDBOX_WRITTEN"; then
+    SANDBOX_REASON="the project directory cannot be resolved"
+    return 1
+  fi
+  SANDBOX_PHYSICAL="$PHYSICAL"
+  # A user settings file in the project directory is repository content.
+  if physical_dir "$config"; then
+    case "$PHYSICAL/" in
+      "${SANDBOX_PHYSICAL%/}"/*)
+        SANDBOX_REASON="the user settings directory ($config) is inside the project directory"
+        return 1
+        ;;
+    esac
+  fi
+
+  # The layer's records (layer_records.py: PROJECT_RECORDS and
+  # GIT_DIR_RECORDS), the settings files and the hook scripts.
+  for f in "$SANDBOX_WRITTEN" "$SANDBOX_PHYSICAL"; do
+    for key in "${LAYER_RECORDS[@]}"; do
+      kind=f
+      [ "$key" != .claude/checkpoints ] || kind=d
+      sandbox_need Edit "$kind" "${f%/}/$key" || ok=0
+    done
+    sandbox_need Edit f "${f%/}/.claude/settings.json" || ok=0
+    sandbox_need Edit f "${f%/}/.claude/settings.local.json" || ok=0
+    sandbox_need Edit d "${f%/}/.claude/hooks" || ok=0
+    [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ] || break
+  done
+  if [ "$ok" != 1 ]; then
+    SANDBOX_REASON="the project directory's path holds a character a permission rule reads as a pattern"
+    return 1
+  fi
+  local_files=("$SANDBOX_WRITTEN/.claude/settings.local.json")
+  # git names the git directory, the common one and the top level; where
+  # it finds no repository (git_dir_at: status 1), there are none.
+  if ! command -v git > /dev/null 2>&1; then
+    SANDBOX_REASON="git is not installed, so the git directory's records cannot be named"
+    return 1
+  fi
+  if ! lines=$(hgit -C "$SANDBOX_PHYSICAL" rev-parse --absolute-git-dir --git-common-dir --show-toplevel 2> /dev/null && printf x); then
+    lines=""
+    ok=0
+    git_dir_at "$SANDBOX_PHYSICAL" || ok=$?
+    if [ "$ok" != 1 ]; then
+      SANDBOX_REASON="git did not say which git directory is the project's, or its top level"
+      return 1
+    fi
+  fi
+  if [ -n "$lines" ]; then
+    lines="${lines%x}"
+    git_dir="${lines%%$'\n'*}"
+    lines="${lines#*$'\n'}"
+    common="${lines%%$'\n'*}"
+    lines="${lines#*$'\n'}"
+    top="${lines%%$'\n'*}"
+    lines="${lines#*$'\n'}"
+    if [ -n "$lines" ] || [ -z "$git_dir" ] || [ -z "$common" ] || [ -z "$top" ]; then
+      SANDBOX_REASON="git's answer for the project's git directory cannot be read"
+      return 1
+    fi
+    case "$common" in /*) ;; *) common="${SANDBOX_PHYSICAL%/}/$common" ;; esac
+    if ! physical_dir "$common"; then
+      SANDBOX_REASON="the repository's common git directory cannot be resolved"
+      return 1
+    fi
+    common="$PHYSICAL"
+    SANDBOX_GIT_DIRS="${git_dir}"$'\n'"${common}"$'\n'
+    sandbox_linked "$common"
+    list="$SANDBOX_GIT_DIRS"
+    while [ -n "$list" ]; do
+      gd="${list%%$'\n'*}"
+      list="${list#*$'\n'}"
+      for key in "${GIT_DIR_RECORDS[@]}"; do
+        sandbox_need_both Edit d "${gd%/}/$key" && sandbox_need_both Read d "${gd%/}/$key" || {
+          SANDBOX_REASON="a git directory's path holds a character a permission rule reads as a pattern"
+          return 1
+        }
+      done
+    done
+    local_files+=("${top%/}/.claude/settings.local.json")
+    sandbox_need_both Edit f "${top%/}/.claude/settings.local.json" || {
+      SANDBOX_REASON="the repository's path holds a character a permission rule reads as a pattern"
+      return 1
+    }
+    # The main checkout's root, where the common git directory is its .git.
+    if [ "${common##*/}" = .git ]; then
+      local_files+=("${common%/.git}/.claude/settings.local.json")
+      sandbox_need_both Edit f "${common%/.git}/.claude/settings.local.json" || {
+        SANDBOX_REASON="the main checkout's path holds a character a permission rule reads as a pattern"
+        return 1
+      }
+    fi
+  fi
+  # The local files outside the project directory: Claude Code applies
+  # their env to every hook and command too, and the check of the project's
+  # env (project_layer_settings, above) reads only the project directory's.
+  for f in "${local_files[@]}"; do
+    f="${f%/.claude/settings.local.json}"
+    [ "$f" != "$SANDBOX_WRITTEN" ] && [ "$f" != "$SANDBOX_PHYSICAL" ] || continue
+    lines=$(project_layer_settings "$f") || lines="(unreadable)"
+    if [ -n "$lines" ]; then
+      lines="${lines:0:200}"
+      lines="${lines//$'\n'/ }"
+      lines="${lines//[^A-Za-z0-9_.\/() ]/?}"
+      SANDBOX_REASON="the settings files in $f/.claude set variables in env that are not Claude Code's own, or cannot be read: ${lines% }"
+      return 1
+    fi
+  done
+  # A .mcp.json names tool servers whose code, in the repository, runs
+  # outside the sandbox: its directory must be denied to writes. Where
+  # there is none, the path itself must be denied to writes, so that no
+  # sandboxed command can create one for the next session to start.
+  for f in "$SANDBOX_WRITTEN" ${top:+"${top%/}"}; do
+    if [ -e "$f/.mcp.json" ] || [ -L "$f/.mcp.json" ]; then
+      sandbox_need_both Edit d "$f" "$f/.mcp.json names tool servers that run outside the sandbox" || ok=0
+      if [ "$f" = "$SANDBOX_WRITTEN" ] && [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ]; then
+        sandbox_need Edit d "$SANDBOX_PHYSICAL" "$f/.mcp.json names tool servers that run outside the sandbox" || ok=0
+      fi
+    else
+      sandbox_need_both Edit f "$f/.mcp.json" "a .mcp.json written there would name tool servers that run outside the sandbox" || ok=0
+      if [ "$f" = "$SANDBOX_WRITTEN" ] && [ "$SANDBOX_WRITTEN" != "$SANDBOX_PHYSICAL" ]; then
+        sandbox_need Edit f "${SANDBOX_PHYSICAL%/}/.mcp.json" "a .mcp.json written there would name tool servers that run outside the sandbox" || ok=0
+      fi
+    fi
+  done
+  # The user configuration directory (the user settings, ~/.claude.json
+  # when CLAUDE_CONFIG_DIR is set, plugins, agents, commands, skills,
+  # CLAUDE.md) and ~/.claude.json: the host's configuration sources.
+  home_written="${HOME%/}"
+  home_physical="$home_written"
+  if physical_dir "$HOME"; then home_physical="$PHYSICAL"; fi
+  sandbox_need Edit d "$config" || ok=0
+  if physical_dir "$config" && [ "$PHYSICAL" != "$config" ]; then
+    sandbox_need Edit d "$PHYSICAL" || ok=0
+  fi
+  if [ -z "${CLAUDE_CONFIG_DIR:-}" ]; then
+    sandbox_need Edit f "$home_written/.claude.json" || ok=0
+    [ "$home_physical" = "$home_written" ] || sandbox_need Edit f "$home_physical/.claude.json" || ok=0
+  fi
+  if [ "$ok" != 1 ]; then
+    SANDBOX_REASON="the user configuration directory's or the repository's path holds a character a permission rule reads as a pattern"
+    return 1
+  fi
+  f="${BASH_SOURCE[0]:-$0}"
+  case "$f" in */*) f="${f%/*}" ;; *) f=. ;; esac
+  if ! physical_dir "${f:-/}"; then
+    SANDBOX_REASON="the hook's own directory cannot be resolved"
+    return 1
+  fi
+  hooks_dir="$PHYSICAL"
+  sandbox_need Edit d "$hooks_dir" || ok=0
+  # The audit key file, and the user's credentials: ssh's keys, gh's and
+  # git's tokens and, on macOS, the keychains.
+  for f in "$home_written" "$home_physical"; do
+    sandbox_need Edit f "$f/.config/acs/audit.key" || ok=0
+    sandbox_need Read f "$f/.config/acs/audit.key" || ok=0
+    sandbox_need Read d "$f/.ssh" || ok=0
+    sandbox_need Read f "$f/.config/gh/hosts.yml" || ok=0
+    sandbox_need Read f "$f/.git-credentials" || ok=0
+    [ "$system" != darwin ] || sandbox_need Read d "$f/Library/Keychains" || ok=0
+    [ "$home_physical" != "$home_written" ] || break
+  done
+  [ "$system" != darwin ] || sandbox_need Read d /Library/Keychains || ok=0
+  if [ "$ok" != 1 ]; then
+    SANDBOX_REASON="the hook's or the home directory's path holds a character a permission rule reads as a pattern"
+    return 1
+  fi
+
+  # The files, read by one jq: f_<n> its text, n_<n> its name, s_<n> its
+  # scope (m managed, u user, p project or local).
+  if [ -e "$managed" ] && { [ ! -d "$managed" ] || [ ! -r "$managed" ] || [ ! -x "$managed" ]; }; then
+    SANDBOX_REASON="the managed settings directory $managed cannot be read"
+    return 1
+  fi
+  if [ -e "$managed/managed-settings.d" ] && { [ ! -d "$managed/managed-settings.d" ] || [ ! -r "$managed/managed-settings.d" ] || [ ! -x "$managed/managed-settings.d" ]; }; then
+    SANDBOX_REASON="the managed settings directory $managed/managed-settings.d cannot be read"
+    return 1
+  fi
+  jq_args=()
+  for f in "$managed/managed-settings.json" "$managed"/managed-settings.d/*.json "@user" "$SANDBOX_WRITTEN/.claude/settings.json" "${local_files[@]}"; do
+    scope=p
+    case "$f" in
+      "$managed"/*) scope=m ;;
+      @user)
+        scope=u
+        f="$user"
+        ;;
+    esac
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      SANDBOX_REASON="the settings file $f is not a regular file this hook can read"
+      return 1
+    fi
+    i=$((i + 1))
+    jq_args+=(--rawfile "f_$i" "$f" --arg "n_$i" "$f" --arg "s_$i" "$scope")
+  done
+  # jq with no HOME (it loads $HOME/.jq as a library); an empty array is
+  # expanded so, since bash before 4.4 reads "${a[@]}" of one as unset.
+  verdict=$(HOME= bounded jq -n -r ${jq_args[@]+"${jq_args[@]}"} --arg need "$SANDBOX_NEED" --arg audit_env "${AUDIT_HMAC_KEY:+1}" "$SANDBOX_JQ" 2> /dev/null) || verdict=""
+  if [ "$verdict" != strict ]; then
+    SANDBOX_REASON="${verdict:-the settings files could not be read}"
+    return 1
+  fi
+}
+
+# The verdict on the settings files (sandbox_verify): "strict", or every
+# reason they are not (the first six, joined).
+SANDBOX_JQ='
+  def merge($a; $b):
+    if ($a | type) == "object" and ($b | type) == "object" then
+      reduce ($b | keys_unsorted[]) as $k ($a; .[$k] = (if has($k) then merge(.[$k]; $b[$k]) else $b[$k] end))
+    elif ($a | type) == "array" and ($b | type) == "array" then $a + $b
+    else $b end;
+  def unset_or($v): . == null or . == $v;
+  def empty_list: . == null or . == [];
+  def only($allowed): type == "object" and ((keys - $allowed) | length) == 0;
+  # Whether $e, an entry of a sandbox.filesystem list, is a literal absolute
+  # path at or above the path $p.
+  def path_covers($e; $p):
+    ($e | type) == "string" and ($e | startswith("/")) and (($e | startswith("//")) | not)
+    and (($e | test("[*?\\[\\]{}()\\\\]")) | not)
+    and (($e | if . == "/" then . else rtrimstr("/") end) as $a
+         | $a == "/" or $p == $a or ($p | startswith($a + "/")));
+  # A denial that covers the path $p ($kind f: a file, d: a directory): a
+  # deny rule Tool(//<p>) for a file, Tool(//<p>/**) for a directory, or
+  # Tool(//<dir>/**) for a directory above $p; or an entry of $paths (the
+  # sandbox.filesystem denyWrite or denyRead list) at or above $p.
+  def covered($deny; $paths; $tool; $kind; $p):
+    any($deny[]; . as $rule
+      | if ($rule | startswith($tool + "(//")) and ($rule | endswith(")")) then
+          $rule[($tool | length) + 2:-1] as $r
+          | if $kind == "f" and $r == $p then true
+            elif ($r | endswith("/**")) then $r[:-3] as $a | (($kind == "d" and $p == $a) or ($p | startswith($a + "/")))
+            else false end
+        else false end)
+    or any($paths[]; path_covers(.; $p));
+  # Why a network.allowedDomains entry may open a route outside the
+  # boundary (a loopback, link-local or metadata host, an IP literal, a
+  # one-label name, a bare wildcard), or nothing: the rule the setup
+  # command applies (a dotted DNS name whose last label is alphabetic,
+  # optionally *. before it and :port after it).
+  def host_refused:
+    if type != "string" then "is not a string"
+    elif . == "" or test("^\\s|\\s$") then "is empty or has blanks around it"
+    elif startswith("[") then "is an IP literal"
+    else
+      ([capture("^(?<h>.+?)(?::(?<port>[0-9]{1,5}))?$")] | first) as $m
+      | if $m == null then "is not a host name"
+        elif $m.port != null and (($m.port | tonumber) < 1 or ($m.port | tonumber) > 65535) then "has a port out of range"
+        elif ($m.h | contains(":")) then "is an IP literal"
+        else
+          ($m.h | if endswith(".") then .[:-1] else . end) as $h
+          | ($h | if startswith("*.") then .[2:] else . end) as $name
+          | ($name | split(".")) as $labels
+          | if $h != ($h | ascii_downcase) then "is not in lower case"
+            elif ($name | length) > 253 or any($labels[]; test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$") | not) then "is not a host name"
+            elif ($labels | length) < 2 or ($labels[-1] | test("^([a-z]{2,63}|xn--[a-z0-9-]{1,59})$") | not) then "is an IP literal or a one-label name"
+            elif ($labels | length) >= 4 and all($labels[0:4][]; test("^[0-9]+$")) then "starts with a dotted IP address"
+            elif ([$name] | inside(["localhost.localdomain", "metadata.google.internal", "metadata.goog", "instance-data.ec2.internal"]))
+              or any((".localhost", ".local", ".localdomain", ".internal", ".arpa"); . as $x | $name | endswith($x))
+            then "names a loopback, link-local or metadata host, or a local-use name"
+            else empty end
+        end
+    end;
+  # The key paths of a user or managed file whose value has a type Claude
+  # Code does not accept (it then ignores the whole file).
+  def want($p; $t):
+    (try getpath($p) catch null) as $v
+    | if $v == null then empty
+      elif $t == "strings" then (if ($v | type) == "array" and all($v[]; type == "string") then empty else $p end)
+      elif $t == "objects" then (if ($v | type) == "array" and all($v[]; type == "object") then empty else $p end)
+      elif ($v | type) == $t then empty
+      else $p end;
+  def type_errors:
+    ((["sandbox"], ["sandbox", "filesystem"], ["sandbox", "network"], ["sandbox", "credentials"], ["permissions"], ["env"], ["hooks"]) as $p
+     | want($p; "object")),
+    ((["enabled"], ["failIfUnavailable"], ["autoAllowBashIfSandboxed"], ["allowUnsandboxedCommands"], ["enableWeakerNestedSandbox"],
+      ["enableWeakerNetworkIsolation"], ["allowAppleEvents"], ["allowNestedUserNamespaces"], ["filesystem", "disabled"],
+      ["network", "strictAllowlist"], ["network", "allowAllUnixSockets"], ["network", "allowLocalBinding"]) as $p
+     | want(["sandbox"] + $p; "boolean")),
+    ((["excludedCommands"], ["filesystem", "allowWrite"], ["filesystem", "denyWrite"], ["filesystem", "denyRead"],
+      ["filesystem", "allowRead"], ["network", "allowedDomains"], ["network", "deniedDomains"], ["network", "allowUnixSockets"],
+      ["network", "allowMachLookup"]) as $p
+     | want(["sandbox"] + $p; "strings")),
+    ((["network", "httpProxyPort"], ["network", "socksProxyPort"]) as $p | want(["sandbox"] + $p; "number")),
+    ((["credentials", "files"], ["credentials", "envVars"]) as $p | want(["sandbox"] + $p; "objects")),
+    ((["allow"], ["ask"], ["deny"], ["additionalDirectories"]) as $p | want(["permissions"] + $p; "strings")),
+    (if (.env | type) == "object" and any(.env[]; type != "string") then ["env"] else empty end);
+  # What project and local settings may hold in sandbox: only what keeps or
+  # narrows it.
+  def narrowing_sandbox:
+    . == null
+    or (only(["enabled", "failIfUnavailable", "allowUnsandboxedCommands", "autoAllowBashIfSandboxed", "excludedCommands", "filesystem", "network", "credentials"])
+        and (.enabled | unset_or(true))
+        and (.failIfUnavailable | unset_or(true))
+        and (.allowUnsandboxedCommands | unset_or(false))
+        and (.autoAllowBashIfSandboxed | . == null or type == "boolean")
+        and (.excludedCommands | empty_list)
+        and (.filesystem | . == null or only(["denyWrite", "denyRead"]))
+        and (.network | . == null or (only(["deniedDomains", "strictAllowlist"]) and (.strictAllowlist | unset_or(true))))
+        and (.credentials | . == null
+             or (only(["envVars", "files"])
+                 and all(.envVars, .files; . == null or (type == "array" and all(.[]; type == "object" and .mode == "deny"))))));
+  def env_denied($creds; $name):
+    any($creds | (try .envVars catch null) // [] | .[]?; type == "object" and .name == $name and .mode == "deny");
+  $ARGS.named as $n
+  | [range(1; 10000) | tostring | select($n["f_" + .] != null)
+     | {name: $n["n_" + .], scope: $n["s_" + .], data: ($n["f_" + .] | try fromjson catch null)}] as $files
+  | ([$files[] | select((.data | type) != "object") | .name] | first) as $bad
+  | if $bad != null then "the settings file \($bad) is not a JSON object"
+    else
+      ([$files[] | select(.scope == "m") | .data] | reduce .[] as $x ({}; merge(.; $x))) as $managed
+      | ([$files[] | select(.scope == "u") | .data] | first // {}) as $user
+      | merge($user; $managed) as $t
+      | ($t.sandbox // {}) as $s
+      | (if $managed.allowManagedPermissionRulesOnly == true then $managed else $t end) as $rules
+      | [$rules | (try .permissions.deny catch null) // [] | .[]? | strings] as $deny
+      | [$rules | (try .sandbox.filesystem.denyWrite catch null) // [] | .[]? | strings] as $deny_write
+      | [$rules | (try .sandbox.filesystem.denyRead catch null) // [] | .[]? | strings] as $deny_read
+      | [
+          ($files[] | select(.scope != "p") | .name as $f | .data | type_errors
+           | "\($f) holds \(join(".")) of a type Claude Code does not accept (it then ignores the whole file)"),
+          (if ($s | type) != "object" then "sandbox is not an object in user or managed settings"
+           else
+             (if $s.enabled != true then "sandbox.enabled is not true in user or managed settings" else empty end),
+             (if $s.failIfUnavailable != true then "sandbox.failIfUnavailable is not true in user or managed settings" else empty end),
+             (if $s.allowUnsandboxedCommands != false then "sandbox.allowUnsandboxedCommands is not false in user or managed settings" else empty end),
+             (if ($s.network | type) != "object" or $s.network.strictAllowlist != true then "sandbox.network.strictAllowlist is not true in user or managed settings" else empty end),
+             (if ($s.filesystem | . == null or type == "object") | not then "sandbox.filesystem is not an object" else empty end),
+             (if ($s.excludedCommands | empty_list) | not then "sandbox.excludedCommands is set" else empty end),
+             (if ($s | (try .filesystem.allowRead catch null) | empty_list) | not then "sandbox.filesystem.allowRead is set (it reopens paths that a deny closes)" else empty end),
+             ((["filesystem", "disabled"], ["network", "allowAllUnixSockets"], ["network", "allowLocalBinding"],
+               ["allowAppleEvents"], ["allowNestedUserNamespaces"], ["enableWeakerNestedSandbox"], ["enableWeakerNetworkIsolation"]) as $k
+              | if ($s | getpath($k)? // null | unset_or(false)) | not then "sandbox.\($k | join(".")) is set" else empty end),
+             ((["network", "allowUnixSockets"], ["network", "allowMachLookup"]) as $k
+              | if ($s | getpath($k)? // null | empty_list) | not then "sandbox.\($k | join(".")) is set" else empty end),
+             ((["network", "httpProxyPort"], ["network", "socksProxyPort"]) as $k
+              | if ($s | getpath($k)? // null) != null then "sandbox.\($k | join(".")) is set" else empty end),
+             ($s | (try .network.allowedDomains catch null) // [] | .[]? | . as $d | host_refused
+              | "sandbox.network.allowedDomains entry \($d | tojson) \(.) (a route outside the boundary)"),
+             (("GH_TOKEN", "GITHUB_TOKEN", (if $n.audit_env == "1" then "AUDIT_HMAC_KEY" else empty end)) as $v
+              | if env_denied($s.credentials; $v) then empty
+                else "no sandbox.credentials.envVars entry in user or managed settings denies \($v)\(if $v == "AUDIT_HMAC_KEY" then " (it is set)" else "" end)" end)
+           end),
+          (if ($t.enableAllProjectMcpServers | unset_or(false)) and ($t.enabledMcpjsonServers | empty_list) then empty
+           else "enableAllProjectMcpServers or enabledMcpjsonServers is set in user or managed settings (a .mcp.json a sandboxed command writes would start tool servers outside the sandbox)" end),
+          ($files[] | select(.scope == "p") | .name as $f | .data
+           | (if (.sandbox | narrowing_sandbox) | not
+              then "\($f) changes the sandbox (it may set only enabled true, failIfUnavailable true, allowUnsandboxedCommands false, autoAllowBashIfSandboxed, an empty excludedCommands, filesystem.denyWrite and denyRead, network.deniedDomains, network.strictAllowlist true, and credentials.envVars and files whose entries all deny)"
+              else empty end),
+             (if (.permissions | . == null or (type == "object" and (.additionalDirectories | empty_list))) | not
+              then "\($f) sets permissions.additionalDirectories" else empty end),
+             (if (try .permissions.allow catch null) as $a
+                 | $a == null or (($a | type) == "array" and all($a[]; type == "string" and (test("^(Edit|Read)(\\(|$)") | not)))
+              then empty
+              else "\($f) sets permissions.allow rules for Edit or Read, which widen the sandbox file access" end),
+             (if (.hooks | . == null or . == {}) and (.enableAllProjectMcpServers | unset_or(false)) and (.enabledMcpjsonServers | empty_list)
+                 and ([.statusLine, .fileSuggestion, .apiKeyHelper, .awsAuthRefresh, .awsCredentialExport, .otelHeadersHelper] | all(. == null))
+              then empty
+              else "\($f) names commands or tool servers that run outside the sandbox (hooks, statusLine, fileSuggestion, apiKeyHelper, awsAuthRefresh, awsCredentialExport, otelHeadersHelper, enableAllProjectMcpServers or enabledMcpjsonServers)" end)),
+          ($n.need | split("\n")[] | select(. != "") | split("\t") as [$tool, $kind, $p, $why]
+           | if covered($deny; (if $tool == "Edit" then $deny_write else $deny_read end); $tool; $kind; $p) then empty
+             else "permissions.deny in user or managed settings has no \($tool)(/\($p)\(if $kind == "d" then "/**" else "" end)) rule, nor sandbox.filesystem.\(if $tool == "Edit" then "denyWrite" else "denyRead" end) an entry for it\(if ($why // "") != "" then " (" + $why + ")" else "" end)" end)
+        ]
+      | reduce .[] as $r ([]; if any(.[]; . == $r) then . else . + [$r] end)
+      | if length == 0 then "strict"
+        elif length > 6 then (.[:6] | join("; ")) + "; and \(length - 6) more"
+        else join("; ") end
+    end'
+# END strict-sandbox
+
 # Whether JSON data holds, in a member named for a credential, a value
 # redaction replaces that is not a placeholder: the shared rule
 # (hooks/secret_member.jq, copied below; tests/test_skill_hooks.py keeps
@@ -1304,6 +1947,20 @@ case "$tool_name" in
   Bash)
     command=$(printf '%s' "$payload" | jq -r '.tool_input.command | strings' 2>/dev/null) || command=""
     capability=$(classify_bash "$command")
+    # Any class but mutate relaxes the call (a read, a checkpoint taken or
+    # restored), which holds only under the strict sandbox, verified from
+    # the settings files for this call (sandbox_strict): else the call is a
+    # gated mutate. A call that asks to run outside the sandbox
+    # (dangerouslyDisableSandbox other than false) is one in any case.
+    if [ "$capability" != mutate ]; then
+      escape=$(printf '%s' "$payload" | jq -r '.tool_input.dangerouslyDisableSandbox | . == null or . == false' 2>/dev/null) || escape=""
+      if [ "$escape" != true ]; then
+        SANDBOX_ESCAPE=1
+        capability=mutate
+      elif ! sandbox_strict; then
+        capability=mutate
+      fi
+    fi
     ;;
   *)
     capability=mutate
@@ -2219,11 +2876,34 @@ fi
 
 # mutate: a valid marker for this call alone.
 f501() {
-  block "F501 CHECKPOINT_REQUIRED: $1"
+  block "F501 CHECKPOINT_REQUIRED: $1$(sandbox_note)"
+}
+
+# Where the sandbox is not the strict one, git stash create is itself a
+# gated mutate, so no checkpoint can be taken through Bash: a refusal says
+# so, why, and how to turn the sandbox on. Checked here, when a refusal is
+# written, for a call of any tool. A Bash call that sets
+# dangerouslyDisableSandbox is a gated mutate whatever the settings, and
+# under the strict sandbox its refusal says to run it without that.
+sandbox_note() {
+  sandbox_strict || true
+  if [ "$SANDBOX_CHECKED" = strict ]; then
+    [ "${SANDBOX_ESCAPE:-}" != 1 ] || printf ' %s' "This call sets dangerouslyDisableSandbox, so it is a gated mutate: run it without that parameter, or take a checkpoint first (git stash create)."
+    return 0
+  fi
+  printf ' %s' "$(sandbox_unverified_text)"
+}
+sandbox_unverified_text() {
+  printf '%s' "Claude Code's strict sandbox is not verified for this call (${SANDBOX_REASON:-unknown}), so every Bash call, git stash create included, is a gated mutate and no checkpoint can be taken through Bash. The person can turn it on outside this session: add the settings in hooks/README.md (The strict sandbox) to the user settings file (~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR), then start Claude Code again. This hook refuses those edits from the agent."
 }
 
 if [ ! -e "$marker" ]; then
-  f501 "missing checkpoint marker ($marker). Take a checkpoint first (git stash create); each gated call needs its own."
+  if [ "${SANDBOX_ESCAPE:-}" = 1 ]; then
+    f501 "missing checkpoint marker ($marker)."
+  elif sandbox_strict; then
+    f501 "missing checkpoint marker ($marker). Take a checkpoint first (git stash create); each gated call needs its own."
+  fi
+  f501 "missing checkpoint marker ($marker)."
 fi
 
 # SEC-006: Reject symlinks to prevent bypass via symlink to always-existing file
@@ -2346,6 +3026,10 @@ elif [ -n "$remote_write" ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': $(remote_write_target "$remote_write")) requires approval; it runs only if this call is approved."
 elif [ "$unseen" = 1 ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
+elif [ "$tool_name" = Bash ] && [ "${SANDBOX_ESCAPE:-}" = 1 ]; then
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the call sets dangerouslyDisableSandbox) requires approval; it runs only if this call is approved."
+elif [ "$tool_name" = Bash ] && [ "$SANDBOX_CHECKED" = not ]; then
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the strict sandbox is not verified for this call, ${SANDBOX_REASON:-unknown}) requires approval; it runs only if this call is approved."
 else
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate') requires approval; it runs only if this call is approved."
 fi
