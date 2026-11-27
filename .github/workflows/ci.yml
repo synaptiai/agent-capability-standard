@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# One run per branch and event. A pull request's run for a head that a newer
+# push has replaced is cancelled, so it does not hold runners the new head's
+# run is waiting for; runs on main are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # One Rust toolchain for every job, for the same reason constraints.txt pins
   # ruff: a newer rustc, rustfmt or clippy can turn a green build red with no
