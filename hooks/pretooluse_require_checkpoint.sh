@@ -2925,8 +2925,20 @@ sandbox_note() {
   fi
   printf ' %s' "$(sandbox_unverified_text)"
 }
+# The setup script's apply line, for the person to run in a terminal: the
+# script beside this hook's directory, every path quoted for the shell, and
+# CLAUDE_CONFIG_DIR passed on as /grounded-setup passes it.
+setup_apply_line() {
+  local here root config=""
+  here="${BASH_SOURCE[0]:-$0}"
+  case "$here" in */*) here="${here%/*}" ;; *) here=. ;; esac
+  root="$(cd "$here/.." 2>/dev/null && pwd -P)" || root=""
+  [ -n "$root" ] || root="<plugin>"
+  [ -z "${CLAUDE_CONFIG_DIR:-}" ] || config="$(printf 'CLAUDE_CONFIG_DIR=%q ' "$CLAUDE_CONFIG_DIR")"
+  printf '/usr/bin/env -i %s/usr/bin/python3 -I %q apply --project %q' "$config" "$root/grounded_agency/sandbox_settings.py" "$project_dir"
+}
 sandbox_unverified_text() {
-  printf '%s' "Claude Code's strict sandbox is not verified for this call (${SANDBOX_REASON:-unknown}), so every Bash call, git stash create included, is a gated mutate and no checkpoint can be taken through Bash. The person can turn it on outside this session: add the settings in hooks/README.md (The strict sandbox) to the user settings file (~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR), then start Claude Code again. This hook refuses those edits from the agent."
+  printf '%s' "Claude Code's strict sandbox is not verified for this call (${SANDBOX_REASON:-unknown}), so every Bash call, git stash create included, is a gated mutate and no checkpoint can be taken through Bash. The person can turn it on outside this session: in a terminal outside Claude Code, run $(setup_apply_line) (hooks/README.md, Setting up the sandbox; /grounded-setup gives the same line), which shows the change and asks before it writes the settings in hooks/README.md (The strict sandbox) to the user settings file (~/.claude/settings.json, or settings.json in CLAUDE_CONFIG_DIR), or add them there by hand; then start Claude Code again. This hook refuses those edits from the agent."
 }
 
 if [ ! -e "$marker" ]; then
