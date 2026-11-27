@@ -56,9 +56,10 @@ configuration files that git, curl, wget, pip and npm read at run time.
   the round; most of them are in the layers that read text, and this page
   puts the redaction and records-guard ones in their own classes.) The open
   structural answer is to classify fewer forms: take the tool's worst case
-  for any command outside a small grammar. RFC-0011, a draft amendment of
-  Standard 1.2.0, makes that the rule for shell-like tools: a call gets the
-  tool's worst case unless the layer has verified that an operating-system
+  for any command outside a small grammar. A proposed amendment of
+  Standard 1.2.0 (RFC-0011, under review and not yet accepted) would make
+  that the rule for shell-like tools: a call would get the tool's worst
+  case unless the layer has verified that an operating-system
   boundary holds for it, with no route outside the boundary and limits on
   writes, credentials and network.
 
