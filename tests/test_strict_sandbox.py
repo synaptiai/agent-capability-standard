@@ -105,9 +105,9 @@ def required_rules(
     project's .claude/hooks, the user configuration directory (and
     ~/.claude.json when ``home`` is given: no CLAUDE_CONFIG_DIR) and the
     hooks' directory, an Edit rule for the .mcp.json of the project and of its
-    repository's top level, Read and
-    Edit rules for the audit key file, and Read
-    rules for the user's credentials."""
+    repository's top level, an Edit rule for ~/.config/acs (the audit key,
+    the remote-write record and its work directories), a Read rule for the
+    audit key file, and Read rules for the user's credentials."""
     deny = list(deny_settings(project)["permissions"]["deny"])
     for base in _forms(project):
         deny += [
@@ -126,8 +126,8 @@ def required_rules(
         deny += [f"Edit(/{form}/.claude.json)" for form in _forms(home)]
     deny.append(f"Edit(/{os.path.realpath(hooks_dir)}/**)")
     for form in _forms(home or os.path.expanduser("~")):
-        key = f"{form}/.config/acs/audit.key"
-        deny += [f"Edit(/{key})", f"Read(/{key})"]
+        deny += [f"Edit(/{form}/.config/acs/**)"]
+        deny += [f"Read(/{form}/.config/acs/audit.key)"]
         deny += [f"Read(/{form}/.ssh/**)"]
         deny += [
             f"Read(/{form}/.config/gh/hosts.yml)",
@@ -606,6 +606,28 @@ class TestDenyRules:
         settings["permissions"]["deny"] = deny
         _write(config / "settings.json", settings)
         assert_relaxed(run_hook(project, config))
+
+    def test_a_rule_for_the_audit_key_alone_does_not_cover_its_directory(
+        self, setup: tuple[Path, Path]
+    ) -> None:
+        """Denying writes to the audit key file alone leaves the
+        remote-write server's record (~/.config/acs/remotes.json) and work
+        directories writable, which choose the programs that server runs
+        outside the sandbox: not strict."""
+        project, config = setup
+        settings = _user(config)
+        deny = [
+            r for r in required_rules(project, config) if "/.config/acs/**" not in r
+        ]
+        deny += [
+            f"Edit(/{form}/.config/acs/audit.key)"
+            for form in _forms(os.path.expanduser("~"))
+        ]
+        settings["permissions"]["deny"] = deny
+        _write(config / "settings.json", settings)
+        result = run_hook(project, config)
+        assert_gated(result, "permissions.deny in user or managed settings has no")
+        assert "/.config/acs/**)" in result.stderr, result.stderr
 
     def test_bare_tool_rules_do_not_count(self, setup: tuple[Path, Path]) -> None:
         project, config = setup
@@ -1325,13 +1347,17 @@ def test_the_refusal_names_no_command_that_does_not_exist() -> None:
     ).exists()
     for path in (
         HOOK,
+        ROOT / "README.md",
+        ROOT / "grounded_agency" / "remote_writes.py",
         ROOT / "hooks" / "README.md",
         ROOT / "spec" / "SECURITY.md",
         ROOT / "CHANGELOG.md",
         ROOT / "CLAUDE.md",
     ):
         if "/grounded-setup" in path.read_text(encoding="utf-8"):
-            assert shipped, f"{path.name} names /grounded-setup, which is not shipped"
+            assert shipped, (
+                f"{path.relative_to(ROOT)} names /grounded-setup, which is not shipped"
+            )
 
 
 @needs_sandbox_system

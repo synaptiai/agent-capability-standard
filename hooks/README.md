@@ -788,7 +788,9 @@ can make a call more relaxed:
     `CLAUDE_CONFIG_DIR`, `.claude.json`) and, without `CLAUDE_CONFIG_DIR`,
     `~/.claude.json` (the user's tool servers): a command that writes them
     changes what the next session, hook or tool server runs;
-  - reads and writes of the audit key file, `~/.config/acs/audit.key`;
+  - writes to `~/.config/acs/` (the audit key, the remote-write record
+    and its work directories, [Remote writes](#remote-writes)) and reads of
+    the audit key file, `~/.config/acs/audit.key`;
   - reads of the user's credentials: `~/.ssh/`, `~/.config/gh/hosts.yml`,
     `~/.git-credentials` and, on macOS, `~/Library/Keychains/` and
     `/Library/Keychains/`;
@@ -863,7 +865,8 @@ absolute, for each project and plugin copy):
     "allowUnsandboxedCommands": false,
     "network": {"allowedDomains": ["example.com"], "strictAllowlist": true},
     "filesystem": {
-      "denyWrite": ["/Users/me/.claude", "/Users/me/.claude.json"],
+      "denyWrite": ["/Users/me/.claude", "/Users/me/.claude.json",
+                    "/Users/me/.config/acs"],
       "denyRead": ["/Users/me/.ssh", "/Users/me/.config/gh/hosts.yml",
                    "/Users/me/.git-credentials", "/Users/me/Library/Keychains",
                    "/Library/Keychains"]
@@ -879,7 +882,7 @@ absolute, for each project and plugin copy):
                            "Edit(//Users/me/project/.mcp.json)",
                            "Edit(//<plugin hooks directory>/**)",
                            "Read(//Users/me/.config/acs/audit.key)",
-                           "Edit(//Users/me/.config/acs/audit.key)"]}
+                           "Edit(//Users/me/.config/acs/**)"]}
 }
 ```
 
@@ -913,7 +916,7 @@ What the hook cannot see, so cannot detect:
 
 ## Remote writes
 
-Once the settings of the `/grounded-setup` command are in force, the
+Under the strict sandbox ([The strict sandbox](#the-strict-sandbox)), the
 agent's commands cannot use git's or gh's credentials: the keychains,
 `~/.ssh`, gh's `hosts.yml` and the token variables are denied to Bash. A
 push, a pull request, a merge, a release or an issue then goes through the
@@ -957,8 +960,10 @@ the GitHub repository gh will act on (from the URL, or `--github
 HOST/OWNER/REPO`) and the git and gh it found on the person's PATH, asks,
 and writes `~/.config/acs/remotes.json` (mode 600) with the project's
 directory, its git directory, the URL and the paths of git and gh. The
-setup command's settings deny `~/.config/acs/` to the agent's commands and
-file tools, so the agent cannot change the target or the programs; the
+strict sandbox denies writes to `~/.config/acs/` to the agent's commands
+and file tools, and the hook refuses (F504) any call that names
+`~/.config/acs/remotes.json` or `~/.config/acs/work/`, so the agent cannot
+change the target or the programs; the
 project's `.git/config`, which the agent can write, never chooses them.
 With no record, or a record whose git directory is no longer the
 project's, every tool refuses. A URL holding a password, a transport
@@ -1022,15 +1027,18 @@ target, for example `push branch 'main' to the recorded origin,
 fast-forward only` or `merge pull request '42' by 'squash' on the recorded
 origin`. It shows every value the server accepts (branch and tag names,
 numbers, methods, logins and object ids are ASCII letters, digits and
-`. _ / @ + -`), except one in which the secret scan finds a credential,
-which is shown as `(a value not shown)`, as is a value the server would
-refuse. The hook reads every string of a remote write's input for the
-layer's records, as it does for any MCP tool, so a `title`, `body` or
-`notes` that names `.claude/checkpoint.ok`, `.claude/checkpoints` or
-`acs/checkpoints` is refused F504 although the server passes it to gh only
-as a value; such an issue, pull request or release is written without
-naming those paths. The SDK mapper classifies the tools the same way; a
-host that offers the server under another name loads
+`. _ / @ + -`). A call with such a value in which the secret scan finds
+a credential is refused (F504) before any checkpoint is used, since the
+request could not show its target; a value the server would refuse is
+shown as `(a value not shown)`. The hook reads every string of a remote
+write's input for the layer's records, as it does for any MCP tool, so a
+`title`, `body` or `notes` that names `.claude/checkpoint.ok`,
+`.claude/checkpoints`, `acs/checkpoints` or the server's own record
+(`~/.config/acs/remotes.json`, `~/.config/acs/work/`) is refused F504
+although the server passes it to gh only as a value; such an issue, pull
+request or release is written without naming those paths. The SDK mapper
+classifies the tools the same way; a host that offers the server under
+another name loads
 `remote_writes.binding_records("<its prefix>")` with
 `ToolCapabilityMapper.load_bindings`.
 

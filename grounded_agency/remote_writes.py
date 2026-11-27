@@ -1,6 +1,6 @@
 """Typed remote writes: the plugin's MCP server for pushes, pull requests, releases and issues.
 
-Under the settings ``/grounded-setup`` writes, the agent's commands run in
+Under the strict sandbox (hooks/README.md), the agent's commands run in
 Claude Code's sandbox with git's and gh's credentials denied to them: the
 keychains, ``~/.ssh``, gh's ``hosts.yml`` and the token variables. A plugin's
 MCP server runs outside that sandbox, with the user's own gh login and
@@ -27,10 +27,11 @@ The server is trusted code that runs unconfined, so it treats every input
 as untrusted:
 
 - **No repository field.** The target is the origin a person recorded with
-  ``record`` (below), in ``~/.config/acs/remotes.json``: a directory the
-  setup command's settings deny to the agent's commands and to the file
-  tools. The repository's own ``.git/config``, which the agent can write,
-  never chooses the target. With no record for the project, every tool
+  ``record`` (below), in ``~/.config/acs/remotes.json``, in a directory the
+  strict sandbox denies writes to, for the agent's commands and the file
+  tools; the pre-tool-use hook also refuses any call that names the record.
+  The repository's own ``.git/config``, which the agent can write, never
+  chooses the target. With no record for the project, every tool
   refuses. A local origin (a path) must lie outside the project and the
   temporary directories, since the receiving side of a local push runs
   that repository's own hooks and configuration.
@@ -159,7 +160,9 @@ class RemoteWriteError(Exception):
 
 # The characters of a branch or tag name. The pre-tool-use hook shows a
 # value in an approval request only when it matches this class (a test keeps
-# the two equal), so every target the server acts on is shown.
+# the two equal), and refuses a call with a value of this class that looks
+# like a credential, which it would not show; so every target the server
+# acts on is shown.
 REF_CHARACTERS = r"[A-Za-z0-9._/@+-]+"
 
 
@@ -573,8 +576,8 @@ def _home_directory() -> str:
 
 def record_path(home: str) -> str:
     """The origin record: ``~/.config/acs/remotes.json``, in the directory
-    of the audit key, which the setup command denies to the agent's
-    commands and to the file tools."""
+    of the audit key, which the strict sandbox denies to the agent's
+    commands and to the file tools for writing."""
     return os.path.join(home, ".config", "acs", "remotes.json")
 
 

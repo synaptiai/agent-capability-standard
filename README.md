@@ -309,8 +309,8 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 ### Remote Writes
 
 The plugin also ships an MCP server, `grounded_agency/remote_writes.py`,
-for the remote writes the agent's commands cannot make once the settings of
-`/grounded-setup` deny them git's and gh's credentials: `push`, `tag_push`,
+for the remote writes the agent's commands cannot make under the strict
+sandbox, which denies them git's and gh's credentials: `push`, `tag_push`,
 `pr_create`, `pr_merge`, `release_create`, `issue_create` and
 `issue_assign`, one action per call. No tool takes a repository: the target
 is the origin a person records for the project, outside Claude Code, with

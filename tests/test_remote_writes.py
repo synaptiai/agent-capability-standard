@@ -978,7 +978,9 @@ def test_git_dir_is_made_is_the_packages(path: str) -> None:
 
 def test_the_hook_shows_exactly_the_values_the_server_accepts() -> None:
     """The class of values the hook shows in an approval request is the
-    class of branch and tag names the server accepts, so no target the
+    class of branch and tag names the server accepts; a value of that class
+    the secret scan flags is refused, not hidden
+    (test_the_hook_does_not_show_a_secret_in_the_target), so no target the
     server acts on is hidden from the person who approves it."""
     text = HOOK.read_text(encoding="utf-8")
     match = re.search(r'\[\[ "\$value" =~ \^(\[[^]]+\])\{1,200\}\$ \]\]', text)
@@ -1122,10 +1124,60 @@ def test_the_hook_does_not_show_a_secret_in_the_target(tmp_path: Path) -> None:
     project.mkdir()
     _marker(project)
     token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
-    done = _run_hook(project, "push", {"branch": token})
-    assert done.returncode == 0, done.stderr
-    assert token not in done.stdout + done.stderr
-    assert "(a value not shown)" in done.stdout
+    # The server would accept the token as a branch name, so the hook
+    # refuses the call rather than ask for approval of a target it hides.
+    assert rw.validate_ref_name(token, "branch") == token
+    for tool, tool_input in (
+        ("push", {"branch": token}),
+        ("tag_push", {"tag": token}),
+        ("pr_create", {"head": "main", "base": token, "title": "t", "body": "b"}),
+        ("issue_assign", {"number": 1, "assignee": token}),
+    ):
+        done = _run_hook(project, tool, tool_input)
+        assert done.returncode == 2, (tool, done.stdout, done.stderr)
+        assert token not in done.stdout + done.stderr
+        assert done.stderr.startswith("F504 CONSTRAINT_VIOLATED"), done.stderr
+        assert "looks like a credential" in done.stderr
+    # The refusal uses no checkpoint.
+    assert (project / ".claude" / "checkpoint.ok").exists()
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Write", {"file_path": "~/.config/acs/remotes.json", "content": "{}"}),
+        ("Edit", {"file_path": "/Users/me/.config/acs/./remotes.json"}),
+        ("Bash", {"command": "rm -rf ~/.config//acs/work"}),
+        ("Bash", {"command": "cat > ~/.config/ACS/Remotes.JSON"}),
+    ],
+)
+def test_the_hook_refuses_a_call_that_names_the_record(
+    tmp_path: Path, tool: str, tool_input: dict[str, Any]
+) -> None:
+    """The record and the work directories choose the origin and the git
+    and gh the server runs outside the sandbox: a gated call that names
+    them is refused, whatever its approval."""
+    project = tmp_path / "p"
+    project.mkdir()
+    _marker(project)
+    payload = {
+        "tool_name": tool,
+        "tool_input": tool_input,
+        "permission_mode": "default",
+        "cwd": str(project),
+    }
+    done = subprocess.run(
+        ["bash", str(HOOK)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(project)},
+        timeout=30,
+    )
+    assert done.returncode == 2, (done.stdout, done.stderr)
+    assert "remote-write server's record" in done.stderr, done.stderr
+    assert (project / ".claude" / "checkpoint.ok").exists()
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
@@ -1229,6 +1281,67 @@ def test_the_server_speaks_mcp(recorded: Setup) -> None:
     assert by_id[6]["error"]["code"] == -32601
     assert by_id[7]["result"] == {}
     assert len(responses) == 8  # no answer to the notification
+
+
+SYSTEM_CALLS = """
+import importlib.util, json, sys
+module, project, home, path = sys.argv[1:5]
+spec = importlib.util.spec_from_file_location("remote_writes", module)
+rw = importlib.util.module_from_spec(spec)
+sys.modules["remote_writes"] = rw
+spec.loader.exec_module(rw)
+ctx = rw.Context(project, home, path, ())
+out = {}
+for name, arguments in json.loads(sys.argv[5]):
+    try:
+        rw.call_tool(name, arguments, ctx)
+        out[name] = "ok"
+    except rw.RemoteWriteError as e:
+        out[name] = "refused: " + str(e)
+print(json.dumps(out))
+"""
+
+
+@pytest.mark.skipif(
+    not os.path.exists(SYSTEM_PYTHON), reason="needs the system's /usr/bin/python3"
+)
+def test_the_system_python_performs_the_calls(recorded: Setup) -> None:
+    """plugin.json starts the server with /usr/bin/python3 (3.9 on macOS):
+    under that interpreter, with no untrusted roots, a push, a tag push and
+    a gh call are made."""
+    git("tag", "-a", "-m", "one", "v1", cwd=recorded.project)
+    calls = [
+        ["push", {"branch": "main"}],
+        ["tag_push", {"tag": "v1"}],
+        ["pr_create", {"head": "main", "base": "main", "title": "t", "body": "b"}],
+    ]
+    done = subprocess.run(
+        [
+            SYSTEM_PYTHON,
+            "-I",
+            "-c",
+            SYSTEM_CALLS,
+            str(MODULE),
+            str(recorded.project),
+            str(recorded.home),
+            recorded.path,
+            json.dumps(calls),
+        ],
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout) == {
+        "push": "ok",
+        "tag_push": "ok",
+        "pr_create": "ok",
+    }
+    assert recorded.remote_ref("refs/heads/main") is not None
+    assert recorded.remote_ref("refs/tags/v1") is not None
+    assert recorded.calls()[-1]["argv"][:2] == ["pr", "create"]
 
 
 def test_the_server_performs_a_call(recorded: Setup) -> None:

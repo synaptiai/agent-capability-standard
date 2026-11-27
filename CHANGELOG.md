@@ -2382,11 +2382,14 @@ here and marked so.
   `issue_assign`, one action per call; Claude Code names them
   `mcp__plugin_agent-capability-standard_remote__<tool>`. The server runs
   outside the sandbox with the user's own git and gh credentials, which
-  the setup command's settings deny to Bash once they are in force (#179).
-  It takes no repository argument: the target is the origin a person
-  records with `remote_writes.py record`, in a terminal outside Claude
-  Code, in `~/.config/acs/remotes.json`, a directory those settings deny to
-  the agent; the record also names the git and gh found on the person's
+  the strict sandbox denies to Bash. It takes no repository argument: the
+  target is the origin a person records with `remote_writes.py record`, in
+  a terminal outside Claude Code, in `~/.config/acs/remotes.json`. The
+  strict sandbox the hook verifies requires writes to the whole of
+  `~/.config/acs/` denied, not only to the audit key file, and the hook
+  refuses (F504) a gated call that names the record or
+  `~/.config/acs/work/`. The record
+  also names the git and gh found on the person's
   PATH, which are the programs the server runs (it does not search its own
   PATH). With no record every tool refuses. A local origin must lie
   outside the project, the temporary directories and Claude Code's plugins
@@ -2411,8 +2414,9 @@ here and marked so.
   server). Each tool is bound as a gated `mutate` (Standard 1.2.0
   §5.18.1): the pre-tool-use hook asks for a checkpoint and a person's
   approval for every call and names the call's target in the request
-  (`push branch 'main' to the recorded origin, fast-forward only`), and
-  the SDK mapper classifies the tools the same way
+  (`push branch 'main' to the recorded origin, fast-forward only`); a
+  call whose target looks like a credential, which the request could not
+  show, is refused (F504). The SDK mapper classifies the tools the same way
   (`remote_writes.binding_records(prefix)` gives the records for a host
   that names the server otherwise) (`hooks/README.md`, "Remote writes").
 
