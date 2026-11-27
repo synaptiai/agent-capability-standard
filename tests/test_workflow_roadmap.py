@@ -53,6 +53,7 @@ def _steps(workflow: dict[str, Any]) -> str:
 
 def test_the_roadmap_lists_every_workflow_of_the_catalog() -> None:
     catalog = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
+    catalog.pop("catalog")  # the catalog's manifest (STANDARD v1.2 §5.1.1)
     count, entries = _current()
     assert count == len(entries) == len(catalog)
     assert set(entries) == set(catalog)

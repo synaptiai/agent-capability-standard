@@ -901,7 +901,7 @@ class TestCatalogData:
             assert wf is not None
             data = wf.to_dict()
             rebuilt.add_workflow(WorkflowDefinition.from_dict(name, data))
-            assert data["spec_version"] == "1.1.0"
+            assert data["spec_version"] == "1.2.0"
         assert rebuilt.validate_report() == []
 
     def test_step_round_trip_keeps_every_field(self) -> None:
@@ -1077,7 +1077,7 @@ class TestValidationSeesEdits:
         wf = engine.get_workflow("debug_code_change")
         assert wf is not None and wf.source is not None
         assert "spec_version" not in wf.source
-        assert wf.validation_data() == {**wf.source, "spec_version": "1.1.0"}
+        assert wf.validation_data() == {**wf.source, "spec_version": "1.2.0"}
 
 
 class TestMalformedCatalogs:

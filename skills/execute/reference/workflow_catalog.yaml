@@ -1,4 +1,4 @@
-# Standard version: 1.1.0
+# Standard version: 1.2.0
 # Vendored copy of schemas/workflow_catalog.yaml, schema paths rewritten to
 # the co-located copies. DO NOT EDIT — regenerate with:
 # python tools/sync_skill_schemas.py
@@ -40,6 +40,30 @@
 # New workflow patterns (Issue #9):
 #   monitor-and-replan: Detect world changes and trigger replanning when needed
 #   clarify-intent: Resolve ambiguous user requests through clarification
+#
+# The manifest (STANDARD v1.2 §5.1.1) names this catalog acs.reference, so
+# another catalog can invoke its workflows by qualified id, for example
+# acs.reference/world_model_build, when it is validated or run with this
+# catalog in its catalog set.
+
+catalog:
+  id: acs.reference
+  version: 1.0.0
+  ontology: "2.2"
+  description: The reference workflows of the Agent Capability Standard.
+  exports:
+  - monitor_and_replan
+  - clarify_intent
+  - debug_code_change
+  - world_model_build
+  - capability_gap_analysis
+  - digital_twin_sync_loop
+  - digital_twin_bootstrap
+  - rag_pipeline
+  - security_assessment
+  - multi_agent_orchestration
+  - data_quality_pipeline
+  - model_deployment
 
 monitor_and_replan:
   goal: Detect world changes that invalidate the current plan and trigger replanning when needed.
@@ -474,6 +498,10 @@ debug_code_change:
     - when: ${verify_out} == null || ${verify_out.passed} == true
       action: skip
       message: No fix was applied, or the fix passed verification. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
   - capability: audit
     purpose: Record what changed and why, and whether it was rolled back.
     risk: medium
@@ -1200,6 +1228,10 @@ digital_twin_sync_loop:
     - when: ${mutate_out} == null || ${verify_out.passed} == true
       action: skip
       message: No mutation was applied, or the twin passed verification. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
   - capability: audit
     purpose: Record provenance, tool usage, diffs, decision rationale, and any rollback.
     risk: medium
@@ -1675,7 +1707,7 @@ multi_agent_orchestration:
       constraints: "${decompose_out.structure: object}"
     failure_modes: []
   - capability: delegate
-    purpose: Assign subtasks to appropriate agents based on capabilities.
+    purpose: Delegate the planned subtasks to the subtask worker agent.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1685,7 +1717,7 @@ multi_agent_orchestration:
     store_as: delegate_out
     input_bindings:
       task: "${plan_out.dependencies: object}"
-      agent: "${task.agent_pool[0]: string}"
+      agent: subtask-worker
     failure_modes:
     - condition: No suitable agent available for subtask
       when: ${delegate_out.accepted} == false
@@ -2070,6 +2102,10 @@ model_deployment:
     - when: ${verify_deploy_out.passed} == true
       action: skip
       message: Deployment verified successfully. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
     failure_modes: []
   - capability: audit
     purpose: Record deployment event with full provenance, including any rollback.

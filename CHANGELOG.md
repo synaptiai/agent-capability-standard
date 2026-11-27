@@ -2370,6 +2370,26 @@ here and marked so.
   the record.
 
 ### Changed
+- The reference catalog, `schemas/workflow_catalog.yaml`, targets Standard
+  1.2.0 and carries a manifest (§5.1.1): id `acs.reference`, version 1.0.0,
+  ontology 2.2, exporting all twelve workflows, so another catalog can
+  invoke them by qualified id (`acs.reference/world_model_build`) when it
+  is validated or run with this catalog in its catalog set (#155). Under
+  the 1.2 rules, the rollback steps of `debug_code_change`,
+  `digital_twin_sync_loop` and `model_deployment` have an after-gate that
+  stops the run when `${rollback_out.restored}` is false (§12.5, Checked
+  Rollback), and the `delegate` step of `multi_agent_orchestration`
+  delegates to the literal agent `subtask-worker` in place of
+  `${task.agent_pool[0]}` (§5.15.2). The skill-bundled copies are
+  regenerated.
+- `examples/digital_twin_sync_loop.workflow_catalog.yaml` is a catalog of
+  its own, `acs.examples.twin`, whose workflow `plant_twin_bootstrap`
+  invokes `acs.reference/world_model_build` and
+  `acs.reference/digital_twin_sync_loop` in place of copies of them. CI
+  validates the domain catalogs and the examples with the reference
+  catalog in their catalog set (`--with-catalog
+  schemas/workflow_catalog.yaml`), and a test checks that the example's
+  invokes resolve there (#155).
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
   command, `git stash create`, a restore of a recorded checkpoint) only
   under Claude Code's strict sandbox, which it verifies for the call from

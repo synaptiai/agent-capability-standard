@@ -25,24 +25,34 @@ python scripts/run_conformance.py
 
 ## Example Workflows
 
-`digital_twin_sync_loop.workflow_catalog.yaml` holds the digital twin
-workflows of the reference catalog (`world_model_build`,
-`digital_twin_sync_loop`, `digital_twin_bootstrap`), copied verbatim; a test
-keeps them identical. CI validates it in strict mode:
+`digital_twin_sync_loop.workflow_catalog.yaml` is a catalog of its own,
+`acs.examples.twin`, with one workflow, `plant_twin_bootstrap`. It reuses the
+reference catalog's digital twin workflows instead of copying them: its
+`invoke` steps name them by qualified id, `acs.reference/world_model_build`
+and `acs.reference/digital_twin_sync_loop` (Standard 1.2.0 §5.1.1). The
+reference catalog's manifest gives it the id `acs.reference` and exports
+those workflows.
+
+A qualified id resolves only when its catalog is in the catalog set, so the
+example is validated with the reference catalog beside it. CI does this in
+strict mode:
 
 ```mermaid
 ---
-title: Where the example workflows come from
+title: How the example reaches the reference workflows
 ---
 flowchart TB
-  accDescr: The example catalog holds the three digital twin workflows copied verbatim from the reference catalog, a test keeps the copies identical, and CI validates the example catalog in strict mode.
-  ref[Reference catalog] -->|copied verbatim, a test keeps them identical| ex["Example catalog: world_model_build, digital_twin_sync_loop, digital_twin_bootstrap"]
-  ex -->|validated in strict mode| ci[CI]
+  accDescr: CI validates the example catalog in strict mode with the reference catalog in its catalog set; the example's workflow plant_twin_bootstrap invokes world_model_build and digital_twin_sync_loop of the reference catalog by qualified id.
+  ci[CI, strict mode] -->|validates, with the reference catalog in the set| ex["Example catalog acs.examples.twin"]
+  ex -->|invokes by qualified id| ref["Reference catalog acs.reference"]
 ```
 
 ```bash
-python tools/validate_workflows.py --catalog examples/digital_twin_sync_loop.workflow_catalog.yaml --strict
+python tools/validate_workflows.py --catalog examples/digital_twin_sync_loop.workflow_catalog.yaml --with-catalog schemas/workflow_catalog.yaml --strict
 ```
+
+Validated alone, each qualified id is W607 (its catalog is not in the set),
+which fails under `--strict`.
 
 The workflow skills run the reference catalog's workflows step by step:
 - `skills/debug-workflow/` - Diagnose and fix a bug (`debug_code_change`)

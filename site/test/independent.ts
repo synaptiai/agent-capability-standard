@@ -49,9 +49,15 @@ export function claudeLayerTable(): LayerRow[] {
   return rows;
 }
 
-/** Top-level mapping keys of a YAML file, by a line scan; `x-` vendor keys are left out. */
+/** Whether a top-level key of a catalog names a workflow: a catalog's `catalog`
+ * manifest (§5.1.1) and `x-` vendor keys do not. */
+export function isWorkflowKey(key: string): boolean {
+  return key !== 'catalog' && !key.startsWith('x-');
+}
+
+/** Top-level mapping keys of a YAML file that name workflows, by a line scan. */
 export function topLevelKeys(text: string): string[] {
-  return [...text.matchAll(/^([A-Za-z_][A-Za-z0-9_]*):/gm)].map((m) => m[1]!);
+  return [...text.matchAll(/^([A-Za-z_][A-Za-z0-9_]*):/gm)].map((m) => m[1]!).filter(isWorkflowKey);
 }
 
 /** Workflow files: the core catalog and every domain catalog, by directory listing. */
@@ -172,7 +178,7 @@ export function catalogSteps(repoPath: string): Map<string, string[]> {
   for (const l of repoText(repoPath).split('\n')) {
     const top = /^([A-Za-z_][A-Za-z0-9_-]*):/.exec(l);
     if (top) {
-      current = top[1]!.startsWith('x-') ? null : [];
+      current = isWorkflowKey(top[1]!) ? [] : null;
       if (current) out.set(top[1]!, current);
       continue;
     }
@@ -209,7 +215,7 @@ export function catalogOnErrorCodes(repoPath: string): Map<string, string[]> {
   for (const l of repoText(repoPath).split('\n')) {
     const top = /^([A-Za-z_][A-Za-z0-9_-]*):/.exec(l);
     if (top) {
-      current = top[1]!.startsWith('x-') ? null : [];
+      current = isWorkflowKey(top[1]!) ? [] : null;
       if (current) out.set(top[1]!, current);
       continue;
     }

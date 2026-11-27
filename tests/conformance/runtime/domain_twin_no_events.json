@@ -446,6 +446,12 @@
               "when": "${mutate_out} == null || ${verify_out.passed} == true",
               "action": "skip",
               "message": "No mutation was applied, or the twin passed verification. No rollback needed."
+            },
+            {
+              "when": "${rollback_out.restored} == false",
+              "phase": "after",
+              "action": "stop",
+              "message": "The rollback did not restore everything; see unrestored."
             }
           ]
         },

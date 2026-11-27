@@ -8,7 +8,7 @@ import { loadWorkflows, parseCatalog } from '../src/data/workflows';
 import { dataFlowGrid, indexStripLabel, readLane, readsList, riskSummary, stripKey, workflowSpine } from '../src/lib/workflow-figures';
 import { rowSlices } from '../src/pixel/lines';
 import { workflowsIndexTwin, workflowTwin } from '../src/twins/workflows';
-import { allCatalogSteps, catalogFiles, repoText } from './independent';
+import { allCatalogSteps, catalogFiles, isWorkflowKey, repoText } from './independent';
 import { ALL_GRIDS, resolveGlyphKey } from '../src/pixel/keys';
 
 // A 5-step workflow with a 2-step parallel group, a sub-workflow step, every
@@ -115,7 +115,7 @@ function scanActions(): Map<string, { gates: string[]; failures: string[] }[]> {
     for (const l of repoText(f).split('\n')) {
       const top = /^([A-Za-z_][\w-]*):/.exec(l);
       if (top) {
-        steps = top[1]!.startsWith('x-') ? null : [];
+        steps = isWorkflowKey(top[1]!) ? [] : null;
         if (steps) out.set(top[1]!, steps);
         block = null;
         continue;

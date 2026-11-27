@@ -11,8 +11,10 @@ python tools/validate_workflows.py --strict
 
 ### Validate the domain workflow catalogs and examples (CI runs these in strict mode)
 ```bash
-for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
+for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --with-catalog schemas/workflow_catalog.yaml --strict; done
 ```
+Each is validated with the reference catalog in its catalog set (Standard
+1.2.0 §5.1.1), so an `invoke` of `acs.reference/<workflow>` resolves there.
 
 ### Validate domain profiles against schema
 ```bash
