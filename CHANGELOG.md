@@ -2496,6 +2496,37 @@ here and marked so.
 - `/grounded-setup` denies sandboxed reads of each git directory's `acs`
   directory, which holds the checkpoint key, in `sandbox.filesystem.denyRead`
   and `sandbox.credentials.files`, as well as by the `Read(...)` rules.
+- Python SDK and TypeScript package: `LivenessWatcher` (#170), exported
+  from `grounded_agency.workflows` and from the `@synaptiai/acs-core`
+  index, keeps the liveness count of one `AwaitEvent` wait. It counts the
+  consecutive missed heartbeats (`push`) or failed probes (`probe`), goes
+  back to zero when the source answers, and answers `{"kind":
+  "LivenessLost"}` once `failure_threshold` are missed in a row; `lost_at`
+  (`lostAt`) gives the time of the loss, so a host can tell R406 from
+  R401, and `next_check_ms` (`nextCheckMs`) says when to look again (an
+  overdue probe is due at once). Both follow the same rules.
+- Plugin: `tools/check_audit_invariants.py` (#172) checks the safety
+  layer's records. It reads `.claude/audit.log`, the used checkpoint
+  markers and, with `--records`, the SDK adapter's exported action records;
+  it counts the lines by tool, status, settings and plugin version, and
+  lists the changes of `config_sha256` and the gaps in the adapter's
+  sequence numbers. It exits 1, printing each call id, on a call gated by
+  its tool name that ran with no used marker, on an executed `mutate`,
+  `send`, unbound, Skill, Agent or Task call in the adapter's records with
+  no checkpoint or no approval (a control-only tool needs neither), and on
+  an anomaly: a line recorded with approval off, a change of the hooks'
+  configuration, or a share of refused calls above `--max-refusal-rate`
+  (default 0.2, counted by call id). It exits 2 when it cannot run.
+  `--verify` adds the checks of `tools/verify_audit_log.py`.
+- Plugin: `tools/export_audit_witness.py` (#143) copies the audit head,
+  and its anchor where there is one, into a destination directory
+  (`--dest`, else `ACS_AUDIT_WITNESS_DIR`), each as a new read-only file
+  named by the time and the session; no copy replaces another. It refuses
+  a destination inside the project directory or its git directories, and
+  `ACS_AUDIT_WITNESS_DIR` when the project's settings files set it.
+  `tools/verify_audit_log.py --witness` also takes a directory and checks
+  every `.head` file in it, naming the witness each failure rests on
+  (`spec/SECURITY.md` §5.5).
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
