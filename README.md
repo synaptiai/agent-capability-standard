@@ -454,7 +454,9 @@ See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.m
 
 ```bash
 git clone https://github.com/synaptiai/agent-capability-standard.git
-cd agent-capability-standard && pip install -e ".[sdk]"
+cd agent-capability-standard
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[sdk]"
 ```
 
 To adopt the standard in stages, from the validator in CI to a safety layer and an executor, see the [adoption guide](docs/guides/ADOPTION.md).
