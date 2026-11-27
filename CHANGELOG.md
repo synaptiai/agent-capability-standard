@@ -26,7 +26,7 @@ package, by component. A change described under Changed or Fixed is named
 here and marked so.
 
 **Before you upgrade.** The changes most likely to stop or change a setup
-that works with v2.0.0, each linked to its entry below.
+that works with v2.0.0, each linked to its entry under Upgrading.
 
 - Python 3.14 or newer is required, and Rust 1.88 or newer to build from
   source ([requirements](#upgrade-requirements)).
@@ -3082,7 +3082,7 @@ from this plugin release.
 ## [v1.2.0] — 2026-02-04
 
 The tag `v1.2.0` points at a tree whose `.claude-plugin/plugin.json` reports
-version 1.0.5; `main` reports 1.2.0 from commit 2cf4986, after the tag.
+version 1.0.5; commit 2cf4986, after the tag, set it to 1.2.0.
 
 The full list is in the
 [v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0).
