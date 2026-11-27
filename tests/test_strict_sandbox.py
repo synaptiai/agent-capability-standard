@@ -11,6 +11,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1332,6 +1333,28 @@ def test_the_refusal_names_no_command_that_does_not_exist() -> None:
     ):
         if "/grounded-setup" in path.read_text(encoding="utf-8"):
             assert shipped, f"{path.name} names /grounded-setup, which is not shipped"
+
+
+def test_the_refusal_gives_the_setup_scripts_terminal_line(tmp_path: Path) -> None:
+    """With the sandbox unverified, the refusal names the setup script's
+    apply line for a terminal: a script that exists, this project, and the
+    user's CLAUDE_CONFIG_DIR passed through env -i, every path quoted."""
+    project = _repo(tmp_path / "pro ject")
+    config = tmp_path / "con fig"
+    _write(config / "settings.json", {})
+    result = run_hook(project, config)
+    assert_gated(result)
+    found = re.search(
+        r"run (/usr/bin/env -i .*? apply --project .*?) \(", result.stderr
+    )
+    assert found, result.stderr
+    words = shlex.split(found.group(1))
+    assert words[:3] == ["/usr/bin/env", "-i", f"CLAUDE_CONFIG_DIR={config}"]
+    assert words[3:5] == ["/usr/bin/python3", "-I"]
+    script = Path(words[5])
+    assert script == (ROOT / "grounded_agency" / "sandbox_settings.py").resolve()
+    assert script.is_file()
+    assert words[6:] == ["apply", "--project", str(project)]
 
 
 @needs_sandbox_system
