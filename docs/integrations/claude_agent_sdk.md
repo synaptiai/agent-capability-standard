@@ -168,7 +168,10 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 | BashOutput, TaskOutput, ListMcpResourcesTool | observe | low | No | No |
 | ReadMcpResourceTool | retrieve | low | No | No |
 | ExitPlanMode | inquire | low | No | No |
+| **`mcp__plugin_agent-capability-standard_remote__`{`push`, `tag_push`, `pr_create`, `pr_merge`, `release_create`, `issue_create`, `issue_assign`}** (the plugin's remote-write tools) | **mutate** | **high** | **Yes** | **Yes** |
 | **any other tool**, `Monitor`, `KillShell` and `TaskStop` (they run a command or stop a process) included | **unbound** | **high** | **Yes** | **Yes** |
+
+The remote-write tools are the plugin's MCP server's ([hooks/README.md](../../hooks/README.md#remote-writes)), under the names Claude Code gives them; a host that offers the server under another name loads `remote_writes.binding_records("<its prefix>")` with `load_bindings`.
 
 `Skill`, `Agent` and `Task` are their own capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and `send`, whatever the skill or agent: Claude Code runs the shell commands a skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's arguments substituted into them) as the skill loads, under its `allowed-tools`, and the hooks and MCP servers a subagent's definition names as the subagent runs, and none of these reaches the adapter's hooks; a project's skill or agent can take any name, a built-in agent's included ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). So each such call needs a checkpoint and approval, and a destination policy refuses it. Loading a skill's instructions saves and restores nothing: `Skill(checkpoint)` takes no checkpoint, the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)), so run `git stash create` before the Skill call too.
 

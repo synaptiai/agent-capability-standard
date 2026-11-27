@@ -544,12 +544,14 @@ class TestPerformance:
 
     def test_insert_evict_time_does_not_grow_with_the_store(self) -> None:
         """Benchmark: 10K insert+evict cycles with O(1) eviction take the
-        same time in a full store of 5000 anchors as in one of 20000.
-        Eviction that scanned the store would take about four times as
-        long in the store four times larger. The time limit is loose,
-        because a busy CI runner (macOS in particular) can take more than
-        a second for work that takes a fraction of one on an idle
-        machine."""
+        same time in a full store of 5000 anchors as in one of 40000.
+        Eviction that scanned the store grows with it: a scan added to
+        each eviction took 3.5 times as long in the store eight times
+        larger. The time limit is loose, because a busy CI runner (macOS
+        in particular) can take more than a second for work that takes a
+        fraction of one on an idle machine. Each size is timed three
+        times, in turn, and each small timing is compared with the large
+        one timed right after it."""
 
         def seconds_for(capacity: int) -> float:
             store = EvidenceStore(max_anchors=capacity)
@@ -570,10 +572,21 @@ class TestPerformance:
             assert len(store) == capacity
             return elapsed
 
-        small = seconds_for(5000)
-        large = seconds_for(20000)
+        # Three runs of each, taken in turn, each small timing compared
+        # with the large one timed right after it: a busy runner only adds
+        # time, and a pair timed together sees the same slow stretch
+        smalls, larges = [], []
+        for _ in range(3):
+            smalls.append(seconds_for(5000))
+            larges.append(seconds_for(40000))
+        small = min(smalls)
         assert small < 5.0, f"10K insert+evict took {small:.3f}s, expected < 5.0s"
-        assert large < 2 * max(small, 0.5), (small, large)
+        assert any(
+            lg < 2 * max(sm, 0.5) for sm, lg in zip(smalls, larges, strict=True)
+        ), (
+            smalls,
+            larges,
+        )
 
 
 # ─── Eviction edge cases ───
