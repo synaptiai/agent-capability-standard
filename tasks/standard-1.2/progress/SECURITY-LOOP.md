@@ -7850,11 +7850,18 @@ open pull requests and are left to the wave-2 pass that edits §5.5 once.
 
 ### Checks after the batch
 
+On the round's fixes merged with origin/main at 18c38b74:
+
 - TypeScript package: `npm run build:wasm` (toolchain 1.99.1), `npm run
   build`, `npm run check`, `npm test` (2186 passed).
-- Binding: `tsc --noEmit`, `vitest run` (311 passed, 2 skipped).
+- Binding: `tsc --noEmit`, `vitest run` (318 passed, 2 skipped).
 - Old code: the new tests against 8ec818c2's `grounded.ts`, `lint.ts` and
-  `binding.ts`, copied in place and then restored: 8 of 18 binding tests
-  and 9 of 17 package tests fail; the controls pass.
-- No Python, Rust, hook or skill file changed, so the Python suite, the
-  Rust checks and the hook tests were not run.
+  `binding.ts`, copied in place and then restored: 10 of 22 binding tests
+  and 9 of 17 package tests fail; the controls pass. The tests of defect 4
+  against the `audit.ts`, `grounded.ts` and `records.ts` that carried the
+  first three fixes: 2 of 3 fail; the control passes.
+- `tools/validate_doc_links.py`.
+- Not run: the site build and the figure-gap sweep for the Standard Agents
+  guide (no Chromium run here). No Python, Rust, hook or skill file
+  changed, so the Python suite, the Rust checks and the hook tests were not
+  run.
