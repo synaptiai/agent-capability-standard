@@ -379,9 +379,14 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   The hooks' own git commands run with `core.fsmonitor` and hooks
   turned off and no object fetched (`hgit`), and the take hook's clean-tree
   check with the repository's filters turned off.
+- The plugin's remote-write tools (`push`, `tag_push`, `pr_create`,
+  `pr_merge`, `release_create`, `issue_create`, `issue_assign` of its MCP
+  server, named `mcp__plugin_agent-capability-standard_remote__<tool>`):
+  `mutate`, bound (§5.18.1); the approval request names the call's target
+  ([Remote writes](#remote-writes)).
 - Any other tool (`Monitor` and `PowerShell`, which run commands,
-  `EnterWorktree`, `ExitWorktree`, every MCP tool, a tool the hook does not
-  know) is unbound: `mutate`, since a layer cannot know that an unknown tool
+  `EnterWorktree`, `ExitWorktree`, every other MCP tool, a tool the hook
+  does not know) is unbound: `mutate`, since a layer cannot know that an unknown tool
   only reads (§5.18.2). Its approval request says
   `<tool> (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2)`.
 
@@ -704,6 +709,129 @@ anchor is not kept) until it is removed.
 The hooks write a new marker and a new head in `.claude/checkpoints/`, and
 new entries, keys and anchors in `acs/`, then rename them onto the record,
 so no file a hook writes is outside the rules before it becomes a record.
+
+## Remote writes
+
+Once the settings of the `/grounded-setup` command are in force, the
+agent's commands cannot use git's or gh's credentials: the keychains,
+`~/.ssh`, gh's `hosts.yml` and the token variables are denied to Bash. A
+push, a pull request, a merge, a release or an issue then goes through the
+plugin's MCP server,
+[`grounded_agency/remote_writes.py`](../grounded_agency/remote_writes.py).
+A plugin's MCP server runs outside the sandbox, with the user's own gh
+login and network (Claude Code 2.1.332 on macOS, 2026-11-25), so the
+server's code is trusted and unconfined, and it treats every argument as
+untrusted.
+
+| Tool | Arguments | What one call does |
+|------|-----------|--------------------|
+| `push` | `branch`, optional `force_with_lease` (a full object id) | Pushes `refs/heads/<branch>` to the same branch of the origin. Without a lease the push must fast-forward; with one, the remote branch is replaced only while it points at that object id |
+| `tag_push` | `tag` | Pushes `refs/tags/<tag>`; a tag the origin already has is never replaced |
+| `pr_create` | `head`, `base`, `title`, `body`, optional `draft` | Opens one pull request from a branch already pushed (`gh pr create --head`) |
+| `pr_merge` | `number`, `method` (`merge`, `squash`, `rebase`), optional `match_head_commit` | Merges one pull request; no `--admin`, `--auto` or `--delete-branch` |
+| `release_create` | `tag`, `title`, `notes`, optional `draft`, `prerelease` | Creates one release for a tag the origin has (`--verify-tag`: gh does not create the tag) |
+| `issue_create` | `title`, `body` | Opens one issue |
+| `issue_assign` | `number`, `assignee` | Adds one assignee to one issue |
+
+Claude Code names the tools
+`mcp__plugin_agent-capability-standard_remote__<tool>` (seen with Claude
+Code 2.1.332, which starts the server in the project directory and passes
+it the `env` block of the project's settings). The plugin declares the
+server in `.claude-plugin/plugin.json`, not in a `.mcp.json` at the
+plugin's root, which Claude Code would also read as this repository's own
+project configuration. It is started as
+`/usr/bin/env -u DEVELOPER_DIR -u TOOLCHAINS -u SDKROOT /usr/bin/python3 -I`:
+on macOS `/usr/bin/python3` is a shim that runs the interpreter those
+variables choose, and a project's settings can set them for the server.
+
+**The target.** No tool takes a repository. The target is the origin a
+person records for the project, in a terminal outside Claude Code:
+
+```bash
+/usr/bin/python3 -I <plugin>/grounded_agency/remote_writes.py record --project <project>
+```
+
+It shows the project's `remote.origin.url` (or the URL given with `--url`),
+the GitHub repository gh will act on (from the URL, or `--github
+HOST/OWNER/REPO`) and the git and gh it found on the person's PATH, asks,
+and writes `~/.config/acs/remotes.json` (mode 600) with the project's
+directory, its git directory, the URL and the paths of git and gh. The
+setup command's settings deny `~/.config/acs/` to the agent's commands and
+file tools, so the agent cannot change the target or the programs; the
+project's `.git/config`, which the agent can write, never chooses them.
+With no record, or a record whose git directory is no longer the
+project's, every tool refuses. A URL holding a password, a transport
+helper (`ext::`), plain http or anything that is not
+`https://host/owner/repo`, `ssh://host/owner/repo`, `user@host:owner/repo`
+or an absolute local path is refused. A local origin must lie outside the
+project, the temporary directories and Claude Code's plugins directories:
+git's local transport runs the receiving repository's own hooks and
+configuration, which `core.hooksPath=/dev/null` does not reach, so a
+repository the sandbox can write would run its code outside the sandbox.
+
+**How it runs git and gh.**
+
+- No shell: git and gh are started by argument list, and every option
+  takes its value in the same argument (`--title=...`), so no value starts
+  an option.
+- A push is made from an empty bare repository the server creates for the
+  call, which reads the project's objects through
+  `objects/info/alternates`. The project's configuration
+  (`url.*.insteadOf`, `core.sshCommand`, `credential.helper`,
+  `remote.*.pushurl`) and its hooks take no part. git runs with
+  `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `--no-verify`,
+  `--no-follow-tags`, `--recurse-submodules=no` and only the https, ssh
+  and file protocols, and pushes one `<object>:<ref>` refspec.
+- gh runs in an empty directory, with `--repo` from the record.
+- Each call works in a new directory under `~/.config/acs/work/` (mode
+  700, refused when it is a link or others can write it), which holds the
+  bare repository and is gh's working directory and the children's
+  `TMPDIR`. The environment's `TMPDIR` is not used: a project's settings
+  can point it at a directory the sandbox writes.
+- Branch and tag names are checked as `git check-ref-format` checks them,
+  kept to ASCII letters, digits and `. _ / @ + -`, not starting with `-`,
+  and then checked by git itself. Numbers are integers from 1 to
+  2147483647, methods come from a fixed set, titles hold no control
+  character, and a member a tool does not declare is refused.
+- git and gh are the programs the record names. The server does not search
+  its own PATH, which a project's settings can set and which, in a session,
+  can begin with another plugin's shims. A recorded program that now lies,
+  links followed, in the project, a temporary directory or Claude Code's
+  plugins directory (`~/.claude/plugins`, `$CLAUDE_CONFIG_DIR/plugins`) is
+  refused; the record command skips PATH entries there. The children's
+  PATH holds the directories of the recorded git and gh, then
+  `/usr/bin:/bin:/usr/sbin:/sbin`.
+- A project directory that is the home directory, or holds it, is refused
+  before any program runs: the sandbox could then write every directory
+  under home. The home directory comes from the password database, not
+  from `HOME`.
+- The children get the locale, `SSH_AUTH_SOCK`, the gh token variables
+  and the proxy variables, and no `GIT_*`, `GH_REPO`, `GH_HOST`,
+  `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DEVELOPER_DIR` or `SDKROOT`.
+
+**Gating.** Each tool is bound as a `mutate` (STANDARD 1.2.0 §5.18.1): a
+pushed branch, a pull request, a release and an issue are resources that
+can be read back (§5.18.3). None is bound as `send`: no argument holds a
+destination, which a destination policy would need to check.
+`remote_writes.py bindings [--prefix P]` prints the records. The
+pre-tool-use hook gates each call as it gates Write: a checkpoint marker
+per call (F501 without one) and a person's approval (F502 where the
+permission mode asks no one). The approval request names the call's
+target, for example `push branch 'main' to the recorded origin,
+fast-forward only` or `merge pull request '42' by 'squash' on the recorded
+origin`. It shows every value the server accepts (branch and tag names,
+numbers, methods, logins and object ids are ASCII letters, digits and
+`. _ / @ + -`), except one in which the secret scan finds a credential,
+which is shown as `(a value not shown)`, as is a value the server would
+refuse. The hook reads every string of a remote write's input for the
+layer's records, as it does for any MCP tool, so a `title`, `body` or
+`notes` that names `.claude/checkpoint.ok`, `.claude/checkpoints` or
+`acs/checkpoints` is refused F504 although the server passes it to gh only
+as a value; such an issue, pull request or release is written without
+naming those paths. The SDK mapper classifies the tools the same way; a
+host that offers the server under another name loads
+`remote_writes.binding_records("<its prefix>")` with
+`ToolCapabilityMapper.load_bindings`.
 
 ## Audit Trail
 
@@ -1074,6 +1202,7 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 | `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` counts a restore as a rollback only for a commit a checkpoint recorded, so a checkpoint was taken before it; any other restore is a `mutate` (F501) |
 | Taking a checkpoint (§5.18.6) | `posttooluse_take_checkpoint.sh` writes the marker after a successful `git stash create` |
 | Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` files the marker under `.claude/checkpoints/ended/` when a turn or a session ends or starts; a rollback can still restore its commit |
+| Tool bindings (§5.18.1) | `pretooluse_require_checkpoint.sh` binds the plugin's remote-write tools as `mutate` |
 | Unbound tools (§5.18.2) | `pretooluse_require_checkpoint.sh` treats every tool it does not list, MCP tools included, as a `mutate` |
 | Audit records (§6.4), the layer's identity (§5.18.8) | `posttooluse_log_tool.sh` writes an action record of every tool call, with the configuration that decided it; the `audit` capability is the `audit` skill's |
 

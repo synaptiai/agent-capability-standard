@@ -103,9 +103,13 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #         a program git runs, a partial clone, a repository with submodules,
 #         or git cannot say): mutate;
 #       - anything else: mutate.
-#   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
-#     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
-#     cannot know that an unknown tool only reads).
+#   - The plugin's typed remote writes (REMOTE_WRITE_TOOLS: push, tag_push,
+#     pr_create, pr_merge, release_create, issue_create, issue_assign of its
+#     MCP server, grounded_agency/remote_writes.py): bound as mutate
+#     (§5.18.1), and the approval request names the call's target.
+#   - Any other tool (Monitor, PowerShell, ExitWorktree, every other MCP
+#     tool, a tool this hook does not know): unbound, so mutate (§5.18.2: a
+#     layer cannot know that an unknown tool only reads).
 #
 # Rules.
 #   - persist (§5.18.10, §6.7): the data a call of a tool on PERSIST_TOOLS
@@ -492,6 +496,55 @@ plain_name() {
 }
 # END plain-name
 
+
+# The plugin's typed remote writes: the tools of its MCP server
+# (grounded_agency/remote_writes.py), named as Claude Code names a plugin
+# server's tools, each bound as mutate (§5.18.1; tests/test_remote_writes.py
+# keeps this list equal to the server's).
+REMOTE_WRITE_PREFIX="mcp__plugin_agent-capability-standard_remote__"
+REMOTE_WRITE_TOOLS=(push tag_push pr_create pr_merge release_create issue_create issue_assign)
+
+# One argument of a remote write's call, as its approval request shows it:
+# quoted when it is 1 to 200 ASCII letters, digits or . _ / @ + - (the
+# server refuses any other branch, tag, number, method, login or object id;
+# REF_CHARACTERS in remote_writes.py, kept equal by a test) and the secret
+# scan finds no credential in it; else a note that it is not shown. A value
+# shaped like a credential is not shown although the server accepts it.
+remote_write_value() {
+  local value status=0
+  value=$(printf '%s' "$payload" | jq -r --arg k "$1" '.tool_input[$k] | if type == "string" then . elif type == "number" then tostring else "" end' 2>/dev/null) || value=""
+  if [ -n "$value" ] && (LC_ALL=C; [[ "$value" =~ ^[A-Za-z0-9._/@+-]{1,200}$ ]]); then
+    (set +o pipefail; secret_in "$value") || status=$?
+    if [ "$status" = 1 ]; then
+      printf "'%s'" "$value"
+      return 0
+    fi
+  fi
+  printf '%s' '(a value not shown)'
+}
+
+# What a remote write's call does, for its approval request: one push, tag,
+# pull request, merge, release or issue, on the origin recorded for the
+# project.
+remote_write_target() {
+  local lease
+  case "$1" in
+    push)
+      lease=$(printf '%s' "$payload" | jq -r '.tool_input | if type == "object" and has("force_with_lease") then "yes" else "" end' 2>/dev/null) || lease="yes"
+      if [ -n "$lease" ]; then
+        printf 'force-push branch %s to the recorded origin, only while it is at %s' "$(remote_write_value branch)" "$(remote_write_value force_with_lease)"
+      else
+        printf 'push branch %s to the recorded origin, fast-forward only' "$(remote_write_value branch)"
+      fi
+      ;;
+    tag_push) printf 'push tag %s to the recorded origin' "$(remote_write_value tag)" ;;
+    pr_create) printf 'open a pull request from %s into %s on the recorded origin' "$(remote_write_value head)" "$(remote_write_value base)" ;;
+    pr_merge) printf 'merge pull request %s by %s on the recorded origin' "$(remote_write_value number)" "$(remote_write_value method)" ;;
+    release_create) printf 'create a release for tag %s on the recorded origin' "$(remote_write_value tag)" ;;
+    issue_create) printf 'open an issue on the recorded origin' ;;
+    issue_assign) printf 'assign %s to issue %s on the recorded origin' "$(remote_write_value assignee)" "$(remote_write_value number)" ;;
+  esac
+}
 
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
@@ -1232,6 +1285,12 @@ shown_tool=$(plain_name "$tool_name")
 # (§5.18.2), and its refusals and its approval request name no capability.
 unbound=0
 unseen=0
+remote_write=""
+for entry in "${REMOTE_WRITE_TOOLS[@]}"; do
+  if [ "$tool_name" = "${REMOTE_WRITE_PREFIX}${entry}" ]; then
+    remote_write=$entry
+  fi
+done
 case "$tool_name" in
   Write | Edit | MultiEdit | NotebookEdit)
     capability=mutate
@@ -1248,7 +1307,7 @@ case "$tool_name" in
     ;;
   *)
     capability=mutate
-    unbound=1
+    [ -n "$remote_write" ] || unbound=1
     ;;
 esac
 
@@ -2283,6 +2342,8 @@ rmdir "$claim"
 
 if [ "$unbound" = 1 ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+elif [ -n "$remote_write" ]; then
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': $(remote_write_target "$remote_write")) requires approval; it runs only if this call is approved."
 elif [ "$unseen" = 1 ]; then
   reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
 else

@@ -304,6 +304,19 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 | `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity when a turn or a session ends or starts, filing it under `.claude/checkpoints/ended/` |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
 
+### Remote Writes
+
+The plugin also ships an MCP server, `grounded_agency/remote_writes.py`,
+for the remote writes the agent's commands cannot make once the settings of
+`/grounded-setup` deny them git's and gh's credentials: `push`, `tag_push`,
+`pr_create`, `pr_merge`, `release_create`, `issue_create` and
+`issue_assign`, one action per call. No tool takes a repository: the target
+is the origin a person records for the project, outside Claude Code, with
+`/usr/bin/python3 -I <plugin>/grounded_agency/remote_writes.py record`,
+which also records the git and gh the server runs. Each call is a gated `mutate`, with a checkpoint and a person's approval
+that names its target (see
+[hooks/README.md](hooks/README.md#remote-writes)).
+
 ## Documentation
 
 ### For Users
