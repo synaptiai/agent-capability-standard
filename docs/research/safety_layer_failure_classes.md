@@ -11,8 +11,8 @@ before the fix.
 This page sorts the defects into failure classes. For each class it gives
 the count per round and per severity, the Standard section whose rule the
 defects broke, and the test suites that now hold the fixes. The classes are
-ranked by their residual trend: the class that still produced the most
-defects in the last round comes first.
+ranked by their residual trend: by the count in round 5, the last round,
+then by the count in round 4.
 
 ## Classes ranked by residual trend
 
@@ -27,8 +27,8 @@ the fixes have closed most of it.
 | 2 | Redaction coverage | 8 | 2 | 6 | 7 | 7 | 0 | 28 | 2 | 30 | Level at about 7 a round |
 | 3 | Composite and nesting checks | 7 | 4 | 1 | 2 | 4 | 0 | 18 | 0 | 18 | Falling, then up to 4 |
 | 4 | Trust in layer records | 3 | 6 | 3 | 3 | 1 | 1 | 7 | 8 | 16 | Falling |
-| 5 | Decision and checkpoint state | 9 | 5 | 0 | 0 | 1 | 2 | 11 | 2 | 15 | Closed but for 1 |
-| 6 | Time bounds | 5 | 0 | 0 | 2 | 1 | 0 | 4 | 4 | 8 | Low |
+| 5 | Time bounds | 5 | 0 | 0 | 2 | 1 | 0 | 4 | 4 | 8 | Low |
+| 6 | Decision and checkpoint state | 9 | 5 | 0 | 0 | 1 | 2 | 11 | 2 | 15 | Closed but for 1 |
 | | **All classes** | **37** | **25** | **20** | **24** | **24** | **9** | **101** | **20** | **130** | |
 
 ## What each class covers
@@ -50,12 +50,17 @@ configuration files that git, curl, wget, pip and npm read at run time.
   `tests/test_bash_redirections_and_braces.py`,
   `tests/test_pretooluse_hooks.py`, `tests/test_skill_hooks.py`,
   `tests/test_records_guard.py`.
-- Residual: this class still yields about 10 defects a round, because each
-  fix models one more feature of the shell. The open structural answer is to
-  classify fewer forms: refuse, or take the worst case for, any command
-  outside a small grammar, and confine the commands the layer lets run with
-  the operating-system sandbox that RFC-0011 proposes, so that a misread
-  command can still not reach outside the project.
+- Residual: this class still yields about 10 confirmed defects a round,
+  because each fix models one more feature of the shell. (The loop's own
+  summary of about 20 medium defects a round counts every medium defect of
+  the round; most of them are in the layers that read text, and this page
+  puts the redaction and records-guard ones in their own classes.) The open
+  structural answer is to classify fewer forms: take the tool's worst case
+  for any command outside a small grammar. RFC-0011, a draft amendment of
+  Standard 1.2.0, makes that the rule for shell-like tools: a call gets the
+  tool's worst case unless the layer has verified that an operating-system
+  boundary holds for it, with no route outside the boundary and limits on
+  writes, credentials and network.
 
 ### 2. Redaction coverage
 
@@ -106,7 +111,19 @@ refused without a record.
   `tests/test_checkpoint_state_depth.py`.
 - Residual: falling, with 1 in round 5.
 
-### 5. Decision and checkpoint state
+### 5. Time bounds
+
+A check takes time quadratic in its input, or calls a program with no time
+limit, so the hook gives no verdict in time, and a host runs the call
+unchecked unless the hook is set to block when it fails. A layer that
+cannot finish a check must refuse the call (§5.18.8).
+
+- Rule broken: Standard 1.2.0 §5.18.8.
+- Tests: the time-bound tests in `tests/test_pretooluse_hooks.py` and the
+  bounded-time tests of the redactors in `tests/test_redaction.py`.
+- Residual: low, with 1 in round 5.
+
+### 6. Decision and checkpoint state
 
 A checkpoint or an approval covers a call it should not: a checkpoint of
 another scope, one checkpoint for two calls, a turn boundary the layer did
@@ -124,18 +141,6 @@ call run when it failed.
   checkpoint through the shipped adapter and checks each is refused with
   F501.
 
-### 6. Time bounds
-
-A check takes time quadratic in its input, or calls a program with no time
-limit, so the hook gives no verdict in time. A hook that gives no verdict
-must block the call (§5.18.8); before that setting was in force, it let the
-call run.
-
-- Rule broken: Standard 1.2.0 §5.18.8.
-- Tests: the time-bound tests in `tests/test_pretooluse_hooks.py` and the
-  bounded-time tests of the redactors in `tests/test_redaction.py`.
-- Residual: low, with 1 in round 5.
-
 ## What the counts include
 
 The counts are the 130 confirmed defects of the five rounds. The loop's
@@ -145,7 +150,7 @@ one low. They are not in the counts above. By class they are three in
 shell-text reading, two in decision and checkpoint state, one in redaction
 coverage and one in time bounds.
 
-Each defect is in exactly one class: the class of the rule its fix
-restored. A defect that touched two classes, for example a quadratic
-redaction pattern, is counted in the class of the check that failed, here
-time bounds.
+Each defect is in exactly one class, assigned by hand from its title in
+the loop's record. A defect that touched two classes, for example a
+quadratic redaction pattern, is counted in the class of the check that
+failed, here time bounds.
