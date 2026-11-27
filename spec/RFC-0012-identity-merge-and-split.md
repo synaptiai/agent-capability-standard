@@ -38,9 +38,9 @@ it, and no vector can be written for it. The one artifact §11.7 names for
 it, `schemas/identity_resolution_policy.yaml`, lists eight features rather
 than four. Their weights sum to 2.1 on a score range of 0 to 1, and its
 thresholds (auto merge 0.9, suggest 0.75, no merge 0.6, split review 0.4)
-leave a score between 0.4 and 0.6 without an action. No deployment has
-validated those weights. Requiring them would make an untested heuristic a
-rule of the Standard.
+leave a score between 0.4 and 0.6 without an action. This repository
+holds no code that computes the score and no evaluation of the weights.
+Requiring them would make an untested heuristic a rule of the Standard.
 
 §7.3 lists three hard constraints that "MUST NOT be violated": never merge
 entities with conflicting unique identifiers, never merge across
@@ -318,7 +318,7 @@ For Standard 1.3.0, a MINOR version:
   divided by the sum of the weights, in decimal, with an action for every
   band of scores. It would also need the Standard's four features
   reconciled with the policy's eight. Every number in it would be a
-  heuristic that no deployment has validated. Rejected.
+  heuristic with no evaluation behind it. Rejected.
 - **Fixed unique attributes in the Standard.** A list such as serial and
   employee number cannot fit every domain, and the policy's ip and url
   would refuse legitimate merges of a host that moved. Rejected in favour of

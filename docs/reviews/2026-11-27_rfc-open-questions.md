@@ -44,7 +44,7 @@ planned anyway.
 | 1 | Propose upstream a hook that can refuse a Standard Agents tool call before it runs | **Issue #139** | This is a proposal to the Standard Agent Specification, not a change to this Standard. Upstream text 01 drafts it, and #139 files it. |
 | 2 | Publish a registry of conformance statements, and require one for an SL claim | **Declined** | Both statements that exist ship in this repository beside the fixtures, so a registry would list only them. Raise it again with #84 (certification) when a third party claims class SL. |
 | 3 | Whether the plugin's hooks claim SL once Claude Code offers a fail-closed hook mode | **Issue #144** | The hooks set `onFailure: "block"` on main, and `spec/SECURITY.md` §5.5 lists the host gaps that remain. #144 closes or accepts each gap, and whether the hooks claim SL follows from that. |
-| 4 | Ask Claude Code to state, per permission mode, whether a hook's `ask` reaches a person (implementation) | **Issue #144** | It is a feature request to Claude Code, one of the host gaps #144 covers. Filing it in Claude Code's repository needs the maintainer's go-ahead. |
+| 4 | Ask Claude Code to state, per permission mode, whether a hook's `ask` reaches a person (implementation) | **Issue #144** | #144 lists it as a gap of the SDK adapter: that an `ask` reaches the permission callback in modes `default`, `acceptEdits` and `plan` rests on Claude Code's documentation. Closing it means a request to Claude Code, which needs the maintainer's go-ahead to file in Claude Code's repository. |
 | 5 | A digest of what a checkpoint captured, so a layer can check it against the scope | **1.3.0, Checkpoint and send** | An optional output member is backward compatible. A layer that checks the digest before it counts the call is new behaviour, so it needs Standard text. |
 | 6 | One checkpoint scope per session in the Python adapter (implementation) | **New issue** | It changes only the Python adapter. No issue tracks it. |
 
@@ -57,7 +57,7 @@ planned anyway.
 | A3 | Whether an identity without `authenticated_by` counts for a `human` approver when no `sender_check` is set | **2.0.0** | Counting such an identity no longer would refuse approvals that 1.2.0 accepts. Until then, a workflow that needs it sets `sender_check`. |
 | A4 | Refreshing the inputs of a nested run a resumption continues, such as a checkpoint id | **Declined** | Rewriting an input changes what the calling workflow bound. Taking the checkpoint inside the workflow that mutates, as RFC-0006 advises, avoids the stale id. |
 | A5 | A runtime fixture form for a refused response | **New issue** | It is a new form in the runtime fixture schema, which this repository keeps. It changes no requirement on an executor. |
-| B1 | Concurrent dispatch: several pending actions with a join, `any_complete`, and withdrawing a running member's action | **Declined** | No host binding has asked for it, and it changes the host protocol's one-pending-action model. A new RFC can raise it again when a host needs it. |
+| B1 | Concurrent dispatch: several pending actions with a join, `any_complete`, and withdrawing a running member's action | **Declined** | No open issue in this repository asks for it, and it changes the host protocol's model of one pending action per run. A new RFC can raise it again when a host needs it. |
 | B2 | `actions` as the default record mode in the next major | **2.0.0** | Changing a default changes what 1.2.0 workflows record. |
 | B3 | `require_record` true by default in the next major | **2.0.0** | An audit that did not record would fail where 1.2.0 lets it pass. |
 | B4 | Failure modes that match an error `reason` | **1.3.0, Runs and triggers** | An optional match key is backward compatible. The question's example is falling back to another domain on `unsupported_domain`. |
@@ -75,9 +75,9 @@ planned anyway.
 | 2 | W621 and W622 as errors in a later major, and publishing a host's agent manifests for validators | **2.0.0** | Turning the warnings into errors is breaking. Publishing manifests is a separate question: no reference host publishes its agent manifests, and that part can come back as its own RFC. |
 | 3 | More `answer_type` values, or a JSON Schema for a question's answer | **1.3.0, Delegation and inquiry** | New answer types and an optional answer schema are backward compatible. |
 | 4 | Cross-run serialisation of `rollback` against `mutate` and `persist` as a MUST of a host class | **New issue** (with RFC-0006 B5) | It is a requirement of the host conformance class that RFC-0006 B5 asks for, so the two belong together. |
-| 5 | The step `domain` grammar as S303 in Standard 2.0, and a domain registry | **2.0.0** | Refusing a domain that 1.2.0 warns about is breaking. The registry is declined: domains are open by design, and a registry would need an owner and a process this project does not have. |
+| 5 | The step `domain` grammar as S303 in Standard 2.0, and a domain registry | **2.0.0** | Refusing a step `domain` that 1.2.0 reports as warning W620 is breaking. The registry is declined: domains are open by design, and a registry would need an owner and a process this project does not have. |
 | 6 | An `overlap` policy for event triggers, so that W623 covers their runs | **1.3.0, Runs and triggers** | Schedules already have an `overlap` policy. Giving event triggers the same optional member is backward compatible. |
-| 8 | The model family rule for a provider line whose identifiers do not start with its name, and for a tag that starts with a letter and holds a digit | **Declined** | No line in the vectors has these forms. Changing the rule would change the families that existing vectors compute. A new RFC can raise it with a real provider line that the rule groups wrongly. |
+| 8 | The model family rule for a provider line whose identifiers do not start with its name, and for a tag that starts with a letter and holds a digit | **Declined** | The model family vectors hold no case of either form; the question's `acme:v1.6` is an example, not a vector. Changing the rule could change the families that existing vectors compute. A new RFC can raise it with a real provider line that the rule groups wrongly. |
 
 ## RFC-0008: evidence, grounding and secrets
 
@@ -110,7 +110,7 @@ planned anyway.
 | 2 | A domain profile carrying its own grounding `attested` flag | **1.3.0, Evidence and grounding** | An optional profile member is backward compatible. Today every profile keeps the default. |
 | 3 | The repository's reference catalogs on a 1.2 header (implementation) | **Issue #155**, and a **new issue** for the domain catalogs | #155 moves `schemas/workflow_catalog.yaml`. The four catalogs under `schemas/workflows/` still declare 1.1.0 on main and need their own migration. |
 | 4 | The skills' `allowed-tools`, written comma-separated and naming `Git` and `Web`, which are not Claude Code tool names (implementation) | **New issue** | On main, all 42 skills write the list comma-separated, and 8 of them name `Git` or `Web`. Correcting the names changes what those skills may run, so it needs its own review. |
-| 5 | Trust arithmetic and entity ids in the TypeScript package (implementation) | **Issue #83** | #83 covers SDKs in other languages. The merge and split checks of RFC-0012 would go with entity ids. |
+| 5 | Trust arithmetic and entity ids in the TypeScript package (implementation) | **New issue** | #83 covers SDKs in other languages in general, and the release plan closes it with release 3.0.0, so this needs an issue of its own. The merge and split checks of RFC-0012 would go with entity ids. |
 | 6 | A plain-TypeScript profile loader, held to the same vectors (implementation) | **Declined** | The TypeScript package applies profiles through the WebAssembly core, so there is one loader. The question's condition, a TypeScript layer without WebAssembly, does not hold. |
 | 7 | Recursive types in the schema dialect, and `nullable` in §5.4 | **Declined** | An ontology whose contracts hold a `$ref` cycle is refused when it loads, so no capability uses a recursive type today. A new RFC can raise it with a capability that needs one. |
 
@@ -132,7 +132,7 @@ states the answer the RFC could take when it goes forward.
 
 | RFC | Question | Proposed disposition | Reason |
 |-----|----------|----------------------|--------|
-| RFC-0001 | Standardising a multi-agent coordination protocol, and canonical adapters for common toolchains | **Declined** (both) | Coordination: RFC-0003, RFC-0004, RFC-0006 and RFC-0007 define delegation, identity, synchronisation and the host protocol. A wire protocol between agents belongs to host specifications. Adapters: the Python SDK adapter and the Standard Agents binding are the reference adapters, and adapters in other languages are issue #83. |
+| RFC-0001 | Standardising a multi-agent coordination protocol, and canonical adapters for common toolchains | **Declined** (both) | Coordination: RFC-0003, RFC-0004, RFC-0006 and RFC-0007 define delegation, identity, synchronisation and the host protocol. A wire protocol between agents belongs to host specifications. Adapters: the Python SDK adapter and the Standard Agents binding are the reference adapters, and further adapters are implementations rather than Standard text. |
 | RFC-0003 | Host or device placement of a delegated step | **Declined** | Deployment stays outside the Standard, as RFC-0003 itself concludes: a placement hint would mean nothing to the validator or the executor. A new RFC can raise it with a host that can act on one. |
 | RFC-0004 | Whether a future MAJOR replaces `ActionRecord.actor` and `ProvenanceRecord.agent` with identities outright | **2.0.0** | Removing the string fields is breaking. The identity fields already sit beside them. |
 | RFC-0004 | Whether a delegation is refused up front when the assignee's attested `trust_class` is not acceptable | **1.3.0, Delegation and inquiry** | An opt-in list of acceptable trust classes for the assignee is backward compatible. Today the check runs only on the delegate's events. |
@@ -146,8 +146,8 @@ also needs a new issue, and RFC-0009 Q6 waits on issue #166.
 |-------------|------|
 | 1.3.0 (a new RFC) | 19 |
 | 2.0.0 | 10 |
-| An existing issue | 7 |
-| A new issue | 6 |
+| An existing issue | 6 |
+| A new issue | 7 |
 | RFC-0002 | 6 |
 | Declined | 9 |
 | **Total** | **57** |
