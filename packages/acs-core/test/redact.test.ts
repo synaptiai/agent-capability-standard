@@ -226,6 +226,7 @@ describe('reading a long text (security round 1, batch 5)', () => {
     '?sig=a',
     '&sig=a%3F',
     '?Signature=a%26',
+    '?Signature=\\/',
     '&X-Amz-Signature=',
     '%3FX-Goog-Signature%3D',
     '\\u0026sig\\u003da',

@@ -327,13 +327,13 @@ const WORD = after('A-Za-z0-9');
  * `X-Goog-Signature` (Cloud Storage), `sig` (Azure SAS) or `Signature` (S3
  * SigV2, CloudFront) query parameter, read only after `?` or `&` (as
  * themselves, percent-encoded or as their JSON escapes), so prose such as
- * `signature=` is not read. The value is 16 or more characters; it stops at
- * `&` and `?` in any of those forms, so no run is read again from each of its
- * positions.
+ * `signature=` is not read. The value is 16 or more characters, a `/` in it
+ * written as itself or as its JSON escape `\/`; it stops at `&` and `?` in
+ * any of those forms, so no run is read again from each of its positions.
  */
 const SIGNED_URL_PARAMETER =
   '(?:[?&]|%3F|%26|\\\\u00(?:3F|26))(?:x-amz-signature|x-goog-signature|sig|signature)(?:=|%3D|\\\\u003D)';
-const SIGNATURE_VALUE = '(?:[A-Za-z0-9._~+/=-]|%(?!26|3F)[0-9A-F]{2}){16,}';
+const SIGNATURE_VALUE = '(?:[A-Za-z0-9._~+/=-]|\\\\/|%(?!26|3F)[0-9A-F]{2}){16,}';
 
 /**
  * The patterns of a value after `prefix` in double or single quotes (escaped
@@ -428,8 +428,9 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   ...quotedForms(`${CREDENTIAL_OPTION_NAME}${CREDENTIAL_OPTION_SEPARATOR}`, '(?!-)'),
   // ... or not.
   new RegExp(`${CREDENTIAL_OPTION}(?<secret>${valueChar()}{4,})`, 'dgi'),
-  // AWS access key ids.
-  new RegExp(`${WORD}(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\\b`, 'dg'),
+  // AWS access key ids, which end where no ASCII letter or digit follows (`_`
+  // may follow, as in `mcp__<key id>__<tool>`).
+  new RegExp(`${WORD}(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})(?![A-Za-z0-9])`, 'dg'),
   // GitHub tokens.
   new RegExp(`${WORD}(?<secret>gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})`, 'dg'),
   // Slack tokens.

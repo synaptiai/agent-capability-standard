@@ -328,6 +328,7 @@ describe('a tool name that holds a secret (security round 4, batch 5)', () => {
     // starts after any character that is not an ASCII letter or digit.
     'mcp__srv__ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789',
     'mcp__srv__AKIAIOSFODNN7EXAMPLE',
+    'mcp__AKIAIOSFODNN7EXAMPLE__list',
   ];
   const call = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
   const stored = (t: MemoryThread) => [...t.values.values()].join('\n');

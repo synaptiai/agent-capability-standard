@@ -814,8 +814,9 @@ here and marked so.
   rewritten to match: it lists an anchor's redacted `ref` when it listed the
   anchor's own, and when two anchors are one after redaction it lists
   neither unless it listed both (fail closed). A signed URL's signature
-  (`sig=`, `X-Amz-Signature=`) is not a default pattern: add a pattern
-  (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) where a host cites them.
+  (the `X-Amz-Signature`, `X-Goog-Signature`, `sig` or `Signature` query
+  parameter) is a default pattern; a host that cites URLs signed another
+  way adds a pattern (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`).
 
 **Across components (validator, executor, Python SDK, binding).**
 

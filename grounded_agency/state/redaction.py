@@ -385,14 +385,15 @@ _WORD = _after("A-Za-z0-9")
 # `X-Goog-Signature` (Cloud Storage), `sig` (Azure SAS) or `Signature` (S3
 # SigV2, CloudFront) query parameter, read only after `?` or `&` (as
 # themselves, percent-encoded or as their JSON escapes), so prose such as
-# `signature=` is not read. The value is 16 or more characters; it stops
-# at `&` and `?` in any of those forms, so no run is read again from each
-# of its positions.
+# `signature=` is not read. The value is 16 or more characters, a `/` in
+# it written as itself or as its JSON escape `\/`; it stops at `&` and `?`
+# in any of those forms, so no run is read again from each of its
+# positions.
 _SIGNED_URL_PARAMETER = (
     r"(?:[?&]|%3F|%26|\\u00(?:3F|26))"
     r"(?:x-amz-signature|x-goog-signature|sig|signature)(?:=|%3D|\\u003D)"
 )
-_SIGNATURE_VALUE = r"(?:[A-Za-z0-9._~+/=-]|%(?!26|3F)[0-9A-F]{2}){16,}"
+_SIGNATURE_VALUE = r"(?:[A-Za-z0-9._~+/=-]|\\/|%(?!26|3F)[0-9A-F]{2}){16,}"
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     # PEM private key blocks and OpenPGP private key blocks (`PRIVATE KEY
@@ -517,8 +518,11 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"{_CREDENTIAL_OPTION}(?P<secret>{_value_char()}{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
-    # AWS access key ids.
-    re.compile(rf"{_WORD}(?P<secret>(?:AKIA|ASIA)[A-Z0-9]{{16}})\b", re.ASCII),
+    # AWS access key ids, which end where no ASCII letter or digit follows
+    # (`_` may follow, as in `mcp__<key id>__<tool>`).
+    re.compile(
+        rf"{_WORD}(?P<secret>(?:AKIA|ASIA)[A-Z0-9]{{16}})(?![A-Za-z0-9])", re.ASCII
+    ),
     # GitHub tokens.
     re.compile(
         rf"{_WORD}(?P<secret>gh[pousr]_[A-Za-z0-9]{{36,}}|github_pat_[A-Za-z0-9_]{{22,}})",

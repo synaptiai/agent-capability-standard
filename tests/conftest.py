@@ -284,6 +284,7 @@ SHELL_SCAN_PENDING = frozenset(
         "s3_sigv2_signed_url",
         "signed_url_percent_encoded",
         "signed_url_json_escaped",
+        "signed_url_json_escaped_slash",
     }
 )
 
