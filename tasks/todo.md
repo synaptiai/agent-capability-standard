@@ -210,9 +210,11 @@ adapter, the TypeScript binding, the redactors). Each round: six finders
 with distinct lenses, a deduplication against every finding seen before, an
 independent verifier per finding that tried to refute it by reproducing it
 on a clean copy, then fix batches (root cause, every implementation sharing
-the rule, a test that fails on the old code). It was to stop after two
-rounds in a row with nothing new of medium severity or worse, or after five
-rounds. Every defect, fix and test is recorded in
+the rule, a test that fails on the old code). Rounds 1 to 5 covered all of
+these layers and were to stop after two rounds in a row with nothing new of
+medium severity or worse, or after five rounds. From round 6, rounds run
+per layer group as open pull requests land, and convergence is counted per
+group (decision 23 (b)). Every defect, fix and test is recorded in
 `progress/SECURITY-LOOP.md`.
 
 | Round | Reported | New | Confirmed | High | Medium | Low |
@@ -222,16 +224,22 @@ rounds. Every defect, fix and test is recorded in
 | 3 | 28 | 22 | 20 | 2 | 15 | 3 |
 | 4 | 32 | 26 | 24 | 2 | 18 | 4 |
 | 5 | 28 | 26 | 24 | 0 | 21 | 3 |
-| **All** | 167 | 147 | 130 | 9 | 101 | 20 |
+| 6 | 7 | 6 | 4 | 0 | 3 | 1 |
+| **All** | 174 | 153 | 134 | 9 | 104 | 21 |
 
-All 130 are fixed. Every fix batch ended done, and no finding was lost or
+All 134 are fixed. Every fix batch ended done, and no finding was lost or
 left unverified.
 
-*Not converged.* The loop stopped at its five-round cap, not because it ran
-dry. Each round still confirmed about 20 medium defects, mostly in reading
-shell text the way bash or zsh reads it: quoting, expansions, locales,
-program lookup and the programs' own configuration files. Round 5 was the
-first with no high defect after verification. The pattern says the
+*Not converged.* Rounds 1 to 5 stopped at the five-round cap, not because
+they ran dry. Each of them confirmed about 20 medium defects, mostly in
+reading shell text the way bash or zsh reads it: quoting, expansions,
+locales, program lookup and the programs' own configuration files. Round 5
+was the first with no high defect after verification. Round 6 (#142) is the
+first per-group round: it covered only the Standard Agents binding and the
+TypeScript package, one reviewer ran its six lenses and reproduced each
+finding with a test, in place of six finders and a verifier per finding,
+and it confirmed 3 medium defects and 1 low, so that group has not
+converged either. The pattern of rounds 1 to 5 says the
 text-reading layers (the hooks and the Bash classifier) will keep yielding
 edge cases. The structural answer is to classify fewer forms: refuse or
 take the worst case for anything outside a small grammar, rather than model

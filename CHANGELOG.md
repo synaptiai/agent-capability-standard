@@ -1774,7 +1774,19 @@ here and marked so.
   those policies forbid is now refused (F504) and an output they refuse
   fails (F505, F504). Another call of the tool made while the invocation is
   pending (a parallel call, an endpoint's), which the binding cannot tell
-  from it, is held to them too.
+  from it, is held to them too. Security round 6: the profiles given to a
+  composite and to the composites enclosing it (and the layer's) also raise
+  the flags and person requirement of every nested call, plain or grounded,
+  at any depth, for what it performs and for what its own nested calls
+  perform, whether or not it takes the invocation's token. A raised
+  approval is covered only by the composite's decisions that still meet it
+  when the nested call runs, so a nested call made after the composite's
+  approval lapsed is refused (F502), and a raised checkpoint only when the
+  composite's call used one (F501 otherwise). A nested composite that takes
+  no token asks its own approval (a person's where the profiles require
+  one) and uses its own checkpoint, and those then cover its nested calls.
+  The trace entries of a call that only the enclosing profiles require a
+  person for carry `person_required`, its R407 entries included.
 - Standard Agents binding, composites and plain tools (Standard 1.2.0
   §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
   `defineTool` runs only under a name the new `registerTools` (in
@@ -1851,6 +1863,25 @@ here and marked so.
   approver decides on, which the approvals endpoint still shows); and so is
   every result a composite's state returns that is not a success, a nested
   plain tool's own error included, and a control tool's own error result.
+  Security round 6: an error a control tool's code throws is now returned
+  as an error result, redacted the same way, instead of reaching the
+  runtime as thrown; the control tool's entry is still `executed`.
+- TypeScript package and Standard Agents binding: `checkBindings` and the
+  lint read tool names as own members only (security round 6), so a tool
+  offered or tied to a host action under a name a plain object holds on
+  its prototype (`constructor`, `toString`, `hasOwnProperty`, `__proto__`)
+  whose record did not load is reported W617 or F506, and `groundedTool`
+  refuses a composite listing it with V107, where the check threw; a
+  binding record whose `tool` is `__proto__` is returned among the
+  bindings.
+- Standard Agents binding, audit hook (Standard 1.2.0 §6.4): an entry
+  written by a nested call, or by a call made while a composite's
+  invocation of the tool is pending, waits for a tool call id only while
+  the composite's own entry waits (security round 6). In a runtime that
+  fires no `tool_call_done` for `state.invokeTool`, the hook of the model's
+  own later call of the same tool now links its own entry, not the nested
+  one. This relies on the calls of a step running one after another, with
+  each hook before the next call.
 
 **Interoperability data.**
 
