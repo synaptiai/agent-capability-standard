@@ -36,7 +36,7 @@ def registry() -> CapabilityRegistry:
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 36
+    assert len(CASES) == 37
 
 
 @pytest.mark.parametrize("path", CASES, ids=[p.stem for p in CASES])
@@ -63,6 +63,7 @@ def test_binding_fixture(path: Path, registry: CapabilityRegistry) -> None:
             loaded,
             [(a["action"], a["tool"]) for a in fixture.get("host_actions", [])],
             host_takes_checkpoints=fixture.get("host_takes_checkpoints", False),
+            shell_tools=fixture.get("shell_tools", {}),
         )
 
     def pairs(severity: Severity) -> list[tuple[str, str]]:

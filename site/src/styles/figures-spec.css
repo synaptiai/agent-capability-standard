@@ -1157,6 +1157,121 @@
     gap: var(--space-1);
   }
 
+  /* ---------- §5.18.3 classification, shell-like calls, the boundary ---------- */
+
+  /* The code inside too: at phone width a figure table's code may break
+     anywhere (the rule below), which would let the punctuation after it
+     start the next line. This selector is more specific, so a tiled
+     capability's code stays whole. */
+  .class-cell__cap,
+  .fig__drawing .table-wrap td .class-cell__cap code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .class-cell .mini-tile {
+    margin-right: var(--space-1);
+    vertical-align: middle;
+  }
+
+  .shell-flow .sender__check {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .shell-flow .sender__check .pg {
+    flex: none;
+    margin-top: 4px;
+  }
+
+  .shell-flow .sender__drop {
+    align-items: flex-start;
+  }
+
+  .shell-flow .sender__drop .pg {
+    flex: none;
+    margin-top: 4px;
+  }
+
+  .shell-flow > .sender__item:last-child {
+    display: grid;
+    justify-items: start;
+    font-weight: 400;
+  }
+
+  .os-boundary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+  }
+
+  .os-boundary__side {
+    padding: var(--space-3);
+    border: var(--border);
+    background: var(--bg);
+  }
+
+  /* The boundary itself: the inside box drawn with a double-weight border. */
+  .os-boundary__side--inside {
+    border-width: calc(2 * var(--px));
+  }
+
+  .os-boundary__head {
+    margin: 0 0 var(--space-2);
+    font-weight: 700;
+  }
+
+  .os-boundary__list {
+    margin: 0;
+    padding-left: var(--space-4);
+    font-size: 14px;
+  }
+
+  .os-boundary__note {
+    margin: var(--space-2) 0 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .os-boundary__props {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: var(--space-1) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+  }
+
+  .os-boundary__route {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-1);
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+
+  .os-boundary__arrow--right {
+    display: none;
+  }
+
+  @container (min-width: 640px) {
+    .os-boundary {
+      grid-template-columns: minmax(0, 1fr) 10rem minmax(0, 1fr);
+      align-items: center;
+    }
+
+    .os-boundary__arrow--down {
+      display: none;
+    }
+
+    .os-boundary__arrow--right {
+      display: block;
+    }
+  }
+
   .flow-arrow {
     display: block;
     margin: 2px var(--space-2);

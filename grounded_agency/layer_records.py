@@ -36,7 +36,11 @@ are denied in ``.git/worktrees/<name>/acs``, where the hooks keep them. The
 the common git directory's, each linked worktree's
 (``<common>/worktrees/<name>``) and each submodule's
 (``<common>/modules/<path>``, nested ones included), since a session in one
-checkout can otherwise reach another's key and commit entries. A rule names
+checkout can otherwise reach another's key and commit entries. In a
+submodule checkout, whose common git directory is its own
+``modules/<path>``, the superproject's git directories are added the same
+way (``git rev-parse --show-superproject-working-tree``), up to the
+outermost superproject. A rule names
 the git directories that exist when it is made: the settings are made again
 after ``git worktree add`` or a submodule's first checkout.
 
@@ -118,9 +122,10 @@ class LayerRecord:
     in_git_dir: bool = False
 
 
-def _git_line(project: str, option: str) -> str | None:
+def _git_line(project: str, option: str, empty: bool = False) -> str | None:
     """git's one-line answer to ``git rev-parse <option>`` in ``project``,
-    or None when the project is in no repository."""
+    or None when the project is in no repository (or, with ``empty``, when
+    git answers with nothing)."""
     try:
         result = subprocess.run(
             [
@@ -149,6 +154,8 @@ def _git_line(project: str, option: str) -> str | None:
     if result.returncode == 128:
         return None
     out = os.fsdecode(result.stdout)
+    if empty and result.returncode == 0 and out == "":
+        return None
     if result.returncode != 0 or not out.endswith("\n") or len(out) < 2:
         raise LayerRecordsError(
             f"git could not say which git directory is the project's "
@@ -204,6 +211,42 @@ def _linked_git_dirs(git_dir: str) -> list[str]:
     return found
 
 
+def _repository_git_dirs(physical: str) -> list[str]:
+    """The git directories of the repository the checkout at ``physical``
+    belongs to: its own git directory, its common git directory and the
+    linked worktrees' and submodules' git directories in it; then, for a
+    submodule checkout, the same for its superproject, and for that one's
+    superproject, up to the top. Empty outside a repository."""
+    git_dirs: list[str] = []
+    seen: set[str] = set()
+    checkout: str | None = physical
+    while checkout is not None and checkout not in seen:
+        seen.add(checkout)
+        git_dir = _git_line(checkout, "--absolute-git-dir")
+        if git_dir is None:
+            break
+        git_dirs.append(git_dir)
+        common = _git_line(checkout, "--git-common-dir")
+        if common is not None:
+            # Relative to the directory git ran in, from a git before 2.31
+            # (which has no --path-format), or for the main checkout.
+            common = os.path.realpath(os.path.join(checkout, common))
+            git_dirs.append(common)
+            git_dirs.extend(_linked_git_dirs(common))
+        # A submodule's common git directory is its own modules/<path>:
+        # the superproject's records (its acs/, which holds its checkpoint
+        # key) are reached only from the superproject's checkout.
+        superproject = _git_line(
+            checkout, "--show-superproject-working-tree", empty=True
+        )
+        checkout = (
+            os.path.realpath(superproject)
+            if superproject is not None and os.path.isabs(superproject)
+            else None
+        )
+    return list(dict.fromkeys(git_dirs))
+
+
 def _check_literal(path: str) -> None:
     bad = sorted({c for c in path if c in _PATTERN_CHARACTERS or ord(c) < 0x20})
     if bad:
@@ -224,7 +267,8 @@ def layer_records(project_dir: str | os.PathLike[str]) -> list[LayerRecord]:
     records are given under git's answer, which is physical, and, for a git
     directory inside the project, under the written project path too; then
     those of the repository's other git directories (the common one, linked
-    worktrees', submodules'), as they exist now.
+    worktrees', submodules', and a submodule checkout's superprojects'), as
+    they exist now.
 
     Raises:
         LayerRecordsError: git did not answer, or a path holds a character a
@@ -244,16 +288,8 @@ def layer_records(project_dir: str | os.PathLike[str]) -> list[LayerRecord]:
     for base in bases:
         for rel, directory in PROJECT_RECORDS:
             add(f"{base.rstrip('/')}/{rel}", directory, False)
-    git_dir = _git_line(physical, "--absolute-git-dir")
-    if git_dir is not None:
-        common = _git_line(physical, "--git-common-dir")
-        git_dirs = [git_dir]
-        if common is not None:
-            # Relative to the directory git ran in, from a git before 2.31
-            # (which has no --path-format), or for the main checkout.
-            common = os.path.realpath(os.path.join(physical, common))
-            git_dirs.append(common)
-            git_dirs.extend(_linked_git_dirs(common))
+    git_dirs = _repository_git_dirs(physical)
+    if git_dirs:
         prefix = physical.rstrip("/") + "/"
         for gd in git_dirs:
             git_bases = [gd]

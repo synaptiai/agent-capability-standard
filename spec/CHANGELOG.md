@@ -4,13 +4,13 @@ This changelog tracks changes to the **Agent Capability Standard specification**
 
 ## v1.2.0 (Candidate Standard, unreleased)
 
-### Added — Standard v1.2.0 (Candidate Standard), RFC-0005 to RFC-0010
+### Added — Standard v1.2.0 (Candidate Standard), RFC-0005 to RFC-0011
 - **[STANDARD-v1.2.0](STANDARD-v1.2.0.md)** with ontology 2.2.0. Every change
   is backward compatible: a workflow valid under 1.1.0 is valid under 1.2.0
   and runs the same way unless its host opts in to a new feature, and a
   change that would invalidate a 1.1 workflow is phased in as a warning.
   v1.0.0 and v1.1.0 remain supported. Appendix D of v1.2.0 lists every
-  change; its sections follow the RFCs, all six Accepted:
+  change; D.1 to D.8 follow the RFCs below, all seven Accepted:
   - **[RFC-0005](RFC-0005-tool-calling-hosts.md)**, tool-calling hosts
     (§5.18, D.1): tool bindings, unbound and composite tools, checkpoints
     and approval over calls, refusals and records, text-only results, the
@@ -41,6 +41,19 @@ This changelog tracks changes to the **Agent Capability Standard specification**
     and validators, the trust score and conflict resolution, ontology
     versions, version declaration with the start operation's `header`, and
     the contract schema dialect.
+  - **[RFC-0011](RFC-0011-shell-like-tools-and-os-boundary.md)**,
+    shell-like tools and the operating-system boundary (§2, §5.18.2,
+    §5.18.3, §5.18.8, §10.4, D.8): a layer gives every call of a shell-like tool (a
+    shell, an interpreter, a REPL, or a tool that runs code its arguments
+    supply) the tool's worst case unless its conformance statement declares
+    an operating-system boundary for the tool and the layer has verified by
+    code, for that call, that the boundary holds in the effective host
+    configuration. The boundary is defined by four properties: no route
+    outside it, writes kept from the layer's records, its code and any file
+    that code outside the boundary runs, credentials (the user's, the
+    host's and the layer's) out of reach, and a network allowlist that
+    refuses other hosts. The statement schema's required member
+    `shell_tools` names each tool's boundary or `"none"`.
 - **Codes** V110, V111, R407, R408, F505 (raised), F506 and W617 to W626
   (§9); a V-code keeps its meaning when a safety layer reports it for a call.
 - **Conformance** (§10): the class SL for safety layers, and normative

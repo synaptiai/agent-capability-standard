@@ -121,6 +121,9 @@ def test_bash_runs_code_through_printf_v(
     assert (shipped / sentinel).exists(), line
 
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+@pytest.mark.usefixtures("bash_under_sandbox")
 class TestMapper:
     @pytest.mark.parametrize("line", LINES + SINGLE)
     def test_the_line_takes_the_worst_case(self, line: str) -> None:

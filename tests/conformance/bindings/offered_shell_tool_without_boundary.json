@@ -1,0 +1,54 @@
+{
+  "description": "A shell-like tool whose statement declares no operating-system boundary performs only its worst case, so its classifier does not count it as able to take the checkpoint another offered tool requires (V102).",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "shell",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "classifier": "shell"
+    }
+  ],
+  "offered": {
+    "write": "write",
+    "shell": "shell"
+  },
+  "shell_tools": {
+    "shell": "none"
+  },
+  "expect": {
+    "errors": [
+      {
+        "code": "V102",
+        "tool": "write"
+      },
+      {
+        "code": "V102",
+        "tool": "shell"
+      }
+    ],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      },
+      "shell": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

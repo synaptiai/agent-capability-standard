@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -38,9 +39,19 @@ from claude_agent_sdk import (
     ToolPermissionContext,
 )
 
-from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+from grounded_agency import (
+    GroundedAgentAdapter,
+    GroundedAgentConfig,
+    ToolCapabilityMapper,
+)
 from grounded_agency.errors import Severity
 from grounded_agency.mcp import _guarded, create_grounded_mcp_server
+from grounded_agency.utils import sandbox as sandbox_module
+from grounded_agency.utils.sandbox import (
+    CREDENTIAL_ENV_VARS,
+    boundary_paths,
+    strict_sandbox,
+)
 from tests.conftest import FakeClock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,7 +72,44 @@ def test_the_statement_validates() -> None:
         jsonschema.Draft202012Validator(schema).validate(json.loads(other.read_text()))
 
 
-def test_the_statement_matches_the_adapter() -> None:
+def test_the_statement_schema_checks_an_os_boundary() -> None:
+    schema = json.loads((FIXTURES / "schema" / "statement.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    boundary = {
+        "mechanism": "a sandbox",
+        "routes_outside": "none honoured",
+        "writes": "the project only",
+        "credentials": "denied",
+        "network": "an allowlist",
+        "verification": "every source merged",
+        "outside": ["the layer's hooks"],
+    }
+    statement = _statement()
+    statement["shell_tools"] = {"Bash": boundary}
+    validator.validate(statement)
+    # The layer's own decision code always runs outside the boundary.
+    statement["shell_tools"] = {"Bash": {**boundary, "outside": []}}
+    assert not validator.is_valid(statement)
+    # The boundary object is closed: a member it does not define is refused.
+    statement["shell_tools"] = {"Bash": {**boundary, "x_other": "x"}}
+    assert not validator.is_valid(statement)
+    # The member is required.
+    del statement["shell_tools"]
+    assert not validator.is_valid(statement)
+
+
+def test_the_statement_matches_the_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The boundary the adapter verifies reads the home directory, Claude
+    # Code's configuration and managed settings: the test's own, empty.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for name in ("CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    for name in [n for n in os.environ if n.startswith("CLAUDE_CODE_SANDBOX")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setattr(sandbox_module, "managed_settings_files", lambda: [])
+    monkeypatch.setattr(sandbox_module, "unread_policy_sources", lambda env=None: [])
     from grounded_agency import __version__
     from grounded_agency.adapter import PROMPTING_PERMISSION_MODES
 
@@ -79,7 +127,10 @@ def test_the_statement_matches_the_adapter() -> None:
     assert statement["approval"]["roles"] is False
     assert statement["approval"]["expires"] is None
     # Every check of section 5.18.10 is applied (class SL): the output
-    # contract by default, and turning it off is outside the class.
+    # contract by default, and turning it off is outside the class. The rule
+    # for shell-like tools (section 5.18.3, RFC-0011) is met: Bash is relaxed
+    # only under the declared sandbox (below), so nothing is listed in
+    # not_applied.
     assert "not_applied" not in statement
     assert GroundedAgentConfig().check_outputs is True
     # Each setting that turns a check off is named outside the class: with
@@ -107,6 +158,64 @@ def test_the_statement_matches_the_adapter() -> None:
     assert "other MCP servers" not in without
     assert "PostToolUse hook checks the result of any other" in without
     assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
+    # Section 5.18.3 (RFC-0011): Bash runs under the sandbox the
+    # adapter turns on and verifies; the other shell-like tools of Claude
+    # Code declare no boundary, and get one worst case whatever their input.
+    shell = statement["shell_tools"]
+    assert set(shell) == {"Bash", "Monitor", "PowerShell", "Skill", "Agent", "Task"}
+    assert all(shell[name] == "none" for name in set(shell) - {"Bash"})
+    bash = shell["Bash"]
+    assert "Claude Code's sandbox" in bash["mechanism"]
+    # The credentials the strict sandbox keeps out of reach are those the
+    # statement names, and the configuration keys are named as the
+    # strict sandbox sets them.
+    for name in CREDENTIAL_ENV_VARS:
+        assert name in bash["credentials"]
+    sandbox = strict_sandbox(boundary_paths(str(ROOT), [], []))
+    said = " ".join(v for v in bash.values() if isinstance(v, str))
+    for key, value in sandbox.items():
+        if isinstance(value, bool):
+            assert key in said, key
+    assert "strictAllowlist" in bash["network"]
+    assert "failIfUnavailable" in bash["verification"]
+    assert "dangerouslyDisableSandbox" in bash["routes_outside"]
+    assert any("can_use_tool" in o for o in bash["outside"])
+    assert "not_applied" not in statement
+    mapper = ToolCapabilityMapper()
+    unbound = mapper.map_tool("an_unknown_tool", {})
+    # Monitor and PowerShell get an unbound tool's worst case for any input.
+    for name in ("Monitor", "PowerShell"):
+        for command in ("ls", "git stash create"):
+            assert mapper.map_tool(name, {"command": command}) == unbound
+    # Skill, Agent and Task get one gated mapping whatever their arguments.
+    for name, first, second in (
+        ("Skill", {"skill": "a"}, {"skill": "b", "args": "ls"}),
+        ("Agent", {"prompt": "a"}, {"prompt": "b", "subagent_type": "c"}),
+        ("Task", {"prompt": "a"}, {"prompt": "b", "subagent_type": "c"}),
+    ):
+        mapping = mapper.map_tool(name, first)
+        assert mapping == mapper.map_tool(name, second)
+        assert mapping.requires_checkpoint and mapping.requires_approval
+    # With no verified boundary, every Bash call is its worst case: a
+    # mapper no adapter set one for, and an adapter before it wraps options.
+    for command in ("ls", "git stash create"):
+        mapping = mapper.map_tool("Bash", {"command": command})
+        assert {"mutate", "send"} <= set(mapping.capabilities)
+        assert mapping.requires_checkpoint and mapping.requires_approval
+    adapter = GroundedAgentAdapter(GroundedAgentConfig())
+    assert adapter.mapper.map_tool("Bash", {"command": "ls"}).capability_id != (
+        "observe"
+    )
+    # Options it wraps with the defaults hold the boundary, and the Bash
+    # classifier relaxes their calls.
+    adapter.wrap_options(ClaudeAgentOptions(cwd=str(ROOT), setting_sources=[]))
+    assert adapter.mapper.map_tool("Bash", {"command": "ls"}).capability_id == (
+        "observe"
+    )
+    assert (
+        adapter.mapper.map_tool("Bash", {"command": "git stash create"}).capability_id
+        == "checkpoint"
+    )
 
 
 def test_there_are_fixtures() -> None:

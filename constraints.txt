@@ -17,3 +17,12 @@
 # "the formatter this repository is formatted with"; only an exact version can.
 # When bumping, run `ruff format` and land the reformat in the same commit.
 ruff==0.17.4
+
+# claude-agent-sdk: the adapter verifies Claude Code's sandbox only for the
+# CLI versions under which its boundary tests ran (CHECKED_CLI_VERSIONS in
+# grounded_agency/utils/sandbox.py), and the SDK bundles the CLI. 0.2.189
+# bundles Claude Code 2.1.332, the version CI's CLAUDE_CODE_VERSION installs.
+# Each SDK release bundles a newer CLI, under which the adapter gives every
+# Bash call its worst case. When bumping, run the boundary tests under the
+# new CLI and add its version there in the same commit.
+claude-agent-sdk==0.2.189

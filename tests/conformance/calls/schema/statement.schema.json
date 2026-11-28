@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/statement.schema.json",
   "title": "Safety-layer conformance statement (Agent Capability Standard 1.2.0, section 10.4)",
-  "description": "What a safety layer states about itself for class SL (section 10.4): what it covers, its scope and boundaries, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, the covered calls whose results carry no capability output, and any check of section 5.18.10 it does not apply.",
+  "description": "What a safety layer states about itself for class SL (section 10.4): what it covers, its scope and boundaries, the operating-system boundary of each shell-like tool, how it obtains approval and makes a check atomic, the fixture features it supports, its host gaps, the covered calls whose results carry no capability output, and any check of section 5.18.10, or the rule for shell-like tools of section 5.18.3, it does not apply.",
   "type": "object",
   "required": [
     "layer",
@@ -13,6 +13,7 @@
     "does_not_cover",
     "scope",
     "boundaries",
+    "shell_tools",
     "checkpoint_max_age",
     "approval",
     "concurrency",
@@ -37,6 +38,12 @@
     "does_not_cover": { "type": "string", "minLength": 1 },
     "scope": { "type": "string", "minLength": 1 },
     "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "shell_tools": {
+      "description": "Each shell-like tool whose calls the layer covers (section 2: a tool whose call runs a program that its arguments, or a definition or file it names, supply), by the name the host offers it under, mapped to the operating-system boundary its calls run under, or \"none\". A layer relaxes a call of the tool below its worst case only under a declared boundary it has verified for that call. An empty object states that the layer covers no shell-like tool.",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "anyOf": [{ "const": "none" }, { "$ref": "#/$defs/os_boundary" }] }
+    },
     "checkpoint_max_age": { "$ref": "#/$defs/duration" },
     "approval": {
       "type": "object",
@@ -81,7 +88,7 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "not_applied": {
-      "description": "Each check of section 5.18.10 the layer does not apply, with its row and what follows from it. A layer with any does not conform to class SL until it applies them.",
+      "description": "Each check of section 5.18.10, or the rule for shell-like tools of section 5.18.3, the layer does not apply, with what follows from it. A layer with any does not conform to class SL until it applies them.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     }
@@ -90,6 +97,50 @@
     "duration": {
       "type": "string",
       "pattern": "^(\\d+(ms|s|m|h|d)|P(\\d+D)?(T(\\d+H)?(\\d+M)?(\\d+(\\.\\d{1,9})?S)?)?)$"
+    },
+    "os_boundary": {
+      "description": "An operating-system boundary (section 5.18.3): what enforces it, how each of its four properties holds, how the layer verifies it, and the code that runs outside it.",
+      "type": "object",
+      "required": ["mechanism", "routes_outside", "writes", "credentials", "network", "verification", "outside"],
+      "additionalProperties": false,
+      "properties": {
+        "mechanism": {
+          "description": "What the operating system confines the call's processes with: a sandbox, a container, a virtual machine, a separate account.",
+          "type": "string",
+          "minLength": 1
+        },
+        "routes_outside": {
+          "description": "How no part of a call runs outside the boundary: the configuration honours no argument that runs a call outside it and excludes no command from it (either one leaves the boundary unverified for every call), and no process inside it can ask a process outside it to run a program or act for it (a local socket, a loopback port, a scheduler, messages to an application).",
+          "type": "string",
+          "minLength": 1
+        },
+        "writes": {
+          "description": "Where writes can reach, and how no route (a symbolic or hard link, a rename of the file or of a directory above it) reaches the layer's own records, its code and configuration, any configuration source of the host, or any file that code outside the boundary runs or reads as configuration (a hook's script, a tool server's code or definition, the configuration and hooks of a repository whose git commands run outside the boundary).",
+          "type": "string",
+          "minLength": 1
+        },
+        "credentials": {
+          "description": "How credentials are out of reach, neither readable nor usable through a service outside the boundary (an operating-system keychain, an SSH or GPG agent, a credential helper, a cloud metadata endpoint): the user's, in the files that hold them, SSH private keys and environment variables that carry them; the host's own; and the layer's own secrets, such as an audit key.",
+          "type": "string",
+          "minLength": 1
+        },
+        "network": {
+          "description": "The allowlist, and how a connection or name lookup for a host not on it is refused.",
+          "type": "string",
+          "minLength": 1
+        },
+        "verification": {
+          "description": "How the layer verifies by code, before each call, that the boundary holds: in the effective host configuration (the values the host applies to the call from every source it reads, each counting only from a source the host honours it from) and in the call's arguments, and how it knows the host refuses to run the call when it cannot apply the boundary.",
+          "type": "string",
+          "minLength": 1
+        },
+        "outside": {
+          "description": "The code that runs outside the boundary: the layer's own decision code (hooks, callbacks) and any tool server the host starts outside it. It names at least the layer's own decision code.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        }
+      }
     }
   }
 }

@@ -17,6 +17,10 @@ from hypothesis import strategies as st
 
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper, ToolMapping
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = pytest.mark.usefixtures("bash_under_sandbox")
+
 
 @pytest.fixture
 def mapper() -> ToolCapabilityMapper:

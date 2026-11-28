@@ -173,7 +173,7 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 
 The remote-write tools are the plugin's MCP server's ([hooks/README.md](../../hooks/README.md#remote-writes)), under the names Claude Code gives them; a host that offers the server under another name loads `remote_writes.binding_records("<its prefix>")` with `load_bindings`.
 
-`Skill`, `Agent` and `Task` are their own capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and `send`, whatever the skill or agent: Claude Code runs the shell commands a skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's arguments substituted into them) as the skill loads, under its `allowed-tools`, and the hooks and MCP servers a subagent's definition names as the subagent runs, and none of these reaches the adapter's hooks; a project's skill or agent can take any name, a built-in agent's included ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). So each such call needs a checkpoint and approval, and a destination policy refuses it. Loading a skill's instructions saves and restores nothing: `Skill(checkpoint)` takes no checkpoint, the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)), so run `git stash create` before the Skill call too.
+`Skill`, `Agent` and `Task` are their own capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and `send`, whatever the skill or agent: Claude Code runs the shell commands a skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's arguments substituted into them) as the skill loads, under its `allowed-tools`, and the hooks and MCP servers a subagent's definition names as the subagent runs, and none of these reaches the adapter's hooks; a project's skill or agent can take any name, a built-in agent's included ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). So each such call needs a checkpoint and approval, and a destination policy refuses it. Loading a skill's instructions saves and restores nothing: `Skill(checkpoint)` takes no checkpoint, the skill's `git stash create` does under the verified sandbox ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)), so run `git stash create` before the Skill call too.
 
 Each mapping carries the capabilities the call performs (`capabilities`, primary first) and its **prerequisites**, the `from` capabilities of the `requires` edges into them: `checkpoint` for `mutate`, `send` and `rollback`.
 
@@ -187,11 +187,69 @@ In strict mode such a tool is refused until a checkpoint exists, then put to the
 adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve")
 ```
 
-A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
+A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. An offered tool with a `classifier` counts as able to perform any capability, except a shell-like tool whose statement declares no operating-system boundary, which performs only its worst case ([§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools)): pass the statement's `shell_tools` as `shell_tools` (the adapter's names Bash `"declared"` and Monitor, PowerShell, Skill, Agent and Task `"none"`), and give no other shell-like tool a `classifier`. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
+
+### The Sandbox
+
+Bash is a shell-like tool: its call runs a program that its argument supplies, and the shell, not the adapter, decides what that program does. The Standard lets a layer give such a call less than the tool's worst case only while the call runs under an operating-system boundary the layer declares and has verified for that call ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification), [RFC-0011](../../spec/RFC-0011-shell-like-tools-and-os-boundary.md)). The adapter's boundary is Claude Code's sandbox (Seatbelt on macOS, bubblewrap on Linux), which `wrap_options()` turns on by default. With it, a sandboxed command can reach:
+
+| What | Sandboxed command | File tools (Read, Edit, Write) |
+|------|-------------------|--------------------------------|
+| Files in the working directory, to write | Yes | Yes, with a checkpoint and approval |
+| The adapter's records, and `acs/` in each git directory of the repository (the plugin hooks' checkpoint key, commit entries and audit anchor), to read or write | No | No |
+| The project's `.claude/` and `.mcp.json`, the repository's git configuration and hooks, and the user's Claude Code settings, to write | No | No |
+| Code that runs outside the sandbox, to write: the `grounded_agency` and `claude_agent_sdk` packages, the interpreter and its site-packages, the CLI `cli_path` names, local plugins, and the files stdio MCP servers run | No | No |
+| Credential files, to read | No | No |
+| `GH_TOKEN`, `GITHUB_TOKEN`, `AUDIT_HMAC_KEY`, Claude Code's own tokens, the SSH and GPG agent variables, and every variable whose name looks like a credential's | No (unset) | Not applicable |
+| Hosts on `sandbox_allowed_domains` | Yes | Not applicable |
+| Any other host, local sockets, or a process outside the sandbox | No | Not applicable |
+
+`wrap_options()` passes, in the CLI's `--settings`, a strict sandbox where the options carry none of their own (`sandbox`, or a `sandbox` member of `settings`), and deny rules in `permissions.deny` either way:
+
+| Setting | What `wrap_options()` sets | Added to a sandbox you pass |
+|---------|----------------------------|-----------------------------|
+| `enabled`, `failIfUnavailable` | Both true: the CLI refuses to start when it cannot sandbox | No |
+| `allowUnsandboxedCommands`, `excludedCommands` | False and none: the CLI ignores `dangerouslyDisableSandbox`, and runs no command outside the sandbox | No |
+| Weaker modes, Unix sockets, local ports, Mach services, Apple Events | None | No |
+| `network.allowedDomains`, `network.strictAllowlist` | `GroundedAgentConfig.sandbox_allowed_domains` (empty by default: no host), and true | No |
+| `credentials`, `filesystem.denyRead` | The macOS keychains, `~/.ssh`, `~/.gnupg`, `~/.netrc`, the cloud tools' credentials (`~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube`, `~/.docker/config.json`), the package registries' tokens (`~/.npmrc`, `~/.pypirc`, `~/.cargo/credentials.toml`), the Linux keyrings, gh's configuration, git's credential files, the plugin's audit key file, Claude Code's own credentials and `GroundedAgentConfig.sandbox_deny_paths` | No |
+| `credentials.envVars` | Unset for sandboxed commands: the token variables, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, every variable of the CLI's environment whose name holds `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `SESSION_KEY` or `AUTH`, and `GroundedAgentConfig.sandbox_deny_env` | No |
+| `filesystem.denyWrite` | The plugin hooks' records, the paths `grounded_agency/layer_records.py` gives for the project | No |
+| `autoAllowBashIfSandboxed` | False: a sandboxed command still goes through the adapter's checks and the permission flow | No |
+| `permissions.deny` | `Edit` and `Read` of the adapter's records and the plugin hooks' records, `Edit` of the paths in the third and fourth rows of the table above, `Read` of the credential files | Yes, to the options' own `settings` (a settings file is read and passed inline) |
+
+The deny rules name the adapter's records (`checkpoint_dir`, `audit_log_path`, the snapshot store, a file evidence store) and the rules `grounded_agency/layer_records.py` gives for the plugin hooks' records (`Edit` of the project's `.claude/checkpoint.ok`, `.claude/checkpoints/`, `.claude/audit.log` and `.claude/audit.head`, and `Edit` and `Read` of `acs/` in each git directory of the repository: the project's, the main checkout's, each linked worktree's and each submodule's, and, where the project is a submodule checkout, the same for each superproject above it, as they exist when the options are wrapped). Each names a literal absolute path, and a directory among the hooks' records is named as `dir/**`; where a path is a link, both the link and its target are named. A worktree added or a submodule checked out after the wrap is not covered until the options are wrapped again. They are computed when the options are wrapped, from the CLI's environment (this process's, with the options' `env` over it), so the home directory and `CLAUDE_CONFIG_DIR` are the ones the CLI uses. The CLI applies them to sandboxed commands and to the file tools: in a wrapped session the Edit tool cannot change the `grounded_agency` package either, which matters when it is installed in editable mode from the project.
+
+To keep your own sandbox, pass it as `ClaudeAgentOptions(sandbox=...)` or in `settings`: the adapter keeps it, adds its deny rules, and relaxes Bash calls only if your sandbox holds every value of the table, `autoAllowBashIfSandboxed: false` included. The adapter adds nothing to your sandbox, so its `filesystem.denyWrite` must list the paths that `grounded_agency.layer_records.deny_settings(cwd)["sandbox"]["filesystem"]["denyWrite"]` gives (or `python3 -I grounded_agency/layer_records.py <cwd>` prints), computed after any worktree or submodule is added; otherwise every Bash call is its worst case. To run Bash without a sandbox, set `GroundedAgentConfig(sandbox=False)`: every Bash call is then a gated `mutate` and `send`, so each one, `ls` included, needs a checkpoint and a person's approval, and `git stash create` takes no checkpoint (take checkpoints with `create_checkpoint` instead). That is still class SL. The deny rules are added either way. With the sandbox on, Claude Code refuses to start where it cannot start the sandbox (`failIfUnavailable`: Linux without bubblewrap and socat, native Windows, a container that cannot run bubblewrap); there, set `sandbox=False`. With the sandbox on, `gh`, `git push`, `curl` and package installs fail from Bash unless their host is on `sandbox_allowed_domains`, and `gh` and `git push` cannot authenticate, since the keychain and `~/.ssh` are denied.
+
+The sandbox does not confine code that runs outside it: the adapter's own hooks, callback and checkpoint recorder, the git commands it runs, the tools `create_grounded_mcp_server` serves, which run in your Python process, any MCP server the options, the project's `.mcp.json` or the user's `.claude.json` start, and the hooks of plugins and settings. The deny rules keep a sandboxed command from changing that code, but not code a server loads by module name from the project (`python -m server`). Under the sandbox, a command the classifier misreads as read-only can still change files in the working directory and reach the allowlisted hosts, with no checkpoint.
+
+| Bash call | Class under the verified sandbox | Checkpoint and approval under it | Checkpoint and approval without it |
+|-----------|----------------------------------|----------------------------------|------------------------------------|
+| `ls`, `cat f`, `git status` | observe | No | Yes |
+| `git stash create` | checkpoint | No | Yes |
+| `rm -rf build` | mutate | Yes | Yes |
+| `curl https://example.com` | mutate, send | Yes | Yes |
+| Any call that sets `dangerouslyDisableSandbox` | mutate, send | Yes | Yes |
+
+The Bash classifier below relaxes a call only while the boundary is verified for it, which needs every condition of this table:
+
+| Condition | Checked again before each call |
+|-----------|--------------------------------|
+| Every options this adapter wrapped hold each value of the settings table above, with no `allowRead` or `allowWrite`, no allowlist entry the plugin's setup command would not list (`grounded_agency.sandbox_settings.check_host`: only a dotted DNS name whose last label is alphabetic, with at most a leading `*.`; no loopback, link-local, metadata or local-use name, no IP literal in any spelling, no `metadata.` name, no port), no `WebFetch` allow rule and no `Edit`, `Write` or `Read` allow rule with a path (in `settings` or `allowed_tools`: the CLI merges them into the sandbox), no `permissions.additionalDirectories` or `add_dirs` (the CLI lets a sandboxed command write each added directory), no `extra_args` flag but `debug-to-stderr` (the SDK passes `extra_args` after its own flags, so any other may override them), no `mcp_servers` given as a file or text, every deny rule and `denyWrite` path for the plugin hooks' records, and no protected path holding a character a rule reads as a pattern (`*`, `?`, brackets, braces, parentheses or a backslash); where those records cannot be named (git is not installed or does not answer, or a path holds such a character), the boundary is unverified | No: when the options are wrapped |
+| The options are unchanged since they were wrapped, for as long as the caller holds them | Yes |
+| The other settings sources the CLI reads set no sandbox value, allow rule, added directory or `CLAUDE_CODE_SANDBOX…` variable in their `env` that may weaken the boundary: the managed settings files, and the user's, the project's and the local file that `setting_sources` loads. They are read when the options are wrapped, and a file among them that changes afterwards leaves the boundary unverified until it holds what it held then. A source the adapter does not read (a managed preferences profile on macOS, server-managed settings, the Windows policy registry) and a `CLAUDE_CODE_SANDBOX…` environment variable leave it unverified too | Yes: that no file changed since the wrap |
+| No record, credential file, settings file, hook script, MCP server list, git configuration file, or file a stdio server or the CLI runs has a second hard link (the package, interpreter and plugin trees are not walked; the plugin hooks' records are walked whole on each Bash call, the marker history under `.claude/checkpoints/` and `acs/` of each git directory included, as the pre-tool-use hook counts them, and past 50000 entries the boundary is unverified), and no credential-like variable has been set in this process since the wrap that the sandbox does not unset | Yes |
+| While a destination policy is in force (`allowed_destinations`, a profile's), the allowlist is empty | No: when the options are wrapped |
+| The CLI is the one the Agent SDK bundles, in a version under which the boundary tests ran (`grounded_agency.utils.sandbox.CHECKED_CLI_VERSIONS`: Claude Code 2.1.332, which `claude-agent-sdk` 0.2.189 bundles); a CLI that `cli_path` names, an SDK that bundles none (it then runs the `claude` on `PATH`) and a bundled CLI of another version leave it unverified, since the version decides which sources the CLI reads and which values it honours | No: when the options are wrapped |
+| The call runs in `bypassPermissions` mode (`grounded_agency.utils.sandbox.CHECKED_PERMISSION_MODES`), the one mode in which the precedence of settings files was tested; the routes Claude Code decides itself were also tested in `default` and `acceptEdits`, but not which files can override them there. The mode is read from the hook input, else from the options' `permission_mode`, and a call that names neither runs in `default`. Options in another mode, or a settings file whose `permissions.defaultMode` is another, leave it unverified, and a call in any other mode gets the worst case | Yes |
+| The call does not set `dangerouslyDisableSandbox` | Yes |
+
+Otherwise every Bash call is Bash's worst case, which a destination policy refuses. The adapter logs the reason. A call is classified again when it reports back (for the checkpoint it took and the capabilities that ran) only as the PreToolUse hook classified it: a `git stash create` that hook gave the worst case takes no checkpoint, even if the boundary holds by then. It is not a refusal (R407): the call can still run with a checkpoint and approval. Before any options are wrapped, the adapter's mapper gives every Bash call the worst case too.
 
 ### Bash Command Classification
 
-Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (with `execute` first for an interpreter, wherever it appears in the command, and `send` first for a program that sends): it may transmit anywhere, so a destination policy refuses it (below). Only the command's program, its first word as the shell passes it, gives a class narrower than that (`observe` for the allow-list, `mutate` for `rm` and the local git changes); text in an argument never does, so `curl URL -A 'git reset'` is curl's worst case, not `git reset`'s `mutate`.
+Under a verified sandbox (above), Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)); without one, every Bash call is the worst case. A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (with `execute` first for an interpreter, wherever it appears in the command, and `send` first for a program that sends): it may transmit anywhere, so a destination policy refuses it (below). Only the command's program, its first word as the shell passes it, gives a class narrower than that (`observe` for the allow-list, `mutate` for `rm` and the local git changes); text in an argument never does, so `curl URL -A 'git reset'` is curl's worst case, not `git reset`'s `mutate`.
 
 The command line is read with the shell's quoting rules and split into simple commands at an unquoted `&&`, `||`, `;`, `|` and `&`; a quoted or escaped operator (`'<'`, `";"`, `\;`) is the word the shell passes, so `grep ';' f` is one command and `find f '<' -execdir ...` keeps its `-execdir`. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`, and a two-word entry's program and subcommand as two words: bash runs a first word that holds a blank (a quoted `"git status"`) as the program of that name, which is on no list. An allow-listed command is read-only only with the arguments it reads with, some commands that look like reads are not on the list, and a line the mapper cannot read as the shell will gets the worst case whatever its commands: the table's rows from "A line that redirects" on list them.
 
@@ -529,7 +587,22 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundaries are the Stop and the next prompt of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of every MCP tool bound to a capability, in the form the session reads them (R402): a tool `create_grounded_mcp_server` serves checks its own, and the PostToolUse hook checks another server's. Claude Code's own tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`, which plays each fixture with the tools served and again as another server's tools); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"`, `check_outputs=False` and `create_grounded_mcp_server(require_layer=False)` are outside the class.
+The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundaries are the Stop and the next prompt of any session it serves; it declares Claude Code's sandbox as the operating-system boundary of Bash and none for Monitor, PowerShell, Skill, Agent and Task (`shell_tools`); its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of every MCP tool bound to a capability, in the form the session reads them (R402): a tool `create_grounded_mcp_server` serves checks its own, and the PostToolUse hook checks another server's. Claude Code's own tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`, which plays each fixture with the tools served and again as another server's tools); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"`, `check_outputs=False` and `create_grounded_mcp_server(require_layer=False)` are outside the class.
+
+That boundary meets the rule for shell-like tools of [RFC-0011](../../spec/RFC-0011-shell-like-tools-and-os-boundary.md) ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)), which binds a claim of class SL, for the settings sources the adapter reads and the CLI versions it checks ([The Sandbox](#the-sandbox)). The classifier itself is advisory: it reads text that the shell interprets.
+
+```mermaid
+---
+title: The rule for shell-like tools, applied to the adapter
+---
+flowchart TD
+  accDescr: Under the rule of RFC-0011, a call of a shell-like tool gets the tool's worst case unless the adapter's statement declares an operating-system boundary for the tool and the adapter verifies it for the call. The statement declares Claude Code's sandbox for Bash and none for Monitor, PowerShell, Skill, Agent and Task, whose calls always get the worst case. A Bash call is relaxed only when the options the adapter built hold the strict sandbox and the call does not set dangerouslyDisableSandbox.
+  call["Shell-like call"] --> declared{"Boundary declared?"}
+  declared -->|"No: not Bash"| worst["Worst case"]
+  declared -->|"Yes: Bash"| verified{"Strict sandbox for this call?"}
+  verified -->|No| worst
+  verified -->|Yes| relax["Classifier may relax"]
+```
 
 ## Structured Output
 
@@ -851,6 +924,19 @@ class GroundedAgentConfig:
     # The directory the ontology's $ref paths are relative to (§4.1.2).
     # None: the directory above the ontology's (the repository root).
     schema_root: str | None = None
+
+    # Turn on the strict sandbox for Bash when the options carry none of
+    # their own (see The Sandbox). False: no sandbox, and every Bash call is
+    # a gated mutate and send.
+    sandbox: bool = True
+
+    # The hosts a sandboxed command may reach. Empty: none.
+    sandbox_allowed_domains: Sequence[str] = ()
+
+    # More credential files (absolute, or under ~/) and environment
+    # variables a sandboxed command may not read.
+    sandbox_deny_paths: Sequence[str] = ()
+    sandbox_deny_env: Sequence[str] = ()
 ```
 
 **Domain profiles.** `GroundedAgentConfig(profiles=[...])` applies domain
@@ -1042,8 +1128,24 @@ If `claude_agent_sdk` isn't installed, the adapter falls back to dict-based type
 `grounded_query()` and `GroundedClient` require the SDK.
 
 ```bash
-pip install claude-agent-sdk
+pip install claude-agent-sdk==0.2.189
 ```
+
+That is the release `constraints.txt` pins, whose bundled CLI the adapter checks the sandbox for (see the next entry).
+
+### Every Bash Call Needs a Checkpoint and Approval
+
+The adapter relaxes a Bash call (`ls`, `git stash create`) only while it has verified the sandbox for it ([The Sandbox](#the-sandbox)); otherwise every Bash call is Bash's worst case. The adapter logs why, in a warning that starts "Bash runs without a verified operating-system boundary". Two common causes:
+
+- **Another SDK release.** The adapter verifies the sandbox only for the CLI that `claude-agent-sdk` 0.2.189 bundles (Claude Code 2.1.332). A newer SDK bundles a newer CLI, and the log names its version. Install the pinned release:
+
+  ```bash
+  pip install claude-agent-sdk==0.2.189
+  # or, from the repository root:
+  pip install -e ".[sdk]" -c constraints.txt
+  ```
+
+- **A permission mode other than `bypassPermissions`.** In `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` or any other mode, and in a session that sets no mode (it runs in `default`), every Bash call is the worst case. In `bypassPermissions` no person is asked, so a call that requires approval is refused with F502 unless the adapter runs with `approval="off"`, which is outside class SL ([Approval](#approval)).
 
 ### CLIConnectionError: Does Not Honor on_failure
 
@@ -1230,7 +1332,8 @@ class ToolCapabilityMapper:
 def load_bindings(records, nodes, requires, ontology_version, known=None
                   ) -> tuple[dict[str, ToolMapping], list[ValidationError]]: ...
 def check_offered(offered: Mapping[str, str | None], mappings, host_actions=(),
-                  *, host_takes_checkpoints: bool = False) -> list[ValidationError]: ...
+                  *, host_takes_checkpoints: bool = False,
+                  shell_tools: Mapping[str, str] | None = None) -> list[ValidationError]: ...
 ```
 
 ### CheckpointTracker

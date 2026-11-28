@@ -819,6 +819,7 @@ def check_offered(
     host_actions: Iterable[tuple[str, str]] = (),
     *,
     host_takes_checkpoints: bool = False,
+    shell_tools: Mapping[str, str] | None = None,
 ) -> list[ValidationError]:
     """Check the tools a host offers a model (section 5.18.2).
 
@@ -834,12 +835,19 @@ def check_offered(
             effect whenever ``tool`` is called, such as ending the turn.
         host_takes_checkpoints: The host takes checkpoints itself, so
             ``checkpoint`` counts as performed.
+        shell_tools: The layer's shell-like tools, as its conformance
+            statement's ``shell_tools`` names them: each mapped to
+            ``"none"`` (no operating-system boundary declared) or
+            ``"declared"``. A shell-like tool with ``"none"`` performs only
+            its worst case (section 5.18.3), so its ``classifier`` does not
+            count it as able to perform any capability.
 
     Returns:
         W617 for each offered tool that is unbound; V111 for each one whose
         record names another tool; V102 for each bound tool that requires a
         capability no offered bound tool can perform (an offered tool with a
-        ``classifier`` counts as able to perform any); F506 for each host
+        ``classifier`` counts as able to perform any, unless ``shell_tools``
+        names it ``"none"``); F506 for each host
         action tied to a tool that is not control-only and is unbound, has
         a prerequisite, or requires a checkpoint or approval.
     """
@@ -858,7 +866,7 @@ def check_offered(
         if mapping is None or mapping.control:
             continue
         performable.update(mapping.capabilities)
-        if mapping.classifier is not None:
+        if mapping.classifier is not None and (shell_tools or {}).get(name) != "none":
             any_capability = True
     if host_takes_checkpoints:
         performable.add("checkpoint")

@@ -11,6 +11,7 @@ import type { SpecSlot } from '../lib/spec-slots';
 import * as D from '../lib/spec-dsl-figures';
 import * as T from '../lib/spec-tail-figures';
 import * as H from '../lib/spec-host-figures';
+import * as C from '../lib/spec-tool-figures';
 import { loadCatalogSchema } from '../data/catalog-schema';
 import { readRepoFile } from '../lib/repo';
 import { cell, code, figure, table } from './md';
@@ -102,6 +103,9 @@ const SLOT_NAMES: Record<string, string> = {
   principles: 'The design principles',
   bumps: 'Which change bumps which number',
   'checkpoint-tree': 'Checkpoint decision tree',
+  classification: C.CLASSIFICATION_TITLE,
+  'shell-like-calls': C.SHELL_TITLE,
+  'os-boundary': C.BOUNDARY_TITLE,
   categories: 'Error categories',
 };
 
@@ -199,6 +203,33 @@ export function slotBlock(slot: SpecSlot, source: string): string {
     case 'sender-filter': {
       const rows = D.senderFilter(text, where);
       return figure(title, D.senderCaption(rows), table(['Input', 'Drops an item'], rows.map((r) => [code(r.input), r.drops ? 'Yes' : 'No'])));
+    }
+    case 'classification':
+      return figure(title, C.classificationCaption(C.classificationRows(text, where)), drawn('table'));
+    case 'shell-like-calls': {
+      const f = C.shellFlow(text, where);
+      return figure(
+        title,
+        C.shellFlowCaption(f),
+        (() => {
+          const st = C.shellSteps(f);
+          return [`1. ${st.start}.`, ...st.checks.map((c, i) => `${i + 2}. ${c.question} ${c.no.map((x) => `${x}.`).join(' ')}`), `${st.checks.length + 2}. ${st.end.lead} ${st.end.text}`].join('\n');
+        })(),
+      );
+    }
+    case 'os-boundary': {
+      const b = C.boundary(text, where);
+      const sides = C.boundarySides();
+      const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+      return figure(
+        title,
+        C.boundaryCaption(b),
+        [
+          `- Inside the boundary: ${sides.inside.map(lower).join('; ')}. ${sides.insideNote}.`,
+          `- Outside the boundary: ${sides.outside.map(lower).join('; ')}. ${sides.outsideNote}`,
+          `- ${sides.route}.`,
+        ].join('\n') + `\n\n${drawn('table')}`,
+      );
     }
     case 'schema-shelf':
       return figure(title, T.shelfCaption(T.schemaShelf(text, where)), drawn('table'));
