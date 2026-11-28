@@ -565,7 +565,12 @@ deadline is in time. `run.wake_at()` gives the earliest time a tick changes
 the run (the `until`, or the deadline plus 1 ms), or `None`; `run.tick(t)`
 returns whether it changed the run. Liveness is yours to watch: answer
 `LivenessLost` once the source has missed `failure_threshold` heartbeats or
-probes; it is never a wake-up time.
+probes in a row; it is never a wake-up time. `LivenessWatcher.for_action(action,
+now)` (in `grounded_agency.workflows`, and `LivenessWatcher` in the
+TypeScript package) keeps that count for one wait: call `heartbeat(t)` when
+the source answers and `probe_failed(t)` when a probe fails, and answer
+`watcher.response(t)` when it is not `None`; `next_check_ms(t)` says when
+to look again.
 
 ### An event-driven host
 

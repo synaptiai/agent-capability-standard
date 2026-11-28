@@ -1034,3 +1034,232 @@ class TestTheBytesSigned:
         )
         assert (total, valid) == (3, 2)
         assert any("Line 2: a blank line" in e for e in errors), errors
+
+
+@pytest.mark.skipif(
+    shutil.which("jq") is None
+    or shutil.which("openssl") is None
+    or shutil.which("git") is None,
+    reason="the hook needs jq and openssl, and the anchor a git directory",
+)
+class TestWitnessExport:
+    """tools/export_audit_witness.py copies the head and its anchor into a
+    destination directory outside the project, as new files named by time
+    and session, and verify_audit_log.py --witness <directory> checks the
+    log against every witness kept there (issue #143)."""
+
+    EXPORT = Path(__file__).resolve().parents[1] / "tools" / "export_audit_witness.py"
+    VERIFIER = Path(__file__).resolve().parents[1] / "tools" / "verify_audit_log.py"
+
+    @pytest.fixture
+    def project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "proj"
+        project.mkdir()
+        subprocess.run(
+            ["git", "init", "-q"], cwd=project, check=True, capture_output=True
+        )
+        return project
+
+    @pytest.fixture
+    def store(self, tmp_path: Path) -> Path:
+        store = tmp_path / "witnesses"
+        store.mkdir()
+        return store
+
+    def _export(
+        self, project: Path, *args: str, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
+        base = {k: v for k, v in os.environ.items() if k != "ACS_AUDIT_WITNESS_DIR"}
+        return subprocess.run(
+            [sys.executable, str(self.EXPORT), "--project", str(project), *args],
+            capture_output=True,
+            text=True,
+            env={**base, **(env or {})},
+            timeout=30,
+        )
+
+    def _verify(self, project: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.VERIFIER), "--hmac-key", HMAC_KEY, *args],
+            capture_output=True,
+            text=True,
+            cwd=project,
+            timeout=30,
+        )
+
+    def _calls(self, project: Path, *call_ids: str) -> None:
+        for call_id in call_ids:
+            assert TestHead._call(project, call_id).returncode == 0
+
+    def test_an_exported_witness_shows_a_cut_an_earlier_head_hides(
+        self, project: Path, store: Path
+    ) -> None:
+        self._calls(project, "toolu_1", "toolu_2", "toolu_3")
+        log = project / ".claude" / "audit.log"
+        head = project / ".claude" / "audit.head"
+        anchor = project / ".git" / "acs" / "audit.head"
+        earlier, earlier_anchor = head.read_text(), anchor.read_text()
+        self._calls(project, "toolu_4", "toolu_5")
+        result = self._export(project, "--dest", str(store), "--session", "s-1")
+        assert result.returncode == 0, result.stderr
+        kept = sorted(store.iterdir())
+        assert [p.name.split("-", 1)[1] for p in kept] == [
+            "s-1-anchor.head",
+            "s-1-head.head",
+        ]
+        assert all(p.read_text() == head.read_text() for p in kept)
+        assert all(p.stat().st_mode & 0o222 == 0 for p in kept)
+        assert self._verify(project, "--witness", str(store)).returncode == 0
+        # The cut, with the earlier head and anchor written back.
+        log.write_text("\n".join(log.read_text().splitlines()[:3]) + "\n")
+        head.write_text(earlier)
+        anchor.write_text(earlier_anchor)
+        assert self._verify(project).returncode == 0
+        result = self._verify(project, "--witness", str(store))
+        assert result.returncode == 1, result.stdout
+        for p in kept:
+            assert (
+                f"Witness {p}: the log ends before its witness: 5 entries "
+                "recorded, 3 found"
+            ) in result.stdout
+
+    def test_an_exported_witness_shows_a_cut_with_a_head_signed_anew(
+        self, project: Path, store: Path
+    ) -> None:
+        self._calls(project, "toolu_1", "toolu_2", "toolu_3", "toolu_4")
+        assert self._export(project, "--dest", str(store)).returncode == 0
+        log = project / ".claude" / "audit.log"
+        lines = log.read_text().splitlines()[:2]
+        log.write_text("\n".join(lines) + "\n")
+        last = json.loads(lines[-1])["hmac"]
+        signed = {
+            "entries": 2,
+            "hmac": last,
+            "head_hmac": compute_hmac(f"acs-audit-head:2:{last}", HMAC_KEY),
+        }
+        for path in (
+            project / ".claude" / "audit.head",
+            project / ".git" / "acs" / "audit.head",
+        ):
+            path.write_text(json.dumps(signed, separators=(",", ":")) + "\n")
+        # The log grows again past the witness, on a chain the key signs.
+        self._calls(project, "toolu_5", "toolu_6")
+        assert self._verify(project).returncode == 0
+        result = self._verify(project, "--witness", str(store))
+        assert result.returncode == 1
+        assert "entry 4 is not the one the witness records" in result.stdout
+
+    def test_witnesses_taken_at_each_end_all_verify_a_log_that_grew(
+        self, project: Path, store: Path
+    ) -> None:
+        for session, call_id in (("a", "toolu_1"), ("b", "toolu_2"), ("c", "toolu_3")):
+            self._calls(project, call_id)
+            assert (
+                self._export(
+                    project, "--dest", str(store), "--session", session
+                ).returncode
+                == 0
+            )
+        assert len(list(store.iterdir())) == 6
+        result = self._verify(project, "--witness", str(store))
+        assert result.returncode == 0, result.stdout
+
+    def test_no_copy_replaces_another(self, project: Path, store: Path) -> None:
+        sys.path.insert(0, str(self.EXPORT.parent))
+        from export_audit_witness import export
+
+        self._calls(project, "toolu_1")
+        first = export(project, str(store), "s", now=1_800_000_000)
+        second = export(project, str(store), "s", now=1_800_000_000)
+        assert [p.name for p in first] == [
+            "20270115T080000Z-s-head.head",
+            "20270115T080000Z-s-anchor.head",
+        ]
+        assert [p.name for p in second] == [
+            "20270115T080000Z-s-head-2.head",
+            "20270115T080000Z-s-anchor-2.head",
+        ]
+
+    def test_the_destination_comes_from_the_environment(
+        self, project: Path, store: Path
+    ) -> None:
+        self._calls(project, "toolu_1")
+        result = self._export(project, env={"ACS_AUDIT_WITNESS_DIR": str(store)})
+        assert result.returncode == 0, result.stderr
+        assert len(list(store.iterdir())) == 2
+        result = self._export(project)
+        assert result.returncode == 2
+        assert "no destination" in result.stderr
+
+    def test_a_destination_the_projects_settings_set_is_not_used(
+        self, project: Path, store: Path
+    ) -> None:
+        self._calls(project, "toolu_1")
+        settings = project / ".claude" / "settings.local.json"
+        settings.write_text(json.dumps({"env": {"ACS_AUDIT_WITNESS_DIR": str(store)}}))
+        result = self._export(project, env={"ACS_AUDIT_WITNESS_DIR": str(store)})
+        assert result.returncode == 1
+        assert "the project's settings files set it" in result.stderr
+        assert ".claude/settings.local.json" in result.stderr
+        assert list(store.iterdir()) == []
+        # A destination given on the command line is the person's.
+        assert self._export(project, "--dest", str(store)).returncode == 0
+
+    @pytest.mark.parametrize(
+        "where", ["project", "claude", "git", "relative", "missing", "link"]
+    )
+    def test_a_destination_the_agent_writes_or_that_is_not_there_is_refused(
+        self, project: Path, tmp_path: Path, where: str
+    ) -> None:
+        self._calls(project, "toolu_1")
+        inside = {
+            "project": project,
+            "claude": project / ".claude",
+            "git": project / ".git" / "acs",
+            "relative": Path("witnesses"),
+            "missing": tmp_path / "nowhere",
+            "link": tmp_path / "link",
+        }[where]
+        if where == "link":
+            inside.symlink_to(project / ".claude")
+        result = self._export(project, "--dest", str(inside))
+        assert result.returncode == 1
+        assert "WITNESS EXPORT FAILED" in result.stderr
+        expected = {
+            "project": "inside the project directory",
+            "claude": "inside the project directory",
+            "link": "inside the project directory",
+            "git": "inside the project directory",
+            "relative": "not an absolute path",
+            "missing": "not an existing directory",
+        }[where]
+        assert expected in result.stderr
+
+    def test_a_linked_worktrees_git_directory_is_refused(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """A project whose .git is a file naming its git directory elsewhere
+        (a linked worktree): that directory is the agent's too."""
+        other = tmp_path / "gitdir"
+        (other / "acs").mkdir(parents=True)
+        shutil.rmtree(project / ".git")
+        (project / ".git").write_text(f"gitdir: {other}\n")
+        (project / ".claude").mkdir()
+        (project / ".claude" / "audit.head").write_text("{}\n")
+        result = self._export(project, "--dest", str(other / "acs"))
+        assert result.returncode == 1
+        assert "inside the project's git directory" in result.stderr
+
+    def test_no_head_no_export(self, project: Path, store: Path) -> None:
+        result = self._export(project, "--dest", str(store))
+        assert result.returncode == 1
+        assert "there is no head to export" in result.stderr
+
+    def test_a_witness_directory_with_no_witness_fails(
+        self, project: Path, store: Path
+    ) -> None:
+        self._calls(project, "toolu_1")
+        (store / "notes.txt").write_text("not a witness\n")
+        result = self._verify(project, "--witness", str(store))
+        assert result.returncode == 1
+        assert "holds no witness" in result.stdout

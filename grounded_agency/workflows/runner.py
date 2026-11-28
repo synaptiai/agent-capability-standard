@@ -437,7 +437,9 @@ class Host:
         step fails with R406), or ``None`` when nothing arrived (the run then
         times out, R401, once the deadline has passed). Liveness is yours to
         watch (STANDARD v1.2 §5.19.3): answer ``LivenessLost`` once the
-        source has missed ``failure_threshold`` heartbeats or probes."""
+        source has missed ``failure_threshold`` heartbeats or probes in a
+        row. :class:`~grounded_agency.workflows.liveness.LivenessWatcher`
+        keeps that count (``LivenessWatcher.for_action(action, now)``)."""
         raise NotImplementedError("no event source")
 
     def withdraw(self, action: Action, why: str) -> None:

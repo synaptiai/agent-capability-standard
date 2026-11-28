@@ -47,6 +47,13 @@ It prints `permissions.deny` and `sandbox.filesystem.denyWrite` settings
 for the project, every path literal and absolute; make them again after
 `git worktree add` or a submodule's first checkout.
 
+### Check the audit log for invariant violations, and export a witness of its head
+```bash
+python tools/check_audit_invariants.py [--records exported.json] [--verify]
+python tools/export_audit_witness.py --dest /path/outside/the/project --session ID
+python tools/verify_audit_log.py --witness /path/outside/the/project
+```
+
 ### Validate constraints.txt agrees with pyproject.toml
 ```bash
 python tools/validate_constraints.py
