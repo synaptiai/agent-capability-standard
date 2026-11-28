@@ -42,14 +42,18 @@ copy of the head taken where the agent cannot write it (copied off the
 machine at a session's end, a CI artifact, a write-once store), against
 which a log cut before the witness's entry fails.
 
-The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call.
+The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call
+that ran and one per call the plugin's pre-tool-use hook refused (status
+``rejected``, with its ``code``), in one chain.
 Three generations of entry verify, in any mix, because the HMAC is taken over
 every field but ``hmac`` in the order recorded:
 
 - an action record (STANDARD v1.2 §6.4), with the chain fields: the hook
-  writes action_id, timestamp, actor, intent, status, tool, call_id (when
-  the call has one), details, recorded_by (the layer and its configuration:
-  name, version, config_sha256 and settings; STANDARD 1.2.0 section 5.18.8),
+  writes action_id, timestamp, actor, intent, status, tool, capability
+  (where it is known), call_id (when the call has one), code (on a
+  refusal), details (with checkpoint_id and commit for a call that used a
+  checkpoint marker), recorded_by (the layer and its configuration: name,
+  version, config_sha256 and settings; STANDARD 1.2.0 section 5.18.8),
   prev_hmac, hmac, and the audit skill's own chain
   (.claude/audit/records.jsonl) holds records of the same form;
 - before Standard 1.2: ts, event, tool, skill (on a Skill call),

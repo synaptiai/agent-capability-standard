@@ -43,7 +43,7 @@ Each step gives what happens, the expected result, and where the operator looks 
 **Step 1. The agent calls Write with no checkpoint.**
 
 - Expected: refused with `F501 CHECKPOINT_REQUIRED`, and the file is unchanged.
-- Look at: the session's output. The audit log records calls that ran, so it has no line for this one.
+- Look at: the session's output, then the audit log, `.claude/audit.log`, whose line for this call has `"status": "rejected"` and `"code": "F501"`.
 
 **Step 2. The agent runs `git stash create "checkpoint: before rewrite"`.**
 
@@ -57,7 +57,7 @@ Each step gives what happens, the expected result, and where the operator looks 
 
 **Step 4. The operator is called.**
 
-- Expected: the audit log `.claude/audit.log` has a line with `"tool": "Write"`, `"status": "executed"` and the call's `call_id`. The used marker whose name holds that call id, `used/<checkpoint_id>.<call_id>.<suffix>`, holds the restore point in its `commit`.
+- Expected: the audit log `.claude/audit.log` has a line with `"tool": "Write"`, `"status": "executed"`, `"capability": "mutate"` and the call's `call_id`, and under `details` the restore point: `checkpoint_id` and `commit`. The used marker whose name holds that call id, `used/<checkpoint_id>.<call_id>.<suffix>`, holds the same `commit`.
 - Look at: first the audit log, then the used marker.
 
 **Step 5. The operator restores.**

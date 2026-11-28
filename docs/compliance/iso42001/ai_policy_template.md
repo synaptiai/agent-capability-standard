@@ -35,7 +35,7 @@ All AI agent actions shall be backed by evidence anchors. No capability output m
 All AI operations shall maintain complete audit trails. Every tool call that runs is logged with a timestamp. Every claim carries a `ProvenanceRecord` linking it to the agent, capability, and evidence that produced it.
 
 **Framework enforcement:**
-- `PostToolUse` and `PostToolUseFailure` hooks log every tool call that runs to `.claude/audit.log`, with a SHA-256 digest in place of the tool input; a call that a hook or a permission rule refused did not run and is not logged
+- `PostToolUse` and `PostToolUseFailure` hooks log every tool call that runs to `.claude/audit.log`, with a SHA-256 digest in place of the tool input, and each call the plugin's pre-tool-use hook refused as a `rejected` record with its code; a call another hook or a permission rule refused is not logged
 - `EvidenceStore` captures tool executions as `EvidenceAnchor` objects
 - `ProvenanceRecord` schema links claims to agents, capabilities, and evidence
 

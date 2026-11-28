@@ -271,7 +271,7 @@ The table lists what each profile sets; the values take effect where the profile
 
 | Mechanism | What is Logged | How | Reference |
 |-----------|---------------|-----|-----------|
-| **PostToolUse audit hook** | Every tool call that runs, after it succeeds (PostToolUse) or fails (PostToolUseFailure): timestamp, tool name, skill name on a `Skill` call, and a SHA-256 digest of the tool input (the input itself is not written). A call a hook or a permission rule refused did not run and is not logged | Automatic via `posttooluse_log_tool.sh` | `hooks/hooks.json` |
+| **PostToolUse audit hook** | Every tool call that runs, after it succeeds (PostToolUse) or fails (PostToolUseFailure): timestamp, tool name, skill name on a `Skill` call, and a SHA-256 digest of the tool input (the input itself is not written). A call the plugin's pre-tool-use hook refused is logged as a `rejected` record with its code, in the same chain; a call another hook or a permission rule refused is not logged | Automatic via `posttooluse_log_tool.sh` | `hooks/hooks.json` |
 | **EvidenceStore** | Evidence anchors, confidence scores, provenance records | Programmatic via SDK adapter | `grounded_agency/state/evidence_store.py` |
 | **CheckpointTracker** | Checkpoint creation, validation, expiry events | Programmatic via SDK adapter | `grounded_agency/state/checkpoint_tracker.py` |
 | **Validator outputs** | Pass/fail status of all validation checks | CLI execution | `tools/validate_*.py` |

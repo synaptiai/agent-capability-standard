@@ -813,6 +813,8 @@ def _without_link_count(directory: Path) -> Path:
     assert "records_linked" not in stripped
     copy = directory / "pretooluse_without_link_count.sh"
     copy.write_text(stripped)
+    # The log hook beside it records its refusals, as beside the hook.
+    shutil.copy(HOOK.parent / "posttooluse_log_tool.sh", directory)
     for bash in {"/bin/bash", shutil.which("bash")}:
         if bash and os.path.exists(bash):
             subprocess.run([bash, "-n", str(copy)], check=True, timeout=30)
