@@ -2496,6 +2496,12 @@ here and marked so.
 - `/grounded-setup` denies sandboxed reads of each git directory's `acs`
   directory, which holds the checkpoint key, in `sandbox.filesystem.denyRead`
   and `sandbox.credentials.files`, as well as by the `Read(...)` rules.
+- `docs/guides/ADOPTION.md`: one staged adoption path for Standard 1.2.
+  Each stage names its component, the level or class that component can
+  claim, and a check to run; the guide also gives a starting point for each
+  domain profile. The FAQ, GROUNDED_AGENCY D.3 and the WHITEPAPER's
+  adoption recommendation point at it, and their L2/L3 team milestones are
+  removed.
 
 ### Changed
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
@@ -2655,6 +2661,8 @@ here and marked so.
   accepted more than `expires_ms` after the request, and one stored later
   counts for nothing; a rejection is still accepted until the request is used
   or expires.
+- README: the Python package is not on PyPI. Install it from a clone of the
+  repository, which needs Python >= 3.14 and Rust >= 1.88.
 
 ## [v2.0.0] — 2026-10-29
 
