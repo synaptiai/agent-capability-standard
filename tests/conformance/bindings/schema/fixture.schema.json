@@ -33,6 +33,11 @@
       }
     },
     "host_takes_checkpoints": { "type": "boolean", "default": false },
+    "shell_tools": {
+      "type": "object",
+      "description": "The layer's shell-like tools, as its conformance statement's shell_tools names them: \"none\" (no operating-system boundary declared) or \"declared\". A shell-like tool with \"none\" performs only its worst case (section 5.18.3): its classifier does not count it as able to perform any capability (section 5.18.2).",
+      "additionalProperties": { "enum": ["none", "declared"] }
+    },
     "expect": {
       "type": "object",
       "required": ["errors", "warnings", "effective"],

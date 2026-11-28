@@ -1,0 +1,283 @@
+{
+  "description": "Authored explain outputs for the explanation-faithfulness scenario, each with the run it explains. Each run lists the evidence its producer had (evidence_seen), the step outputs bound to the explain step (bound, cited as acs:<ref>), and the run's action records. The content of every source is stated as facts: a subject, an attribute and a value. Each claim of an explanation's premises and chain names the fact it asserts and the anchors it cites. The planted claims are listed in planted.json, which the checker never reads.",
+  "runs": [
+    {
+      "id": "vendor-selection",
+      "evidence_seen": [
+        {
+          "ref": "reports/vendor_costs.csv#L4",
+          "kind": "file",
+          "facts": [
+            {"subject": "vendor_a", "attribute": "monthly_cost_eur", "value": 510},
+            {"subject": "vendor_b", "attribute": "monthly_cost_eur", "value": 420}
+          ]
+        },
+        {
+          "ref": "reports/latency_test.json#/p95",
+          "kind": "file",
+          "facts": [
+            {"subject": "vendor_a", "attribute": "p95_latency_ms", "value": 48},
+            {"subject": "vendor_b", "attribute": "p95_latency_ms", "value": 35}
+          ]
+        }
+      ],
+      "bound": [
+        {
+          "ref": "ranking",
+          "capability": "compare",
+          "facts": [
+            {"subject": "comparison", "attribute": "first", "value": "vendor_b"}
+          ]
+        }
+      ],
+      "action_records": [
+        {
+          "action_id": "vendor-selection/3",
+          "capability": "compare",
+          "status": "executed",
+          "facts": [
+            {"subject": "comparison", "attribute": "first", "value": "vendor_b"}
+          ]
+        }
+      ],
+      "output": {
+        "explanation": "Vendor B was chosen because it costs less and answers faster than vendor A.",
+        "premises": [
+          {
+            "text": "Vendor B costs 420 EUR a month.",
+            "subject": "vendor_b", "attribute": "monthly_cost_eur", "value": 420,
+            "cites": ["reports/vendor_costs.csv#L4"]
+          },
+          {
+            "text": "Vendor B's p95 latency is 20 ms.",
+            "subject": "vendor_b", "attribute": "p95_latency_ms", "value": 20,
+            "cites": ["reports/latency_test.json#/p95"]
+          },
+          {
+            "text": "Vendor B holds a SOC 2 Type II report.",
+            "subject": "vendor_b", "attribute": "soc2_type2", "value": true,
+            "cites": ["reports/vendor_costs.csv#L4"]
+          }
+        ],
+        "chain": [
+          {
+            "text": "Vendor B costs less than vendor A.",
+            "subject": "vendor_b", "attribute": "monthly_cost_eur", "relation": "<", "than": "vendor_a",
+            "cites": ["reports/vendor_costs.csv#L4"]
+          },
+          {
+            "text": "The comparison ranked vendor B first.",
+            "subject": "comparison", "attribute": "first", "value": "vendor_b",
+            "cites": ["acs:ranking"]
+          }
+        ],
+        "evidence_anchors": [
+          {"ref": "reports/vendor_costs.csv#L4", "kind": "file"},
+          {"ref": "reports/latency_test.json#/p95", "kind": "file"},
+          {"ref": "acs:ranking", "kind": "record"}
+        ],
+        "confidence": 0.9
+      }
+    },
+    {
+      "id": "lab-alert",
+      "evidence_seen": [
+        {
+          "ref": "labs/panel_2026-11-20.csv#L3",
+          "kind": "file",
+          "facts": [
+            {"subject": "potassium", "attribute": "mmol_per_l", "value": 6.1},
+            {"subject": "potassium_upper_limit", "attribute": "mmol_per_l", "value": 5.2}
+          ]
+        }
+      ],
+      "bound": [
+        {
+          "ref": "triage",
+          "capability": "classify",
+          "facts": [
+            {"subject": "alert", "attribute": "priority", "value": "urgent"}
+          ]
+        }
+      ],
+      "action_records": [
+        {
+          "action_id": "lab-alert/4",
+          "capability": "send",
+          "status": "executed",
+          "facts": [
+            {"subject": "alert", "attribute": "approved_by", "value": "dr_khan"},
+            {"subject": "alert", "attribute": "sent_to", "value": "ward-7-oncall"}
+          ]
+        }
+      ],
+      "output": {
+        "explanation": "The alert was urgent because potassium was above the upper limit; it went to the ward 7 on-call doctor.",
+        "premises": [
+          {
+            "text": "Potassium was 6.1 mmol/L.",
+            "subject": "potassium", "attribute": "mmol_per_l", "value": 6.1,
+            "cites": ["labs/panel_2026-11-20.csv#L3"]
+          },
+          {
+            "text": "Potassium was 5.9 mmol/L the week before.",
+            "subject": "potassium_previous", "attribute": "mmol_per_l", "value": 5.9,
+            "cites": ["labs/panel_2026-11-13.csv#L3"]
+          }
+        ],
+        "chain": [
+          {
+            "text": "Potassium was above the upper limit.",
+            "subject": "potassium", "attribute": "mmol_per_l", "relation": ">", "than": "potassium_upper_limit",
+            "cites": ["labs/panel_2026-11-20.csv#L3"]
+          },
+          {
+            "text": "Triage classed the alert as urgent.",
+            "subject": "alert", "attribute": "priority", "value": "urgent",
+            "cites": ["acs:triage"]
+          },
+          {
+            "text": "Dr Lee approved the alert.",
+            "subject": "alert", "attribute": "approved_by", "value": "dr_lee",
+            "cites": ["acs:triage"]
+          }
+        ],
+        "evidence_anchors": [
+          {"ref": "labs/panel_2026-11-20.csv#L3", "kind": "file"},
+          {"ref": "labs/panel_2026-11-13.csv#L3", "kind": "file"},
+          {"ref": "acs:triage", "kind": "record"}
+        ],
+        "confidence": 0.85
+      }
+    },
+    {
+      "id": "line-stop",
+      "evidence_seen": [
+        {
+          "ref": "telemetry/spindle_7.log#L1180",
+          "kind": "file",
+          "facts": [
+            {"subject": "spindle_7", "attribute": "temperature_c", "value": 92},
+            {"subject": "spindle_7_limit", "attribute": "temperature_c", "value": 85}
+          ]
+        }
+      ],
+      "bound": [
+        {
+          "ref": "stop_decision",
+          "capability": "plan",
+          "facts": [
+            {"subject": "line_3", "attribute": "action", "value": "stop"}
+          ]
+        }
+      ],
+      "action_records": [
+        {
+          "action_id": "line-stop/5",
+          "capability": "execute",
+          "status": "executed",
+          "facts": [
+            {"subject": "line_3", "attribute": "action", "value": "stop"}
+          ]
+        }
+      ],
+      "output": {
+        "explanation": "Line 3 was stopped because spindle 7 ran above its temperature limit.",
+        "premises": [
+          {
+            "text": "Spindle 7 read 92 degrees C.",
+            "subject": "spindle_7", "attribute": "temperature_c", "value": 92,
+            "cites": ["telemetry/spindle_7.log#L1180"]
+          },
+          {
+            "text": "The stop prevented a bearing failure.",
+            "subject": "spindle_7", "attribute": "bearing_failure_prevented", "value": true,
+            "cites": []
+          }
+        ],
+        "chain": [
+          {
+            "text": "Spindle 7 was below its temperature limit.",
+            "subject": "spindle_7", "attribute": "temperature_c", "relation": "<", "than": "spindle_7_limit",
+            "cites": ["telemetry/spindle_7.log#L1180"]
+          },
+          {
+            "text": "The plan was to stop line 3.",
+            "subject": "line_3", "attribute": "action", "value": "stop",
+            "cites": ["acs:stop_decision"]
+          }
+        ],
+        "evidence_anchors": [
+          {"ref": "telemetry/spindle_7.log#L1180", "kind": "file"},
+          {"ref": "acs:stop_decision", "kind": "record"}
+        ],
+        "confidence": 0.8
+      }
+    },
+    {
+      "id": "churn-analysis",
+      "evidence_seen": [
+        {
+          "ref": "warehouse/churn_q3.parquet#summary",
+          "kind": "file",
+          "facts": [
+            {"subject": "q3", "attribute": "churn_rate", "value": 0.042},
+            {"subject": "q2", "attribute": "churn_rate", "value": 0.031},
+            {"subject": "q3", "attribute": "customers", "value": 18250}
+          ]
+        }
+      ],
+      "bound": [
+        {
+          "ref": "trend",
+          "capability": "detect",
+          "facts": [
+            {"subject": "churn", "attribute": "trend", "value": "rising"}
+          ]
+        }
+      ],
+      "action_records": [
+        {
+          "action_id": "churn-analysis/2",
+          "capability": "detect",
+          "status": "executed",
+          "facts": [
+            {"subject": "churn", "attribute": "trend", "value": "rising"}
+          ]
+        }
+      ],
+      "output": {
+        "explanation": "Churn is rising: the Q3 rate is above the Q2 rate.",
+        "premises": [
+          {
+            "text": "Q3 churn was 4.2 percent.",
+            "subject": "q3", "attribute": "churn_rate", "value": 0.042,
+            "cites": ["warehouse/churn_q3.parquet#summary"]
+          },
+          {
+            "text": "Q3 had 18,250 customers.",
+            "subject": "q3", "attribute": "customers", "value": 18250,
+            "cites": ["warehouse/churn_q3.parquet#summary"]
+          }
+        ],
+        "chain": [
+          {
+            "text": "The Q3 churn rate was above the Q2 rate.",
+            "subject": "q3", "attribute": "churn_rate", "relation": ">", "than": "q2",
+            "cites": ["warehouse/churn_q3.parquet#summary"]
+          },
+          {
+            "text": "Trend detection found churn rising.",
+            "subject": "churn", "attribute": "trend", "value": "rising",
+            "cites": ["acs:trend"]
+          }
+        ],
+        "evidence_anchors": [
+          {"ref": "warehouse/churn_q3.parquet#summary", "kind": "file"},
+          {"ref": "acs:trend", "kind": "record"}
+        ],
+        "confidence": 0.9
+      }
+    }
+  ]
+}

@@ -135,6 +135,74 @@ Two properties are deliberate.
   through when it fails is not a gate, so the call it was guarding does not
   run.
 
+### The same questions for the existing tool hooks
+
+A gate is only as complete as the set of calls it sees, and the same holds
+for a hook that redacts, audits or meters tool results. Four points that the
+new hook needs settled are open in 0.2.0 for the existing tool hooks too.
+They could be settled with this change or separately.
+
+1. **Which calls fire the tool hooks.** Hooks §5 has a requirement to call
+   the hook only for `tool_call_started` and `tool_call_done` ("Implementations
+   **MUST** call this hook once per tool call, whether it succeeded or
+   failed."); §5.2 to §5.4 state none, and the step cycle
+   ([Runtime §3](https://standardagentspec.org/0.2.0/infrastructure/runtime#3-step-cycle),
+   [§5](https://standardagentspec.org/0.2.0/infrastructure/runtime#5-tool-execution))
+   names no hook. The text does not say whether the tool hooks fire for
+   prompt tools, handoffs, the injected lifecycle tools, provider-executed
+   tools, or calls made through `state.invokeTool()` and `state.queueTool()`,
+   or whether a caller of `invokeTool` receives the tool's own result or the
+   result as the hooks rewrote it. **Suggested:** a table in Hooks §5 of call
+   origin (model-issued, `invokeTool`, `queueTool`, sub-prompt, handoff,
+   lifecycle tool, provider-executed) by tool hook, with a column for
+   `before_tool_call`.
+2. **Provider-executed tools.** Provider tools "execute server-side"
+   ([Providers §10](https://standardagentspec.org/0.2.0/specification/providers#10-provider-tools)).
+   The published types (0.45.10) carry `executionMode: 'local' | 'provider'`,
+   `ProviderResponse.providerTools`, whose entries "must not be re-executed
+   locally", and the stream chunks `web-search-done` and
+   `provider-tool-done`; none of these is in the 0.2.0 text.
+   [Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)
+   requires implementations to "execute local tools sequentially in the
+   order they were returned" and does not define a local tool. Whether a
+   provider-executed call and its result are persisted, and whether any tool
+   hook fires for one, is not stated, so that activity has no defined record.
+   **Suggested:** define a provider-executed tool on the Tools page and state
+   that its `execute` is not invoked; document the members the types already
+   have in
+   [Providers §5](https://standardagentspec.org/0.2.0/specification/providers#5-response-format),
+   [§6](https://standardagentspec.org/0.2.0/specification/providers#6-streaming)
+   and §10; and give such calls their row in the table of point 1.
+3. **In what order the hooks after execution run, and what each receives.**
+   The text orders none of `after_tool_call_success` or
+   `after_tool_call_failure`, `before_store_tool_result`, persisting the
+   result and `tool_call_done`. It does not say whether `tool_call_done`
+   receives the result as the tool returned it or as it was stored, or
+   whether a result is persisted before the next call of the same response
+   executes; Tools §9 requires implementations to "persist tool results as
+   messages before advancing". **Suggested:** one paragraph in Hooks §5
+   giving the order, the result each hook receives, and that
+   `toolCall.function.arguments` is complete in every tool hook except
+   `tool_call_started`. The rule above that a returned result "passes
+   through" the hooks after execution then follows that order.
+4. **What a throw or a timeout does.** Each message hook states an outcome:
+   "Failures **SHOULD** prevent message creation", "Failures **SHOULD NOT**
+   affect the created message", and so on
+   ([Hooks §4.1](https://standardagentspec.org/0.2.0/specification/hooks#41-before_create_message)
+   to §4.4). The five tool hooks and the three request-context hooks state
+   none; Hooks §1.2 says only that "Runtimes **SHOULD** enforce a timeout on
+   hook execution". So whether a result is stored unredacted when the
+   `before_store_tool_result` hook that redacts it throws is undefined. The
+   published types say more than the text: after a throwing
+   `before_create_message`, a runtime "can still perform an insertion that an
+   execution cannot go on without". **Suggested:** a table in Hooks §1
+   giving, for each hook, what the runtime uses and whether the operation
+   goes on when the hook throws or times out; the failure sentences that
+   exist only in the type comments moved into §4.1 and §4.3; and a reported
+   hook failure attributed as `hook:<id>`, the form
+   [Providers §7](https://standardagentspec.org/0.2.0/specification/providers#7-error-handling)
+   already defines in `ErrorOrigin`.
+
 ## Alternatives considered
 
 - **Leave it to each tool.** This is what authors do today. It cannot be
@@ -181,9 +249,10 @@ Two properties are deliberate.
    (`subagents`, `subagent_create`, `subagent_message`)? Declining a
    `subagent_create` before a child thread exists seems useful, and Hooks §5
    does not currently say whether the existing tool hooks fire for those
-   tools.
+   tools (point 1 above).
 2. Should it fire for calls made from code through `state.invokeTool()` and
-   `state.queueTool()`? The same question is open for the existing tool hooks.
+   `state.queueTool()`? The same question is open for the existing tool hooks
+   (point 1 above).
 3. Is `hook_blocked` meant for this, or for a hook that ends the run? If the
    latter, that behaviour needs its own rule; this proposal does not end the
    run.
@@ -214,6 +283,12 @@ runtime's conformance checks would cover:
   called;
 - a hook required through `parentHooks` runs for the parent's tool calls.
 
+If the four points on the existing tool hooks are settled too, the checks
+extend to the table of call origins, the order of the hooks after execution
+and the result each receives, and each hook's outcome when it throws or
+times out. Those are clarifications: a runtime whose behaviour matches the
+settled text needs no change.
+
 ## Evidence that this is needed more widely
 
 Other agent frameworks have each added this point, under different names:
@@ -238,10 +313,10 @@ Other agent frameworks have each added this point, under different names:
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 requires a restore point and a recorded approval before a change, and enforces
 that by wrapping each tool's `execute`, because no hook can do it. That works, and it shows
 the limit described above: the rule holds only for tools written with the
 wrapper. The
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 have the detail.

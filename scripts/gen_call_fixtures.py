@@ -100,6 +100,7 @@ def binding(
     offered: dict[str, str | None] | None = None,
     host_actions: list[tuple[str, str]] | None = None,
     host_takes_checkpoints: bool | None = None,
+    shell_tools: dict[str, str] | None = None,
 ) -> None:
     fixture: dict[str, Any] = {"description": description, "ontology": ONTOLOGY}
     if (
@@ -115,6 +116,8 @@ def binding(
         fixture["host_actions"] = [{"action": a, "tool": t} for a, t in host_actions]
     if host_takes_checkpoints is not None:
         fixture["host_takes_checkpoints"] = host_takes_checkpoints
+    if shell_tools is not None:
+        fixture["shell_tools"] = shell_tools
     fixture["expect"] = {
         "errors": list(errors),
         "warnings": list(warnings),
@@ -330,9 +333,18 @@ binding(
 )
 binding(
     "offered_classified_tool_counts",
-    "An offered tool with a classifier counts as able to perform any capability, a checkpoint included.",
+    "An offered tool with a classifier, not a shell-like tool, counts as able to perform any capability, a checkpoint included.",
+    [rec("write", "mutate"), rec("batch", "mutate", classifier="batch")],
+    offered={"write": "write", "batch": "batch"},
+    effective={"write": GATED, "batch": GATED},
+)
+binding(
+    "offered_shell_tool_without_boundary",
+    "A shell-like tool whose statement declares no operating-system boundary performs only its worst case, so its classifier does not count it as able to take the checkpoint another offered tool requires (V102).",
     [rec("write", "mutate"), rec("shell", "mutate", classifier="shell")],
     offered={"write": "write", "shell": "shell"},
+    shell_tools={"shell": "none"},
+    errors=[diag("V102", "write"), diag("V102", "shell")],
     effective={"write": GATED, "shell": GATED},
 )
 binding(

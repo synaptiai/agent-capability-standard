@@ -35,10 +35,11 @@ meta:
       version: "0.45.10"
   # The versions these conventions were checked against: the Standard and
   # ontology the binding implements. The rows were made against 1.1.0 / 2.1.0
-  # (the analysis index says so) and are not redone at each version; a new
-  # version is checked against the rulings first, then recorded here. For
-  # 1.2.0 / 2.2.0: no flag, edge or required field changed, and §5.14 and
-  # §5.17 keep their numbers.
+  # and are kept as that record; each concern file lists the rows a 1.2.0
+  # section changes (`changes_in_1_2_0`, checked 2026-11-27; the analysis
+  # index says so). A new version is checked against the rulings first, then
+  # recorded here. For 1.2.0 / 2.2.0: no flag, edge or required field
+  # changed, and §5.14 and §5.17 keep their numbers.
   agent_capability_standard:
     standard: "1.2.0"
     ontology: "2.2.0"

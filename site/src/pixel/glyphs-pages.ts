@@ -128,6 +128,8 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:skills-alignment': ['.........', '.........', '#########', '#..#=#..#', '#..#=#..#', '#########', '.........', '.........', '.........'],
   // A tree of kinds: one parent, two children.
   'page:failure-taxonomy': ['...###...', '...###...', '....#....', '.#######.', '.#.....#.', '###...###', '###...###', '.........', '.........'],
+  // Bars falling from left to right on a baseline: classes ranked by count.
+  'page:failure-classes': ['.#.......', '.#.......', '.#.#.....', '.#.#.....', '.#.#.#...', '.#.#.#.#.', '.#.#.#.#.', '#########', '.........'],
   // A U-turn arrow.
   'page:replanning': ['..###....', '.#...#...', '#.....#..', '#.....#..', '#...#####', '#....###.', '#.....#..', '#........', '#........'],
   // Two tiles set side by side and offset, one solid and one in outline: a comparison.
@@ -232,6 +234,7 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/background/methodology/skills-alignment-evaluation/': 'page:skills-alignment',
   '/background/research/failure-taxonomy/': 'page:failure-taxonomy',
   '/background/research/replanning-capabilities/': 'page:replanning',
+  '/background/research/safety-layer-failure-classes/': 'page:failure-classes',
   '/background/research/oasf-comparison/': 'page:oasf-comparison',
   '/background/research/capability-mapping/': 'page:capability-mapping',
   '/background/research/benchmarks/': 'page:benchmarks',

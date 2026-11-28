@@ -9,7 +9,7 @@
 
 **Documentation:** [acs.synapti.ai](https://acs.synapti.ai/) has the specification, a page for every capability, workflow and domain, and search. Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
 
-> **Versioning:** The spec version tracks the standard itself: v1.2.0 is a Candidate Standard, accepted by RFC-0005 to RFC-0010 and not yet released; [v1.1.0](spec/STANDARD-v1.1.0.md) is the released Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) is Supported. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
+> **Versioning:** The spec version tracks the standard itself: v1.2.0 is a Candidate Standard, accepted by RFC-0005 to RFC-0011 and not yet released; [v1.1.0](spec/STANDARD-v1.1.0.md) is the released Standard; [v1.0.0](spec/STANDARD-v1.0.0.md) is Supported. The plugin version (v2.0.0) tracks the Claude Code implementation. The Python package (`grounded-agency`) uses its own SemVer. See [GOVERNANCE.md](spec/GOVERNANCE.md) for the versioning policy.
 
 ```bash
 # Install as Claude Code plugin
@@ -123,7 +123,7 @@ This standard makes failures **visible and recoverable**:
 
 [Standard 1.2.0](spec/STANDARD-v1.2.0.md) is a Candidate Standard, accepted
 by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to
-[RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md), with
+[RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), with
 capability ontology 2.2.0. A workflow valid under 1.1.0 validates and runs
 as before. It adds:
 
@@ -133,6 +133,12 @@ as before. It adds:
   layers, SL ([§10.4](spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)),
   which the [Python SDK adapter](docs/integrations/claude_agent_sdk.md) and
   the [Standard Agents binding](docs/integrations/standard_agents.md) claim.
+  The Standard also carries the rule of
+  [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md): a layer gives every call of a shell-like tool (a shell, an
+  interpreter) the tool's worst case unless the call runs under an
+  operating-system boundary the layer declares and verifies. The adapter
+  runs Bash under Claude Code's sandbox by default and relaxes a Bash call
+  only while it has verified that sandbox.
 - **The host protocol** ([§5.19](spec/STANDARD-v1.2.0.md#519-host-protocol)):
   the actions, responses and run operations between an executor and its
   host as a published schema, with cancellation, run records and a
@@ -347,7 +353,7 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
 | Document | Purpose |
 |----------|---------|
-| [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md)) |
+| [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md)) |
 | [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Released specification (Standard) |
 | [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Earlier specification (Supported) |
 | [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
@@ -447,7 +453,7 @@ async with ClaudeSDKClient(options) as client:
 **Features:**
 - **Permission callbacks** that block mutations without checkpoints
 - **Evidence anchors** that track provenance for grounded decisions
-- **Skill tracking** that updates checkpoint state when `checkpoint` skill is invoked
+- **Checkpoint recording** that records a checkpoint when a call that saves the state succeeds (`git stash create` under the verified sandbox, or a tool bound to `checkpoint`); a `Skill` call takes none
 - **Audit trails** for compliance and debugging
 
 See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for the full integration guide.
@@ -460,6 +466,8 @@ cd agent-capability-standard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[sdk]"
 ```
+
+The adapter relaxes Bash calls only with the `claude-agent-sdk` release that `constraints.txt` pins (0.2.189, which bundles Claude Code 2.1.332), and only in the `bypassPermissions` permission mode; under another release or in another mode every Bash call needs a checkpoint and approval (`pip install claude-agent-sdk==0.2.189`).
 
 To adopt the standard in stages, from the validator in CI to a safety layer and an executor, see the [adoption guide](docs/guides/ADOPTION.md).
 
@@ -551,4 +559,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [spec/GOVERNANCE.md](s
 
 ---
 
-**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0010, not yet released); v1.1.0, released 2026-10-28, is the released Standard; v1.0.0, released 2026-01-24, is Supported. [GOVERNANCE](spec/GOVERNANCE.md#standard-versions) defines these statuses.
+**Status:** Candidate Standard v1.2.0 (accepted by RFC-0005 to RFC-0011, not yet released); v1.1.0, released 2026-10-28, is the released Standard; v1.0.0, released 2026-01-24, is Supported. [GOVERNANCE](spec/GOVERNANCE.md#standard-versions) defines these statuses.

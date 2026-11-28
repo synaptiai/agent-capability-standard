@@ -516,7 +516,7 @@ export function listingFigures(section: string, routes: readonly Route[], layers
     case 'background':
       return [
         { at: 'top', kind: 'bars', bars: readingBars(sectionDocs(routes, 'background')) },
-        { at: 'Methodology', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) },
+        { at: 'Research', kind: 'matrix', matrix: backgroundLayerMatrix(sectionDocs(routes, 'background'), layers) },
       ];
     // The start pages are read in order by a newcomer, so the figure is how long each takes; counting
     // capability names in code spans scored the overview, which shows all 36 in a drawing, as 0.

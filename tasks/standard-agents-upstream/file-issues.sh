@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO="standardagents/spec"
 # 06 first: it is small and asks for nothing. Then 01, which matters most.
-ORDER=(06 01 07 09 02 03 04 05 08)
+ORDER=(06 01 07 09 02 03 04 05 08 10 11 12)
 
 cd "$(dirname "$0")"
 mode="list"
@@ -43,11 +43,24 @@ for number in "${ORDER[@]}"; do
     printf 'exists   %s  %s\n' "$number" "$existing"
     continue
   fi
-  url=$(tail -n +2 "$file" | sed '1{/^$/d}' | gh issue create --repo "$REPO" --title "$title" --body-file -)
+  # The body is read in full before gh runs, so a failed read files nothing.
+  # BSD sed (macOS) needs the ';' before '}'.
+  body=$(tail -n +2 "$file" | sed '1{/^$/d;}')
+  if [[ -z "$body" ]]; then
+    echo "empty body: $file; nothing filed" >&2
+    exit 1
+  fi
+  url=$(printf '%s\n' "$body" | gh issue create --repo "$REPO" --title "$title" --body-file -)
   printf 'filed    %s  %s\n' "$number" "$url"
 done
 
 if [[ "$mode" == "list" ]]; then
   echo
+  # The texts link this repository at one commit; set it to main's head on
+  # the day of filing (see README.md, Filing).
+  # grep exits 1 when no text has a pinned link; that is not an error here.
+  pinned=$( { grep -ho 'synaptiai/agent-capability-standard/\(tree\|blob\)/[0-9a-f]\{40\}' \
+    [0-9][0-9]-*.md || true; } | sed 's#.*/##' | sort -u | tr '\n' ' ')
+  echo "Links into this repository are pinned to: ${pinned:-none}"
   echo "Nothing was created. Run with --file to create these issues in $REPO."
 fi

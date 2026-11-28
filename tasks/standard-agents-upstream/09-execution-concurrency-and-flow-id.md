@@ -175,7 +175,7 @@ turn matches the table; a sub-prompt and a queued tool see the caller's
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 keeps a trace counter, a list of restore points and approvals in the
 thread's key-value store, written by tools, a hook and an endpoint. Nothing
 orders an endpoint request against a running tool call or against a second
@@ -183,5 +183,5 @@ request, so each approval has its own key, and two arriving together
 can still drop one from the approver list; a restore point counts only in
 the execution that took it, by `flowId`, with a ten-minute limit that holds
 whatever a runtime does with the id. The
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 state both limits.

@@ -20,6 +20,20 @@ where Claude Code lets them, and do not claim the safety-layer class SL
 says why). The Python SDK adapter and the Standard Agents binding claim it
 (their conformance statements are in `tests/conformance/calls/statements/`).
 
+The hooks' text readers (the records guard, the Bash classification, the
+send and audit skills' command hooks) are advisory: they refuse early what
+they recognise and let a command they read as read-only skip the
+checkpoint, but they read text that the shell interprets and are not a
+boundary. The Standard's rule for shell-like tools
+([§5.18.3](../spec/STANDARD-v1.2.0.md#5183-classification),
+[RFC-0011](../spec/RFC-0011-shell-like-tools-and-os-boundary.md))
+allows a layer to relax a Bash call only under an operating-system boundary
+it declares and has verified for that call. The pre-tool-use hook relaxes a
+Bash call only under Claude Code's strict sandbox, which it verifies from
+the settings files it can read ([The strict sandbox](#the-strict-sandbox));
+it cannot see settings given when Claude Code starts, so it does not verify
+the effective configuration as §5.18.3 requires.
+
 ## Platforms
 
 The hooks need `bash`, `jq` and `openssl`, and perl or `find`, `awk` and a
@@ -719,7 +733,11 @@ sandbox runtime skips a glob such as `audit.log*`):
   same rules: the main checkout's, each linked worktree's
   (`.git/worktrees/<name>`) and each submodule's (`.git/modules/<path>`,
   nested ones included), since a session in one checkout can otherwise
-  write another's commit entries or read its key. A project in no
+  write another's commit entries or read its key. A submodule checkout's
+  common git directory is its own `.git/modules/<path>` in the
+  superproject, so the superproject's git directories get the same rules,
+  found with `git rev-parse --show-superproject-working-tree`, up to the
+  outermost one. A project in no
   repository has no `acs/` rule.
 - A rule names a path that exists when the settings are made, so make them
   again after `git worktree add` or a submodule's first checkout.
@@ -769,7 +787,8 @@ The pre-tool-use hook lets a Bash call run with less than the worst case
 (a read-only command with no checkpoint or approval, `git stash create` as
 a checkpoint, a restore of a recorded checkpoint as a rollback) only when
 Claude Code runs it under an operating-system boundary the hook has
-verified for that call (STANDARD 1.2.0 §5.18.3, as RFC-0011 proposes it).
+verified for that call, from the settings files it can read (STANDARD
+1.2.0 §5.18.3, RFC-0011).
 Otherwise the call is a gated `mutate`: it needs a checkpoint marker and
 approval. Without the strict sandbox no checkpoint can be taken through
 Bash, so every gated call is refused with `F501 CHECKPOINT_REQUIRED:`,

@@ -2,6 +2,76 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: workflow-execution
 title: Workflows and the executor
+changes_in_1_2_0:
+- row: wf-01
+  sections: '§5.1.1, §11.5, §11.7'
+  effect: 'Catalog manifests and catalog sets are added, versions 1.0 to 1.2 are supported, and the
+    catalog has a JSON Schema.'
+- row: wf-04
+  sections: '§5.19, §10.5'
+  effect: 'The host protocol is normative, with conformance class EX.'
+- row: wf-05
+  sections: '§5.19.4'
+  effect: 'Saving and continuing a run is specified (one writer, save before acting, state integrity).'
+- row: wf-06
+  sections: '§5.19.4'
+  effect: 'Delivery is at least once, keyed by `run_id` and the action `id`.'
+- row: wf-07
+  sections: '§4.4.2, §5.19.1'
+  effect: 'Every `InvokeCapability` carries an `idempotency_key`, and in a 1.2 workflow an `Output` is
+    checked (R402); `evidence_seen` is added.'
+- row: wf-08
+  sections: '§5.2.2, §4.4.1'
+  effect: 'Checkpoint use is stated, and `RolledBack` answers only a full restore and reports
+    `not_covered`.'
+- row: wf-09
+  sections: '§5.14, §5.14.1'
+  effect: 'The digest input is defined, and a resumed request names `queued_action_id`.'
+- row: wf-10
+  sections: '§5.13, §5.13.1'
+  effect: 'The host polls liveness and reports `LivenessLost`, and answers to an inquiry are defined.'
+- row: wf-11
+  sections: '§5.19.3'
+  effect: 'A `Sleep` ends at `until`, an action times out after its deadline, and an answer at the
+    deadline is in time.'
+- row: wf-12
+  sections: '§5.19.5'
+  effect: 'A run can be cancelled (R408), with the status `cancelled`.'
+- row: wf-13
+  sections: '§5.10.2'
+  effect: 'Trigger evaluation is the host''s duty: event acceptance and one run per `event_id`, fire
+    times, the `every` anchor, `overlap` and missed fire times.'
+- row: wf-16
+  sections: '§5.2'
+  effect: 'The backoff schedule is stated.'
+- row: wf-18
+  sections: '§5.2.3'
+  effect: 'Members of a group are not ordered and may run in any order or concurrently; `join` has one
+    value, `all_complete` (W618 otherwise).'
+- row: wf-19
+  sections: '§5.1.1, §5.20'
+  effect: '`invoke` names workflows by qualified id across catalog sets, and with `grounding@1` carries
+    its nested run''s anchors.'
+- row: wf-20
+  sections: '§5.15.2, §5.15.3'
+  effect: 'Delegation targets are bounded by `agents`, and `continues` continues an earlier delegation.'
+- row: wf-22
+  sections: '§5.19.4'
+  effect: 'One writer per run and save before acting are required.'
+- row: wf-23
+  sections: '§11.5'
+  effect: 'Rules for 1.2 targets apply only to a workflow that declares one, and W616 covers a feature
+    newer than the target.'
+- row: wf-27
+  sections: '§5.19.5'
+  effect: 'The host protocol now has cancellation (R408).'
+- row: wf-28
+  sections: '§5.19.4'
+  effect: 'At-least-once delivery keyed by `run_id` and `id` covers an answer that arrives late or twice.'
+- row: wf-29
+  sections: '§5.19.6, §4.4.2'
+  effect: 'Protocol traffic that carries only the action''s values is not a `send` step, and transmissions
+    carry idempotency keys.'
 rows:
 - id: wf-01
   relation: acs_only

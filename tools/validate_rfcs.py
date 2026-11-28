@@ -56,7 +56,7 @@ CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
 
 # Accepted before the review rule existed; they record neither line.
 ACCEPTED_BEFORE_REVIEW_RULE = frozenset(
-    {"0001", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010"}
+    {"0001", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011"}
 )
 
 # spec/GOVERNANCE.md: "Changes require: Motivation, Alternatives, Backward

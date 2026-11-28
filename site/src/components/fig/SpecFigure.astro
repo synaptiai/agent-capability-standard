@@ -44,6 +44,7 @@ import SafetyDefaults from './SafetyDefaults.astro';
 import TableWrap from '../TableWrap.astro';
 import * as T from '../../lib/spec-tail-figures';
 import * as H from '../../lib/spec-host-figures';
+import * as C from '../../lib/spec-tool-figures';
 import { heatRanges, heatStep } from '../../lib/edge-figures';
 import { loadIdentityPolicy } from '../../data/spec-sources';
 import { githubBlobUrl, githubTreeUrl } from '../../lib/repo';
@@ -85,7 +86,7 @@ const schema = loadCatalogSchema();
 const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
 const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
 const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'digest-vectors', 'effect-vectors', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2', 'pattern-3', 'pattern-4'];
-const NEW = [...TAIL, ...Object.keys(T.CODE_TABLE_FIGURES), 'principles', 'sl-fixtures', 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count', 'host-loop', 'overlap', 'protocol-actions', 'run-records', 'fixture-entries'];
+const NEW = [...TAIL, ...Object.keys(T.CODE_TABLE_FIGURES), 'principles', 'sl-fixtures', 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count', 'host-loop', 'overlap', 'protocol-actions', 'run-records', 'fixture-entries', 'classification', 'shell-like-calls', 'os-boundary'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
   'export-replay': "A target another catalog does not export",
@@ -174,6 +175,9 @@ const loop = slot === 'host-loop' ? H.hostLoop(text, where) : null;
 const overlap = slot === 'overlap' ? H.overlapRows(text, where) : [];
 const runEnds = slot === 'run-records' ? H.runRecordRows(text, where) : [];
 const entries = slot === 'fixture-entries' ? H.fixtureEntries(text, where) : null;
+const classRows = slot === 'classification' ? C.classificationRows(text, where) : [];
+const shell = slot === 'shell-like-calls' ? C.shellFlow(text, where) : null;
+const osBoundary = slot === 'os-boundary' ? C.boundary(text, where) : null;
 const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
 const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
 const mergeBands = policy ? T.mergeBands(policy) : [];
@@ -664,6 +668,59 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
   </Figure>
 )}
 
+{slot === 'classification' && inner && (
+  <Figure id={idOf(C.CLASSIFICATION_TITLE)} n={n} title={titled(C.CLASSIFICATION_TITLE)} caption={C.classificationCaption(classRows)} kind="classification">
+    <Fragment set:html={inner} />
+  </Figure>
+)}
+{slot === 'shell-like-calls' && shell && (
+  <Figure id={idOf(C.SHELL_TITLE)} n={n} title={titled(C.SHELL_TITLE)} caption={C.shellFlowCaption(shell)} kind="shell-like-calls">
+    <ol class="sender shell-flow">
+      {(() => {
+        const st = C.shellSteps(shell);
+        // Backticked code as <code>, §n as a link to that section.
+        const words = (t: string) => t.split(/(`[^`]+`|§\d+(?:\.\d+)*)/).map((part) => (part.startsWith('`') ? <code>{part.slice(1, -1)}</code> : part.startsWith('§') ? <a href={sectionLink(part.slice(1))}>{part}</a> : part));
+        return (
+          <>
+            <li class="sender__item">{st.start}</li>
+            {st.checks.map((c) => (
+              <li class="sender__gate">
+                <FlowArrow />
+                <p class="sender__check"><PixelGlyph name="diamond" /><span>{words(c.question)}</span></p>
+                {c.no.map((x) => <p class="sender__drop"><PixelGlyph name="close" /><span>{words(x)}</span></p>)}
+              </li>
+            ))}
+            <li class="sender__item"><FlowArrow /><span><strong>{st.end.lead}</strong> {words(st.end.text)}</span></li>
+          </>
+        );
+      })()}
+    </ol>
+  </Figure>
+)}
+{slot === 'os-boundary' && osBoundary && inner && (
+  <Figure id={idOf(C.BOUNDARY_TITLE)} n={n} title={titled(C.BOUNDARY_TITLE)} caption={C.boundaryCaption(osBoundary)} kind="os-boundary">
+    {(() => {
+      const sides = C.boundarySides();
+      return (
+        <div class="os-boundary">
+          <div class="os-boundary__side os-boundary__side--inside">
+            <p class="os-boundary__head">Inside the boundary</p>
+            <ul class="os-boundary__list">{sides.inside.map((x) => <li>{x}</li>)}</ul>
+            <p class="os-boundary__note">{sides.insideNote}:</p>
+            <ul class="os-boundary__props">{osBoundary.properties.map((p) => <li class="chip">{p}</li>)}</ul>
+          </div>
+          <p class="os-boundary__route"><span>{sides.route}</span><span class="os-boundary__arrow os-boundary__arrow--down"><FlowArrow /></span><span class="os-boundary__arrow os-boundary__arrow--right"><FlowArrow dir="right" length={24} /></span></p>
+          <div class="os-boundary__side">
+            <p class="os-boundary__head">Outside the boundary</p>
+            <ul class="os-boundary__list">{sides.outside.map((x) => <li>{x}</li>)}</ul>
+            <p class="os-boundary__note">{sides.outsideNote}</p>
+          </div>
+        </div>
+      );
+    })()}
+    <Fragment set:html={inner} />
+  </Figure>
+)}
 {slot === 'schema-shelf' && (
   <Figure id={idOf('schema shelf')} n={n} title={titled('Schema shelf')} caption={T.shelfCaption(shelf)} kind="schema-shelf">
     <ul class="shelf">

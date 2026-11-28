@@ -60,6 +60,7 @@ async def decide(
     permission_callback: object,
     tool_name: str,
     tool_input: dict,
+    permission_mode: str = "default",
 ) -> object:
     """A new call's decision in the order Claude Code reaches it: the
     adapter's PreToolUse hook, then, unless the hook refused it, the
@@ -70,7 +71,11 @@ async def decide(
     hook = adapter._make_pretooluse_safety_hook()
     out = (
         await hook(
-            {"tool_name": tool_name, "tool_input": tool_input},
+            {
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "permission_mode": permission_mode,
+            },
             context.tool_use_id,
             None,
         )
@@ -105,6 +110,16 @@ async def main():
             checkpoint_dir=tempfile.mkdtemp(prefix="acs-demo-"),
         )
     )
+
+    # Bash runs under the sandbox wrap_options() turns on, and the adapter
+    # classifies a Bash call by its command only there; without it, every
+    # Bash call is a gated mutate and send.
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions
+
+        adapter.wrap_options(ClaudeAgentOptions(setting_sources=[]))
+    except ImportError:
+        print("claude-agent-sdk is not installed: every Bash call is the worst case")
 
     # What wrap_options() installs as can_use_tool when the options it wraps
     # carry the host's callback (here: approve).
@@ -164,7 +179,8 @@ async def main():
 
     # Phase 4: Read-only operations always allowed
     print("\n--- Phase 4: Read-Only Operations ---")
-    print("Read-only tools don't require checkpoints:")
+    print("Read-only tools don't require checkpoints. A read-only Bash command")
+    print("needs none only under the verified sandbox, in bypassPermissions mode:")
 
     read_only = [
         ("Read", {"path": "README.md"}),
@@ -174,7 +190,9 @@ async def main():
     ]
 
     for tool_name, tool_input in read_only:
-        result = await decide(adapter, permission_callback, tool_name, tool_input)
+        result = await decide(
+            adapter, permission_callback, tool_name, tool_input, "bypassPermissions"
+        )
         allowed = is_allowed(result)
 
         mapping = adapter.mapper.map_tool(tool_name, tool_input)
@@ -209,7 +227,8 @@ Key Points:
 1. High-risk mutations (Write, Edit, rm, etc.) REQUIRE checkpoints (F501)
 2. Checkpoints are consumed after use - one per checkpoint-gated tool call
    (each call reserves the checkpoint under its tool_use_id)
-3. Read-only operations (Read, Grep, ls) ALWAYS allowed
+3. Read-only operations (Read, Grep) are always allowed; a read-only Bash
+   command (ls) only under the verified sandbox, in bypassPermissions mode
 4. In strict_mode=False, mutations warn but proceed
 5. A call whose capability requires approval is put to the host's
    can_use_tool callback; with none it is denied (F502), unless the

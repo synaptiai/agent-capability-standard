@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 Standard 1.2.0 (Candidate Standard) and capability ontology 2.2.0, accepted
-by RFC-0005 to RFC-0010, with their implementation: the reference validator
+by RFC-0005 to RFC-0011, with their implementation: the reference validator
 and executor, the Python SDK, the plugin's hooks and skills, the new
 TypeScript package `@synaptiai/acs-core` and the Standard Agents binding.
 They resolve the findings of the Standard Agents mapping, which this release
@@ -25,16 +25,82 @@ the Python SDK, the plugin, the Standard Agents binding or the TypeScript
 package, by component. A change described under Changed or Fixed is named
 here and marked so.
 
+**Before you upgrade.** The changes most likely to stop or change a setup
+that works with v2.0.0, each linked to its entry under Upgrading.
+
+- Python 3.14 or newer is required, and Rust 1.88 or newer to build from
+  source ([requirements](#upgrade-requirements)).
+- The slash commands `/gap-analysis-workflow` and
+  `/digital-twin-sync-workflow` are now `/capability-gap-analysis` and
+  `/digital-twin-sync-loop` ([renamed skills](#upgrade-renamed-skills)).
+- The plugin's PreToolUse hook runs for every tool. `Skill`, `Agent`, `Task`
+  and every tool the SDK mapper does not map (MCP tools, `Monitor`,
+  `PowerShell`, `ExitWorktree`, ...) are a gated `mutate`: each call uses up
+  its own checkpoint marker (F501 without one) and is asked for approval
+  (F502) in the permission modes default, acceptEdits and plan, and blocked
+  with F502 in the others unless `ACS_HOOK_APPROVAL=off`
+  ([every tool](#upgrade-every-tool), [one marker per call](#upgrade-jq-marker)).
+- Without Claude Code's strict sandbox, every Bash call is a gated `mutate`,
+  read-only commands and `git stash create` included, so no checkpoint
+  marker can be taken and every gated call is refused with F501. Add the
+  settings `hooks/README.md` lists under "The strict sandbox" to
+  `~/.claude/settings.json` outside Claude Code, then start it again
+  ([strict sandbox](#upgrade-strict-sandbox)).
+- While the project's `.claude/settings.json` or
+  `.claude/settings.local.json` sets in `env` a hook setting or any variable
+  other than Claude Code's own (for example `NODE_ENV` or `PATH`), or cannot
+  be read, every call is blocked with R407. Move such an entry to
+  `~/.claude/settings.json`, managed settings or the environment
+  ([project settings](#upgrade-project-env)).
+- While a file under the git directory's `acs/` has a hard link outside the
+  records, the hook blocks every call with F504; while another of the
+  project's records has one, it blocks every call it does not let pass
+  outright. Remove the link outside the session. Counting links needs perl,
+  or `find`, `awk` and a GNU or BSD `stat` (R407 without them)
+  ([hard links](#upgrade-record-links)).
+- The hooks need `jq` (R407 without it). Without `openssl` the take hook
+  writes no checkpoint marker, so every gated call is refused with F501, and
+  the log hook writes its lines unsigned ([jq](#upgrade-jq-marker),
+  [checkpoint entries](#upgrade-earlier-checkpoints),
+  [audit key](#upgrade-audit-key)).
+- Checkpoints taken before the upgrade restore only as a gated `mutate`
+  ([earlier checkpoints](#upgrade-earlier-checkpoints)).
+- The log hook signs with the key in `~/.config/acs/audit.key`, else
+  `AUDIT_HMAC_KEY`, and derives no key from the host name: with neither, it
+  writes its lines unsigned. A log v2.0.0 wrote has no head and is signed
+  with `AUDIT_HMAC_KEY` or the host-name key: outside Claude Code, move
+  `.claude/audit.log` aside and verify it with `tools/verify_audit_log.py
+  --no-head --hmac-key` and that key. The audit skill's
+  `.claude/audit/records.jsonl` verifies with `--no-head --hmac-key
+  "$AUDIT_HMAC_KEY"`; lines v2.0.0 wrote there carry no chain
+  ([audit key](#upgrade-audit-key), [audit head](#upgrade-audit-head),
+  [audit skill](#upgrade-audit-records)).
+- Python SDK: a tool the mapper does not know is the strictest case (a
+  checkpoint and approval), and `GroundedAgentConfig.approval` defaults to
+  `"ask"`. Register an MCP tool with its real capability, and set
+  `approval="off"` for the earlier approval behaviour
+  ([Python SDK tools](#upgrade-sdk-tools)).
+- Runs of 1.1 workflows can end differently. An approved step that fails has
+  a `failed` record, with its code, from the moment it fails, also when its
+  failure mode's rollback or checkpoint then fails (F503, F501) or finds no
+  checkpoint to roll back to, where v2.0.0 left the record `approved`. The
+  1.1 runtime fixtures `records_failure_rollback_fails` and
+  `records_failure_nothing_to_roll_back` show it: on the v2.0.0 executor
+  both end with F503 and the step's record `approved`; now that record is
+  `failed` with code R402. A version-1 snapshot of a run in progress
+  restores with the record members 1.2 adds
+  ([failed record](#upgrade-failed-record), [snapshots](#upgrade-snapshots)).
+
 **Requirements.**
 
-- Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
+- <a id="upgrade-requirements"></a>Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
   are no longer supported. The extension's stable-ABI floor is 3.14.
 - Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
   0.11 requires it.
 
 **Python SDK: tool calls and the adapter (Standard 1.2.0 §5.18).**
 
-- Python SDK: a tool the mapper does not know is now the strictest case (a
+- <a id="upgrade-sdk-tools"></a>Python SDK: a tool the mapper does not know is now the strictest case (a
   high-risk mutation that needs a checkpoint and approval), not `observe`;
   register an MCP tool with its real capability. `GroundedAgentConfig.approval`
   defaults to `"ask"`, so a call whose capability requires approval (Write,
@@ -132,6 +198,85 @@ here and marked so.
   classified `observe`. Move such an entry into `options.env` or the
   host's environment, or pass `setting_sources` without `"project"` and
   `"local"`. The plugin's hooks refuse the same calls.
+- Python SDK, `wrap_options()`: Bash runs under Claude Code's sandbox by
+  default, and the Bash classifier relaxes a call (a read-only command,
+  `git stash create`, a recorded restore, a local change without `send`)
+  only while that sandbox is verified for it (STANDARD 1.2.0 §5.18.3,
+  RFC-0011), and only for the CLI the Agent SDK bundles in a version under
+  which the boundary tests ran (Claude Code 2.1.332, bundled with
+  `claude-agent-sdk` 0.2.189, which `constraints.txt` pins): with
+  `cli_path`, an SDK that bundles no CLI, or one that bundles another
+  Claude Code version, every Bash call is its worst case. It relaxes a
+  call only in `bypassPermissions` mode (`CHECKED_PERMISSION_MODES`), the
+  one mode in which the precedence of settings files was tested: a call in
+  any other mode, or with no mode stated (it runs in `default`), is its
+  worst case, and so is every call under options, or a settings file's
+  `permissions.defaultMode`, in another mode. In `bypassPermissions` a call
+  that requires approval is refused with F502 unless `approval="off"`. The
+  pre-tool-use check decides once for each call whether the sandbox is
+  verified, and a Bash call it gave the worst case takes no checkpoint
+  when it reports back, even where the sandbox is verified by then; its
+  evidence is filed under the worst case's capability
+  (`create_evidence_collector` takes the decision as `boundary_held`). An
+  allowlist entry the setup command would not list (a
+  trailing-dot or hex form of a local address, a wildcard such as `*.*`),
+  a `metadata.` name, a port or an IPv6 literal leaves the sandbox
+  unverified. Where the options carry no sandbox of their own,
+  `wrap_options()` sets a strict one: on, refusing to start when it cannot
+  sandbox (`failIfUnavailable`), no unsandboxed commands, no excluded
+  commands, a network allowlist of
+  `GroundedAgentConfig.sandbox_allowed_domains` (empty by default: no
+  host) with `strictAllowlist`, and the keychains, `~/.ssh`, `~/.gnupg`,
+  `~/.netrc`, the cloud tools' and package registries' credential files,
+  gh's and git's credential files, the audit key file, Claude Code's
+  credentials, the paths in `GroundedAgentConfig.sandbox_deny_paths`, the
+  token and agent variables and every variable whose name looks like a
+  credential's (with `sandbox_deny_env` for more) out of reach, and
+  `filesystem.denyWrite` paths for the plugin hooks' records. It also
+  adds `permissions.deny` rules to the options' `settings` (a settings
+  file is read and passed inline): `Edit` and `Read` of the adapter's
+  records; the rules `grounded_agency/layer_records.py` gives for the
+  hooks' records, `Edit` and `Read` of `acs/` in each git directory of
+  the repository (the project's, the main checkout's, each linked
+  worktree's and each submodule's, and, from a submodule checkout, its
+  superprojects', as they exist at the wrap) among them;
+  `Edit` of the project's `.claude/` and `.mcp.json`, the
+  repository's git configuration and hooks, the user's Claude Code
+  settings, and the code that runs outside the sandbox (the
+  `grounded_agency` and `claude_agent_sdk` packages, the interpreter and
+  its site-packages, `cli_path`, local plugins and the files stdio MCP
+  servers run), and `Read` of the credential files. The `Edit` rules
+  apply to the file tools too, so a wrapped session cannot edit an
+  editable install of `grounded_agency` in its project. A sandboxed command cannot reach the network,
+  so `gh`, `git push`, `curl` or a package install from Bash fails unless
+  its host is on `sandbox_allowed_domains`, and with the keychain denied
+  `gh` and `git push` cannot authenticate. Options with a sandbox of their
+  own (`sandbox`, or a `sandbox` member of `settings`) keep it; the
+  classifier relaxes their Bash calls only if it holds every value of the
+  strict one. Claude Code refuses to start where it cannot start the
+  sandbox (Linux without bubblewrap and socat, native Windows, a container
+  that cannot run bubblewrap); there, pass
+  `GroundedAgentConfig(sandbox=False)`. Without a verified sandbox
+  (`sandbox=False`, a weaker sandbox, a `WebFetch` allow rule or an `Edit`,
+  `Write` or `Read` allow rule with a path in `settings` or
+  `allowed_tools`, `add_dirs` or `permissions.additionalDirectories`, any
+  `extra_args` flag but `debug-to-stderr`, `mcp_servers` given as a file
+  or text, a settings source the CLI reads that may weaken it or that
+  changed since the wrap, a policy source the adapter does not read, a
+  non-empty allowlist while a destination policy is in force, a deny rule
+  or `denyWrite` path for the hooks' records missing, hooks' records that
+  cannot be named (no git, or a path a rule reads as a pattern), options
+  changed after the wrap, or options not yet wrapped), every Bash call is a gated `mutate` and `send`: `ls`
+  needs a checkpoint and approval, and `git stash create` takes no
+  checkpoint (use `create_checkpoint`). The deny rules are added either
+  way. A call that sets `dangerouslyDisableSandbox` is always the worst
+  case.
+  `ToolCapabilityMapper.os_boundary` is the check; with `None`, the
+  default, every Bash call is the worst case, so a bare
+  `ToolCapabilityMapper()`, and `create_checkpoint_recorder` or
+  `create_evidence_collector` without the adapter's mapper, classify
+  `ls` as `mutate` and `send` and record no checkpoint for
+  `git stash create`.
 - Python SDK, `register_mcp_tool` (Fixed): a capability the ontology does
   not define raises `ValueError` (V101) at registration, where v2.0.0
   registered the tool; a declared `risk` below the capability's is ignored
@@ -928,7 +1073,7 @@ here and marked so.
   a state with deferrals that an earlier version saved still restores, but
   cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
   new one. The state of a run that never deferred holds neither.
-- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
+- <a id="upgrade-snapshots"></a>Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
   version 2. The terminal action is derived from the state rather than
   stored with copies of the records and outputs, every action carries
   `run_id`, and the state may hold the record mode and the chain heads of
@@ -949,7 +1094,7 @@ here and marked so.
   one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
   `header`, `records`, `profiles`, `grounding` and `destinations`, which
   every construction names. `WorkflowRunner` states the header itself.
-- Reference executor: an approved step that fails now has a `failed` record,
+- <a id="upgrade-failed-record"></a>Reference executor: an approved step that fails now has a `failed` record,
   with the step's code, from the moment it fails, before its failure modes
   run, and also when its failure mode's rollback or checkpoint then fails
   (F503, F501) or finds no checkpoint to roll back to; 1.1 left that record
@@ -958,7 +1103,11 @@ here and marked so.
   `take_records` for the rest of the run. A host that reads the records
   while a failure mode's checkpoint or rollback is pending sees `failed`
   where it saw `approved`. A record a resumed run reuses no longer keeps the
-  `checkpoint_id` of an earlier pass.
+  `checkpoint_id` of an earlier pass. The 1.1 runtime fixtures
+  `records_failure_rollback_fails` and `records_failure_nothing_to_roll_back`
+  end this way: on the v2.0.0 executor both end with F503 and the step's
+  record `approved`, without a code; now that record is `failed` with code
+  R402.
 - Validator: an `audit` step's literal `retention` outside the duration
   grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
   1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
@@ -1010,7 +1159,7 @@ here and marked so.
 
 **Plugin: hooks and skills (released with plugin 3.0.0).**
 
-- **Breaking (plugin):** two composed skills take their directory names
+- <a id="upgrade-renamed-skills"></a>**Breaking (plugin):** two composed skills take their directory names
   (Agent Skills requires `name` to equal the directory): the slash commands
   `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
   `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
@@ -1041,7 +1190,7 @@ here and marked so.
   plugin as a whole needs 2.1.295 or later, the first version that honours
   `onFailure`; both floors are stated in `README.md` and `hooks/README.md`.
   Part of #144.
-- Plugin hooks (released with plugin 3.0.0, Changed): without Claude
+- <a id="upgrade-strict-sandbox"></a>Plugin hooks (released with plugin 3.0.0, Changed): without Claude
   Code's strict sandbox, every Bash call needs a checkpoint and approval,
   read-only commands included, and `git stash create` and a restore are
   gated calls too, so no checkpoint can be taken through Bash and every
@@ -1054,14 +1203,14 @@ here and marked so.
   local file that turns the sandbox off, excludes a command, widens what it
   can write or read, or names a command that runs outside it turns the
   relaxation off.
-- Plugin hooks (released with plugin 3.0.0, Added): while a file under the
+- <a id="upgrade-record-links"></a>Plugin hooks (released with plugin 3.0.0, Added): while a file under the
   git directory's `acs/` has a hard link outside the records, the
   PreToolUse hook blocks every call with F504, reads included; while a file
   of the project's records has one, it blocks every call it does not let
   pass outright. Remove the other link outside the session. The hook needs
   perl, or `find`, `awk` and a GNU or BSD `stat`, to count the links (R407
   without them, or when a directory of the records cannot be read).
-- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
+- <a id="upgrade-jq-marker"></a>Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
   gated call it authorises, so each such call needs its own; a successful
@@ -1107,7 +1256,7 @@ here and marked so.
   unique-local literals, and an IPv4 host in another form (`127.1`,
   `2130706433`, `0x7f000001`).
 - Plugin hooks, fail-closed fixes (released with plugin 3.0.0):
-  - The PreToolUse hook is registered for every tool (matcher `*`), with
+  - <a id="upgrade-every-tool"></a>The PreToolUse hook is registered for every tool (matcher `*`), with
     `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
     cannot start or times out blocks the call where Claude Code supports
     that setting. A tool the SDK mapper maps to a capability that needs
@@ -1123,7 +1272,7 @@ here and marked so.
   - A Bash command over 4096 bytes is gated before it is trimmed or read: a
     command padded with blanks (50,000 trailing ones took 44 seconds to
     trim) can no longer hold the hook past its time limit.
-  - The commits a rollback may restore are entered in the project's git
+  - <a id="upgrade-earlier-checkpoints"></a>The commits a rollback may restore are entered in the project's git
     directory (`<git dir>/acs/checkpoints/commits/`), outside the work tree,
     and a restore must run in the project's repository: an entry or a
     marker a cloned repository ships no longer lets `git stash apply` run
@@ -1379,7 +1528,7 @@ here and marked so.
     gets these prompts; set it in the global configuration instead. The
     take hook's clean-tree check turns the repository's own filters off. A
     Bash `printf` with an option (`printf -v NAME`) is a gated `mutate`.
-  - The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
+  - <a id="upgrade-project-env"></a>The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
     `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`,
     managed settings or the environment Claude Code starts in. While the
     project's `.claude/settings.json` or `.claude/settings.local.json` names
@@ -1498,7 +1647,7 @@ here and marked so.
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
-- Plugin audit log, its end: the chain shows a changed or removed entry by
+- <a id="upgrade-audit-head"></a>Plugin audit log, its end: the chain shows a changed or removed entry by
   the link of the entry after it, but not the removal of the last entries
   or of the whole log, which the hook's comment claimed it did. The hook now
   keeps the chain's end in `.claude/audit.head` (the number of entries and
@@ -1525,7 +1674,7 @@ here and marked so.
   neither can write back an earlier head, or sign a new one); the verifier
   gains `--witness PATH` (repeatable), a copy of the head kept where the
   agent cannot write it, which shows such a cut.
-- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
+- <a id="upgrade-audit-records"></a>Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`
   under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (the
@@ -1539,7 +1688,7 @@ here and marked so.
   move an existing file aside and let the skill start a new one (it does so
   itself when the last line has no `hmac`), and read the old members under
   `details` in new lines.
-- Plugin audit log, its key: the log hook and `tools/verify_audit_log.py`
+- <a id="upgrade-audit-key"></a>Plugin audit log, its key: the log hook and `tools/verify_audit_log.py`
   read the HMAC key from `~/.config/acs/audit.key` when that file exists,
   else from `AUDIT_HMAC_KEY`, so the file wins when both are set. No key is
   derived from the host name. The file is used only when it is a regular
@@ -1914,7 +2063,7 @@ here and marked so.
 
 ### Added
 - Standard 1.2.0 (Candidate Standard), `spec/STANDARD-v1.2.0.md`, with
-  capability ontology 2.2.0, accepted by RFC-0005 to RFC-0010 (RFC-0002
+  capability ontology 2.2.0, accepted by RFC-0005 to RFC-0011 (RFC-0002
   stays a Draft). Appendix D lists every change from 1.1.0 and
   `spec/CHANGELOG.md` summarises them; the entries below follow the RFCs.
   Ontology 2.2.0 is additive (§11.6, which now says how the ontology is
@@ -1934,7 +2083,15 @@ here and marked so.
   §9.8 diagnostics, records that name the layer, and capability outputs on a
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
-- Safety-layer conformance fixtures: 36 binding fixtures in
+- Offered-tool checks, `check_offered` (Python) and `checkBindings`
+  (TypeScript): a `shell_tools` (`shellTools`) argument names the layer's
+  shell-like tools as its statement does, and one with no declared
+  boundary performs only its worst case, so its `classifier` does not count
+  it as able to perform any capability (STANDARD 1.2.0 §5.18.2); binding
+  fixtures may carry `shell_tools`. The Standard Agents binding's
+  `lintPromptTools` counts a classified tool only as its own capability, since the binding applies no classifier: a prompt
+  whose only checkpoint route was a classified tool now gets V102.
+- Safety-layer conformance fixtures: 37 binding fixtures in
   `tests/conformance/bindings/` and 33 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
@@ -2267,6 +2424,26 @@ here and marked so.
   ids), §8.1–§8.3 (trust), §11.5–§11.7 (versions and artifacts) and
   Appendix D.7. The entries on domain profiles, trust, entity ids, cited
   versions and WebAssembly below implement it.
+- Standard 1.2.0, shell-like tools and the operating-system boundary
+  ([RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md)): the
+  text of §2, §5.18.2, §5.18.3, §5.18.8, §10.4 and D.8. A safety
+  layer gives every call of a shell-like tool (a shell, an interpreter, a
+  REPL, or a tool that runs code its arguments supply) the tool's worst
+  case unless its conformance statement declares an operating-system
+  boundary for the tool and the layer has verified by code, for that call,
+  that the boundary holds in the effective host configuration: the values
+  the host applies, from every source it reads, each counting only where
+  the host honours it. The boundary is defined by four properties: no
+  route outside it, writes kept from the layer's records, its code and any
+  file that code outside the boundary runs, credentials (the user's, the
+  host's and the layer's) out of reach, and a network allowlist that
+  refuses other hosts. The conformance statement schema has a required
+  member `shell_tools`; the Python adapter's statement declares Claude
+  Code's sandbox as Bash's boundary and `"none"` for Monitor, PowerShell,
+  Skill, Agent and Task, and the Standard Agents binding's declares no
+  shell-like tool. The plugin's text readers (the
+  records guard, the Bash classification, the send and audit skills'
+  command hooks) are documented as advisory, not as the boundary.
 - Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
   checks them (`profile::Policy`), the validator and the executor apply
   them (raised flags, a person for `require_human` and `block_autonomous`
@@ -2361,7 +2538,20 @@ here and marked so.
   behind that document (319 rows in ten concerns, each with references and
   verbatim quotes from both sides), the findings it produced about each
   standard (83 and 64) and the questions the texts leave open. `tests/test_standard_agents_mapping.py` keeps the index, the
-  files and their references to this repository in agreement.
+  files and their references to this repository in agreement. The rows are a
+  record made against Standard 1.1.0; each concern file lists, under
+  `changes_in_1_2_0`, the rows a Standard 1.2.0 section changes, and
+  `index.yaml` records the check (`checked_against`: Standard 1.2.0,
+  ontology 2.2.0, 27 November 2026, and the Standard Agent Specification at
+  `f462a67`, types 0.45.13). Each question about the Standard Agent
+  Specification records the drafted text that asks it (`outcome`). The
+  integration document's mapping tables link the Standard 1.2.0 section
+  beside each row that 1.2.0 changes.
+- Orchestration extensions and Standard Agents guides: how a host decides
+  the attendance of a run no trigger started, as guidance (a run is attended
+  when a person can answer an approval request within its `expires`); the
+  answer to ACS-Q10 cites Standard 1.2.0 §5.10.2 and §5.14, and the
+  reference hosts keep the attended default.
 - `examples/standard_agents/`: a reference binding in TypeScript and a worked
   example. `groundedTool` classifies a Standard Agents tool by an ontology
   capability and enforces the capability's checkpoint, approval and output
@@ -2394,7 +2584,7 @@ here and marked so.
   annotation schema and the approval digest vectors
   (`tests/conformance/approval/digests.json`) from the ontology and the
   reference executor; `--check` fails on drift (CI).
-- `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
+- `tasks/standard-agents-upstream/`: twelve issue texts for the Standard Agent
   Specification, and `file-issues.sh`, which files them in order with the
   GitHub CLI.
 - `schemas/interop/standard_agents_mapping.yaml`: the Standard Agents
@@ -2426,7 +2616,8 @@ here and marked so.
   key), and a `sandbox.filesystem.denyWrite` list, every path literal and
   absolute. `acs/` is named in the git directory git names for the project
   (a linked worktree's own) and in each other git directory of the
-  repository: the main checkout's, linked worktrees' and submodules'. It
+  repository: the main checkout's, linked worktrees' and submodules', and,
+  for a submodule checkout, the same for each superproject above it. It
   uses the standard library alone and the syntax of Python 3.9;
   `python3 -I grounded_agency/layer_records.py [PROJECT_DIR]` prints the
   settings as JSON.
@@ -2543,6 +2734,23 @@ here and marked so.
   script's `apply` line to run there, and once it is on, the sandbox
   keeps commands from writing the user configuration directory. Claude
   Code is started again after the write.
+- Benchmarks: six scenarios, each reported by `benchmarks/runner.py` and in
+  CI's benchmark artifact (#163, #167, #169). `explanation_faithfulness`
+  checks each premise and chain claim of an explain output against the
+  anchors it cites, the run's evidence and its action records, and gives it
+  one of three verdicts: supported, unsupported or contradicted. Its CI gate,
+  in `benchmarks/tests/test_safety_scenarios.py`, requires every planted
+  claim to get its planted verdict and no faithful claim to be flagged; the
+  claims and the anchors' content are hand-written in a structured form.
+  `destination_policy` (F504), `checkpoint_gate` (F501), `grounding_gate`
+  (F505) and `secret_redaction` (§6.7) put tool calls through a real
+  `GroundedAgentAdapter`, with unsafe cases that must be refused and safe
+  cases that must run. `prompt_injection` checks that an instruction found
+  in a retrieved page, a recalled memory entry or a tool result does not
+  take effect: the send is refused F504 and the mutate F502.
+- `docs/research/safety_layer_failure_classes.md`: the 130 defects of the
+  safety layer's security review sorted into six classes, ranked by how
+  many defects of each class the review's fifth and last round still found.
 - Tests: boundary tests that attack the sandbox (#186). They run each
   route under the sandbox runtime's `srt` command (0.0.82) with the
   settings `/grounded-setup` computes, and as a control without the
@@ -2585,7 +2793,7 @@ here and marked so.
   open for review for at least 14 days and is accepted by one maintainer
   that `.github/CODEOWNERS` names. `tools/validate_rfcs.py` requires an
   Accepted RFC's header to carry `**Review window:**` and `**Accepted
-  by:**`; RFC-0001 and RFC-0003 to RFC-0010, accepted before the rule, are
+  by:**`; RFC-0001 and RFC-0003 to RFC-0011, accepted before the rule, are
   exempt. Part of #164.
 - `.github/CODEOWNERS` names the maintainers who review the ontology, the
   domain profiles, `hooks/`, `grounded_agency/capabilities/mapper.py`,
@@ -2604,8 +2812,7 @@ here and marked so.
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
   command, `git stash create`, a restore of a recorded checkpoint) only
   under Claude Code's strict sandbox, which it verifies for the call from
-  the settings files it can read (#180; Standard 1.2.0 §5.18.3 as RFC-0011
-  proposes it): from user or managed settings, `sandbox.enabled`,
+  the settings files it can read (#180; Standard 1.2.0 §5.18.3, RFC-0011): from user or managed settings, `sandbox.enabled`,
   `failIfUnavailable` and `network.strictAllowlist` true and
   `allowUnsandboxedCommands` false, no excluded commands, `allowRead` or
   other route out of the sandbox, an allowlist of DNS names only (no IP
@@ -2679,6 +2886,12 @@ here and marked so.
   GitHub Actions: checkout v7, setup-python v7, cache v6, upload-artifact
   v7, setup-go v7.
 - CI tests Python 3.14 and 3.15.
+- Benchmarks: `decision_audit` compares each criterion, value and score an
+  explanation cites with the recorded reasoning, and no longer reads the
+  explanation's own `confabulated` label, so the baseline's faithfulness is
+  now 54% and its confabulation rate 40% (#163). `mutation_recovery`
+  restores through `CheckpointTracker.restore_checkpoint` with a
+  `FileSnapshotStore` and checks the restore it returns (#167).
 
 ### Fixed
 - **Plugin hooks on macOS (#134).** CI now also runs the tests on macOS, with `/bin/bash` 3.2 and with Homebrew's bash. Fixed:
@@ -3244,6 +3457,9 @@ from this plugin release.
 
 ## [v1.2.0] — 2026-02-04
 
+The tag `v1.2.0` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; commit 2cf4986, after the tag, set it to 1.2.0.
+
 The full list is in the
 [v1.2.0 release](https://github.com/synaptiai/agent-capability-standard/releases/tag/v1.2.0).
 
@@ -3277,12 +3493,18 @@ The full list is in the
 
 ## [v1.1.1] — 2026-01-27
 
+The tag `v1.1.1` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; no commit set it to 1.1.1.
+
 ### Changed
 - Migrated capability ontology from JSON to YAML format
 - Updated capability count references from 35 to 36
 - Expanded the FAQ with the rationale for rejected layer proposals
 
 ## [v1.1.0] — 2026-01-27
+
+The tag `v1.1.0` points at a tree whose `.claude-plugin/plugin.json` reports
+version 1.0.5; no commit set it to 1.1.0.
 
 ### Added
 - Domain-specific workflow templates and default profiles (#12, #17)

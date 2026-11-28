@@ -59,6 +59,10 @@ from tests.test_bash_program_words import (
     needs_hook,
 )
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = pytest.mark.usefixtures("bash_under_sandbox")
+
 needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 # Each sets a shell variable through a builtin's `{varname}` redirection,

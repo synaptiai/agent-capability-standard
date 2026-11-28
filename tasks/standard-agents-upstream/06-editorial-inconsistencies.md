@@ -1,8 +1,8 @@
-# Ten inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels)
+# Eleven inconsistencies in the 0.2.0 text (numbering, cross-references, requirement levels, version ranges)
 
 Small corrections found while reading 0.2.0 closely. Each is a place where
 two passages disagree, so an implementer cannot tell which to follow. Items 1
-to 3 are mechanical; 4 to 10 need a decision.
+to 3 and 11 are mechanical; 4 to 10 need a decision.
 
 ## 1. The Runtime page has two sections numbered 14
 
@@ -94,7 +94,9 @@ channel that Subagents §6.4 has in mind, or a violation of item 3.
 `getValue` and `setValue` never resolve another thread's keys, and nothing is
 inherited or copied), and state whether a `ThreadState` obtained through
 `getParentThread()`, `getChildThread()` or the `childState` argument of
-`after_subagent_created` may read and write that thread's store. The same question applies to its file system.
+`after_subagent_created` may read and write that thread's store. The same question applies to its file system, and to
+`stopSession()`, `execution.stop()` and `terminate()` called on that
+`ThreadState`: whether a parent can end a child's session from code.
 
 ## 7. Where thread endpoints are mounted
 
@@ -157,4 +159,24 @@ Runtime §7.3.1 and Packaging also name only subagent relationships.
 
 **Suggested fix:** say in one place whether adding an exposed agent to a
 prompt as a handoff activates its `parentHooks`, and make the four passages
-agree.
+agree. The same place could say whether a child's `parentHooks` run when the
+owning side is handler-backed, and while the parent thread is at rest.
+
+## 11. The Examples page pins a range that excludes the current package
+
+[Examples §8](https://standardagentspec.org/0.2.0/getting-started/examples#8-packaging)
+gives this `package.json`:
+
+```jsonc
+"@standardagents/openrouter": "^0.44.0",
+"@standardagents/spec": "^0.44.0"
+```
+
+For a `0.x` version a caret range admits only the same minor version, so
+`^0.44.0` means `>=0.44.0 <0.45.0`. Both packages are published at 0.45.13,
+which the range excludes, so a package copied from the example does not
+install the current packages. The Packaging page's example uses a different form,
+`"@standardagents/spec": ">=0.2.0"` in `peerDependencies`.
+
+**Suggested fix:** use the current minor version in the Examples page
+(`^0.45.0`), or one range form in both examples.

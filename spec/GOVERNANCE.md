@@ -28,7 +28,7 @@ SemVer:
   window on its `**Date:**`:
   `**Review window:** YYYY-MM-DD to YYYY-MM-DD` and
   `**Accepted by:** @<login>`. `tools/validate_rfcs.py` checks them in CI.
-  RFC-0001 and RFC-0003 to RFC-0010 were Accepted before this rule and
+  RFC-0001 and RFC-0003 to RFC-0011 were Accepted before this rule and
   carry neither line.
 - A change to a capability's safety flags or to a `requires`, `precedes` or
   `conflicts_with` edge needs a new MAJOR ontology version (STANDARD
