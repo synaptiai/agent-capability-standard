@@ -3,11 +3,16 @@ section 5.18.3, RFC-0011).
 
 Opt-in: it starts the Claude Code CLI the Agent SDK bundles, which needs a
 logged-in Claude Code or an API key, so it runs only with
-``ACS_LIVE_SANDBOX=1``. ``ACS_LIVE_MODEL`` picks the model.
+``ACS_LIVE_SANDBOX=1``. ``ACS_LIVE_MODEL`` picks the model. Run it with
+``pytest --noconftest``: the suite's conftest gives every test a scratch
+``HOME`` and ``CLAUDE_CONFIG_DIR``, where Claude Code has no login. With
+``-s`` it prints the version of the CLI the Agent SDK bundles and the
+version each session reports.
 
 Each probe is one query in a temporary git repository, with options
 ``GroundedAgentAdapter().wrap_options()`` built with its defaults, in the
-default permission mode. A read-only command runs with no checkpoint; a
+``bypassPermissions`` permission mode, the one mode in which the adapter
+relaxes Bash. A read-only command runs with no checkpoint; a
 read of a credential file, a write to the home directory, a request to a
 host off the allowlist and a write to the audit log are refused by the
 sandbox. The probes that write take a checkpoint first, and the adapter
@@ -45,6 +50,7 @@ async def _run(
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
+        SystemMessage,
         ToolResultBlock,
         ToolUseBlock,
         UserMessage,
@@ -55,7 +61,7 @@ async def _run(
         ClaudeAgentOptions(
             cwd=str(project),
             setting_sources=[],
-            permission_mode="default",
+            permission_mode="bypassPermissions",
             max_turns=8,
             model=os.environ.get("ACS_LIVE_MODEL") or None,
         )
@@ -69,7 +75,10 @@ async def _run(
     calls: dict[str, str] = {}
     results: list[tuple[str, str, bool]] = []
     async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
+        if isinstance(message, SystemMessage) and message.subtype == "init":
+            # Shown with -s: the version the CLI that ran reports.
+            print(f"claude_code_version {message.data.get('claude_code_version')}")
+        elif isinstance(message, AssistantMessage):
             for block in message.content:
                 if isinstance(block, ToolUseBlock) and block.name == "Bash":
                     calls[block.id] = str(block.input.get("command"))
@@ -125,8 +134,12 @@ def project(tmp_path: Path) -> Path:
 async def test_the_default_sandbox_in_a_live_session(
     tmp_path: Path, project: Path
 ) -> None:
+    from claude_agent_sdk._cli_version import __cli_version__
+
     from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 
+    # Shown with -s: the version of the CLI the Agent SDK bundles.
+    print(f"Claude Code {__cli_version__}, bundled with the Agent SDK")
     canary = tmp_path / "data" / "notes.txt"
     canary.parent.mkdir()
     secret = f"canary-{uuid.uuid4().hex}"
