@@ -207,12 +207,22 @@ class TestTheFixture:
         assert runs(sentinel) > after_status
 
     def test_a_post_index_change_hook_runs_on_git_status(
-        self, home: Path, tmp_path: Path
+        self, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """git status writes the index, and so runs the hook, when its
+        refresh updates an entry or when an entry's mtime is not older than
+        the index's (compared to the second where git is built without
+        USE_NSEC). a.txt is changed, so refresh never updates its entry: a
+        test that touched only a.txt saw the hook run only when the commit
+        wrote the index in the second the files were written. .gitattributes
+        is tracked and unchanged, so with other times every refresh updates
+        its entry and status writes the index. Status takes the index lock
+        only with optional locks on."""
+        monkeypatch.delenv("GIT_OPTIONAL_LOCKS", raising=False)
         project = base_repository(tmp_path / "proj")
         sentinel = tmp_path / "sentinel"
         sentinel_script(project / ".git" / "hooks" / "post-index-change", sentinel)
-        os.utime(project / "a.txt", (1_000_000_000, 1_000_000_000))
+        os.utime(project / ".gitattributes", (1_000_000_000, 1_000_000_000))
         git(project, "status")
         assert runs(sentinel) >= 1
 
