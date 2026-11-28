@@ -92,7 +92,7 @@ print(f"Partial: {report['partial_count']}")
 
 ## OASF Version Tracking
 
-This mapping targets **OASF v0.8.0**. As the OASF standard evolves, some GA extensions may be superseded by native OASF skill categories. The [OASF Safety Extensions Proposal](../proposals/OASF_SAFETY_EXTENSIONS.md) advocates for first-class adoption of `checkpoint`, `rollback`, and `ground` as OASF skill categories.
+This mapping targets **OASF v0.8.0**. As the OASF standard evolves, some GA extensions may be superseded by native OASF skill categories. The [OASF Safety Extensions Proposal](../proposals/OASF_SAFETY_EXTENSIONS.md), a reference document that has not been submitted to the OASF project, describes how `checkpoint`, `rollback`, and `ground` could become OASF skills.
 
 When new OASF versions add coverage for currently unmapped capabilities:
 1. Add the new OASF code to `categories` in `oasf_mapping.yaml`
