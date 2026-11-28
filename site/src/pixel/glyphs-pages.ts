@@ -104,6 +104,12 @@ export const PAGE_GRIDS: Readonly<Record<string, readonly string[]>> = {
   'page:nonconformity-procedure': ['#########', '#..###..#', '#..###..#', '#..###..#', '#...#...#', '#.......#', '#..###..#', '#.......#', '#########'],
   // Govern above map, measure and manage: one block over a hub of three.
   'page:nist-ai-rmf': ['..#####..', '..#####..', '....#....', '...###...', '...###...', '..#...#..', '###...###', '###...###', '.........'],
+  // A power symbol: a ring broken at the top by a bar, for taking a system out of service.
+  'page:decommissioning-procedure': ['....#....', '.#..#..#.', '#...#...#', '#...#...#', '#.......#', '#.......#', '.#.....#.', '..#####..', '.........'],
+  // Two linked squares: a component another party supplies, joined to the system.
+  'page:third-party-risk-procedure': ['#####....', '#...#....', '#..#####.', '#..#.#.#.', '#####..#.', '...#...#.', '...#####.', '.........', '.........'],
+  // A table with two pieces on it, for an exercise played around a table.
+  'page:tabletop-exercise-template': ['.........', '..#...#..', '.###.###.', '.........', '#########', '#########', '.#.....#.', '.#.....#.', '.#.....#.'],
 
   // ---- Background
   // A closed book with a banded spine.
@@ -213,6 +219,9 @@ export const PAGE_GLYPHS: Readonly<Record<string, string>> = {
   '/compliance/iso-42001/management-review/': 'page:management-review',
   '/compliance/iso-42001/nonconformity-procedure/': 'page:nonconformity-procedure',
   '/compliance/nist-ai-rmf/': 'page:nist-ai-rmf',
+  '/compliance/nist-ai-rmf/decommissioning-procedure/': 'page:decommissioning-procedure',
+  '/compliance/nist-ai-rmf/third-party-risk-procedure/': 'page:third-party-risk-procedure',
+  '/compliance/nist-ai-rmf/tabletop-exercise-template/': 'page:tabletop-exercise-template',
 
   '/background/whitepaper/': 'page:whitepaper',
   '/background/grounded-agency/': 'page:grounded-agency',
