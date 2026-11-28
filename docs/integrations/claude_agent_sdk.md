@@ -236,12 +236,13 @@ The Bash classifier below relaxes a call only while the boundary is verified for
 
 | Condition | Checked again before each call |
 |-----------|--------------------------------|
-| Every options this adapter wrapped hold each value of the settings table above, with no `allowRead` or `allowWrite`, no allowlist entry for loopback, an IP literal, a `.local` or metadata host or a bare wildcard, no `WebFetch` allow rule and no `Edit`, `Write` or `Read` allow rule with a path (in `settings` or `allowed_tools`: the CLI merges them into the sandbox), no `permissions.additionalDirectories` or `add_dirs` (the CLI lets a sandboxed command write each added directory), no `extra_args` flag but `debug-to-stderr` (the SDK passes `extra_args` after its own flags, so any other may override them), no `mcp_servers` given as a file or text, every deny rule and `denyWrite` path for the plugin hooks' records, and no protected path holding a character a rule reads as a pattern (`*`, `?`, brackets, braces, parentheses or a backslash); where those records cannot be named (git is not installed or does not answer, or a path holds such a character), the boundary is unverified | No: when the options are wrapped |
+| Every options this adapter wrapped hold each value of the settings table above, with no `allowRead` or `allowWrite`, no allowlist entry the plugin's setup command would not list (`grounded_agency.sandbox_settings.check_host`: only a dotted DNS name whose last label is alphabetic, with at most a leading `*.`; no loopback, link-local, metadata or local-use name, no IP literal in any spelling), no `WebFetch` allow rule and no `Edit`, `Write` or `Read` allow rule with a path (in `settings` or `allowed_tools`: the CLI merges them into the sandbox), no `permissions.additionalDirectories` or `add_dirs` (the CLI lets a sandboxed command write each added directory), no `extra_args` flag but `debug-to-stderr` (the SDK passes `extra_args` after its own flags, so any other may override them), no `mcp_servers` given as a file or text, every deny rule and `denyWrite` path for the plugin hooks' records, and no protected path holding a character a rule reads as a pattern (`*`, `?`, brackets, braces, parentheses or a backslash); where those records cannot be named (git is not installed or does not answer, or a path holds such a character), the boundary is unverified | No: when the options are wrapped |
 | The options are unchanged since they were wrapped, for as long as the caller holds them | Yes |
 | The other settings sources the CLI reads set no sandbox value, allow rule, added directory or `CLAUDE_CODE_SANDBOX…` variable in their `env` that may weaken the boundary: the managed settings files, and the user's, the project's and the local file that `setting_sources` loads. They are read when the options are wrapped, and a file among them that changes afterwards leaves the boundary unverified until it holds what it held then. A source the adapter does not read (a managed preferences profile on macOS, server-managed settings, the Windows policy registry) and a `CLAUDE_CODE_SANDBOX…` environment variable leave it unverified too | Yes: that no file changed since the wrap |
 | No record, credential file, settings file, hook script, MCP server list, git configuration file, or file a stdio server or the CLI runs has a second hard link (the package, interpreter and plugin trees are not walked; the plugin hooks' records are walked whole on each Bash call, the marker history under `.claude/checkpoints/` and `acs/` of each git directory included, as the pre-tool-use hook counts them, and past 50000 entries the boundary is unverified), and no credential-like variable has been set in this process since the wrap that the sandbox does not unset | Yes |
 | While a destination policy is in force (`allowed_destinations`, a profile's), the allowlist is empty | No: when the options are wrapped |
 | The CLI is the one the Agent SDK bundles, in a version whose settings the adapter checks (`grounded_agency.utils.sandbox.CHECKED_CLI_VERSIONS`: Claude Code 2.1.321, which `claude-agent-sdk` 0.2.180 bundles); a CLI that `cli_path` names, an SDK that bundles none (it then runs the `claude` on `PATH`) and a bundled CLI of another version leave it unverified, since the version decides which sources the CLI reads and which values it honours | No: when the options are wrapped |
+| The call runs in a permission mode the adapter has checked (`grounded_agency.utils.sandbox.CHECKED_PERMISSION_MODES`: `default`, `acceptEdits` and `bypassPermissions`, the modes in which the boundary tests ran the routes Claude Code decides itself; the precedence of settings files was tested in `bypassPermissions` only), read from the hook input, else from the options' `permission_mode`; options in another mode, or a settings file whose `permissions.defaultMode` is another, leave it unverified, and `plan`, `auto`, `dontAsk` and any mode the adapter does not know give the call the worst case | Yes |
 | The call does not set `dangerouslyDisableSandbox` | Yes |
 
 Otherwise every Bash call is Bash's worst case, which a destination policy refuses. The adapter logs the reason. A call is classified again when it reports back (for the checkpoint it took and the capabilities that ran) only as the PreToolUse hook classified it: a `git stash create` that hook gave the worst case takes no checkpoint, even if the boundary holds by then. It is not a refusal (R407): the call can still run with a checkpoint and approval. Before any options are wrapped, the adapter's mapper gives every Bash call the worst case too.
@@ -1127,8 +1128,24 @@ If `claude_agent_sdk` isn't installed, the adapter falls back to dict-based type
 `grounded_query()` and `GroundedClient` require the SDK.
 
 ```bash
-pip install claude-agent-sdk
+pip install claude-agent-sdk==0.2.180
 ```
+
+That is the release `constraints.txt` pins, whose bundled CLI the adapter checks the sandbox for (see the next entry).
+
+### Every Bash Call Needs a Checkpoint and Approval
+
+The adapter relaxes a Bash call (`ls`, `git stash create`) only while it has verified the sandbox for it ([The Sandbox](#the-sandbox)); otherwise every Bash call is Bash's worst case. The adapter logs why, in a warning that starts "Bash runs without a verified operating-system boundary". Two common causes:
+
+- **Another SDK release.** The adapter checks the settings of the CLI that `claude-agent-sdk` 0.2.180 bundles (Claude Code 2.1.321). A newer SDK bundles a newer CLI, and the log names its version. Install the pinned release:
+
+  ```bash
+  pip install claude-agent-sdk==0.2.180
+  # or, from the repository root:
+  pip install -e ".[sdk]" -c constraints.txt
+  ```
+
+- **A permission mode the adapter has not checked.** In `plan`, `auto`, `dontAsk` or another mode outside `default`, `acceptEdits` and `bypassPermissions`, every Bash call is the worst case.
 
 ### CLIConnectionError: Does Not Honor on_failure
 

@@ -123,7 +123,7 @@ This standard makes failures **visible and recoverable**:
 
 [Standard 1.2.0](spec/STANDARD-v1.2.0.md) is a Candidate Standard, accepted
 by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to
-[RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md), with
+[RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md), with
 capability ontology 2.2.0. A workflow valid under 1.1.0 validates and runs
 as before. It adds:
 
@@ -351,7 +351,7 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
 | Document | Purpose |
 |----------|---------|
-| [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md)) |
+| [STANDARD-v1.2.0.md](spec/STANDARD-v1.2.0.md) | Formal specification (Candidate Standard, accepted by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to [RFC-0011](spec/RFC-0011-shell-like-tools-and-os-boundary.md)) |
 | [STANDARD-v1.1.0.md](spec/STANDARD-v1.1.0.md) | Released specification (Standard) |
 | [STANDARD-v1.0.0.md](spec/STANDARD-v1.0.0.md) | Earlier specification (Supported) |
 | [CONFORMANCE.md](spec/CONFORMANCE.md) | Conformance levels and testing |
@@ -451,7 +451,7 @@ async with ClaudeSDKClient(options) as client:
 **Features:**
 - **Permission callbacks** that block mutations without checkpoints
 - **Evidence anchors** that track provenance for grounded decisions
-- **Skill tracking** that updates checkpoint state when `checkpoint` skill is invoked
+- **Checkpoint recording** that records a checkpoint when a call that saves the state succeeds (`git stash create` under the verified sandbox, or a tool bound to `checkpoint`); a `Skill` call takes none
 - **Audit trails** for compliance and debugging
 
 See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for the full integration guide.
@@ -463,6 +463,8 @@ pip install grounded-agency
 # Or with SDK support:
 pip install grounded-agency[sdk]
 ```
+
+The adapter relaxes Bash calls only with the `claude-agent-sdk` release that `constraints.txt` pins (0.2.180); under another release every Bash call needs a checkpoint and approval (`pip install claude-agent-sdk==0.2.180`).
 
 The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.88).
 

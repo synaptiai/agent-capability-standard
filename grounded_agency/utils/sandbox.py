@@ -718,8 +718,14 @@ def pattern_faults(paths: BoundaryPaths) -> list[str]:
 # and the keys that may weaken the sandbox. A layer that does not know them
 # for the host's version has not verified the boundary (STANDARD 1.2.0
 # section 5.18.3). 2.1.321 is the CLI that claude-agent-sdk 0.2.180
-# bundles, whose settings schema these checks follow; constraints.txt pins
-# that SDK for CI.
+# bundles: the keys are checked against its settings schema. The sources
+# the CLI reads and the values it honours from each were observed under
+# 2.1.332 (RFC-0011, open questions 1 and 5), and no run of the tests of
+# source precedence under 2.1.321 is recorded. One run of
+# tests/test_sandbox_live.py (the bundled CLI, default mode, no settings
+# sources), reported on 2026-11-26 without the CLI's version, saw the
+# sandbox refuse a host not on the allowlist.
+# constraints.txt pins that SDK for CI.
 CHECKED_CLI_VERSIONS: frozenset[str] = frozenset({"2.1.321"})
 
 # The Claude Code permission modes in which this layer knows which settings

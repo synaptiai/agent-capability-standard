@@ -10,8 +10,8 @@
 This RFC amends Standard 1.2.0, a Candidate Standard, for tools whose
 call runs a program that its arguments supply: a shell, an interpreter, a
 REPL. Under
-the current text of §5.18.3 a safety layer may classify such a call from its
-text and give it less than the tool's worst case, for example let a command
+the text of §5.18.3 before this RFC, a safety layer could classify such a
+call from its text and give it less than the tool's worst case, for example let a command
 it reads as read-only skip the checkpoint. This RFC allows that only when the
 layer's conformance statement declares an operating-system boundary for the
 tool and the layer has verified, for the call, that the boundary holds in the
@@ -461,9 +461,17 @@ What each reference layer does:
   read-only command, `git stash create`, a restore of a recorded
   checkpoint, a local file change) only while it has verified, in the
   options it built and in the other settings files the CLI loads, that the
-  sandbox has each property, and only for the CLI its Agent SDK bundles in
-  a version whose settings it checks (Claude Code 2.1.321); every other
-  Bash call gets the worst case. A Bash call the pre-tool-use check gave
+  sandbox has each property, only for the CLI its Agent SDK bundles in
+  a version whose settings it checks (Claude Code 2.1.321), and only in a
+  permission mode it has checked (`default`, `acceptEdits`,
+  `bypassPermissions`, the modes of open question 5's tests); every other
+  Bash call gets the worst case. It checks the keys against the settings
+  schema of 2.1.321. The sources the CLI reads and the values it honours
+  from each were observed under 2.1.332 (open questions 1 and 5), and no
+  run of the tests of source precedence under 2.1.321 is recorded. One run
+  of the adapter's live test (the bundled CLI, default mode, no settings
+  sources), reported on 2026-11-26 without the CLI's version, saw the
+  sandbox refuse a host not on the allowlist. A Bash call the pre-tool-use check gave
   the worst case is the worst case when it reports back too: it takes no
   checkpoint. Its statement declares that sandbox for Bash, and `"none"`
   for Monitor, PowerShell, Skill, Agent and Task, which it gives one worst
@@ -615,4 +623,5 @@ its shell-like tools the worst case and takes checkpoints by another route.
    argument, excluded commands, the network allowlist), and with them in
    the user's settings in `bypassPermissions` mode only (the precedence of
    settings files). Claude Code itself has not been run on Linux, and
-   `plan` mode has not been tested. Open: #186.
+   `plan` mode has not been tested. The Python adapter relaxes Bash only in
+   the three tested modes. Open: #186.
