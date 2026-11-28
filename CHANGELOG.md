@@ -2840,6 +2840,10 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   validity (Standard 1.2.0 §5.18.6).
 - `wrap_options()` no longer adds `Skill` to `allowed_tools`, so `Skill`
   calls reach the permission callback (the SDK warned that it was shadowed).
+- `GroundedAgentConfig(strict_mode=False)`, outside class SL, raises
+  `ValueError` unless `acknowledge_unenforced_checks=True` is passed with
+  it, and the adapter logs a warning when it starts in that mode. The SDK
+  guide no longer suggests it for F501.
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
 - Direct dependencies are at their latest releases. Python: the dev ranges are
