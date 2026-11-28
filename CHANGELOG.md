@@ -2697,6 +2697,23 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   script's `apply` line to run there, and once it is on, the sandbox
   keeps commands from writing the user configuration directory. Claude
   Code is started again after the write.
+- Benchmarks: six scenarios, each reported by `benchmarks/runner.py` and in
+  CI's benchmark artifact (#163, #167, #169). `explanation_faithfulness`
+  checks each premise and chain claim of an explain output against the
+  anchors it cites, the run's evidence and its action records, and gives it
+  one of three verdicts: supported, unsupported or contradicted. Its CI gate,
+  in `benchmarks/tests/test_safety_scenarios.py`, requires every planted
+  claim to get its planted verdict and no faithful claim to be flagged; the
+  claims and the anchors' content are hand-written in a structured form.
+  `destination_policy` (F504), `checkpoint_gate` (F501), `grounding_gate`
+  (F505) and `secret_redaction` (§6.7) put tool calls through a real
+  `GroundedAgentAdapter`, with unsafe cases that must be refused and safe
+  cases that must run. `prompt_injection` checks that an instruction found
+  in a retrieved page, a recalled memory entry or a tool result does not
+  take effect: the send is refused F504 and the mutate F502.
+- `docs/research/safety_layer_failure_classes.md`: the 130 defects of the
+  safety layer's security review sorted into six classes, ranked by how
+  many defects of each class the review's fifth and last round still found.
 - Tests: boundary tests that attack the sandbox (#186). They run each
   route under the sandbox runtime's `srt` command (0.0.82) with the
   settings `/grounded-setup` computes, and as a control without the
@@ -2815,6 +2832,12 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   GitHub Actions: checkout v7, setup-python v7, cache v6, upload-artifact
   v7, setup-go v7.
 - CI tests Python 3.14 and 3.15.
+- Benchmarks: `decision_audit` compares each criterion, value and score an
+  explanation cites with the recorded reasoning, and no longer reads the
+  explanation's own `confabulated` label, so the baseline's faithfulness is
+  now 54% and its confabulation rate 40% (#163). `mutation_recovery`
+  restores through `CheckpointTracker.restore_checkpoint` with a
+  `FileSnapshotStore` and checks the restore it returns (#167).
 
 ### Fixed
 - **Plugin hooks on macOS (#134).** CI now also runs the tests on macOS, with `/bin/bash` 3.2 and with Homebrew's bash. Fixed:
