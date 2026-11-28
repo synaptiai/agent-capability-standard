@@ -84,7 +84,7 @@ The `skills` field points Claude Code to the flat skill directory structure. Eac
 **Minimum Rust (building from source):** 1.88
 **License:** Apache-2.0
 
-**Install commands:**
+**Install commands (once the package is on PyPI; it is not yet, so install from a clone with `pip install -e .` until then):**
 
 ```bash
 # Core package (PyYAML plus the compiled core)

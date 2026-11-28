@@ -11,6 +11,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -105,9 +106,9 @@ def required_rules(
     project's .claude/hooks, the user configuration directory (and
     ~/.claude.json when ``home`` is given: no CLAUDE_CONFIG_DIR) and the
     hooks' directory, an Edit rule for the .mcp.json of the project and of its
-    repository's top level, Read and
-    Edit rules for the audit key file, and Read
-    rules for the user's credentials."""
+    repository's top level, an Edit rule for ~/.config/acs (the audit key,
+    the remote-write record and its work directories), a Read rule for the
+    audit key file, and Read rules for the user's credentials."""
     deny = list(deny_settings(project)["permissions"]["deny"])
     for base in _forms(project):
         deny += [
@@ -126,8 +127,8 @@ def required_rules(
         deny += [f"Edit(/{form}/.claude.json)" for form in _forms(home)]
     deny.append(f"Edit(/{os.path.realpath(hooks_dir)}/**)")
     for form in _forms(home or os.path.expanduser("~")):
-        key = f"{form}/.config/acs/audit.key"
-        deny += [f"Edit(/{key})", f"Read(/{key})"]
+        deny += [f"Edit(/{form}/.config/acs/**)"]
+        deny += [f"Read(/{form}/.config/acs/audit.key)"]
         deny += [f"Read(/{form}/.ssh/**)"]
         deny += [
             f"Read(/{form}/.config/gh/hosts.yml)",
@@ -606,6 +607,28 @@ class TestDenyRules:
         settings["permissions"]["deny"] = deny
         _write(config / "settings.json", settings)
         assert_relaxed(run_hook(project, config))
+
+    def test_a_rule_for_the_audit_key_alone_does_not_cover_its_directory(
+        self, setup: tuple[Path, Path]
+    ) -> None:
+        """Denying writes to the audit key file alone leaves the
+        remote-write server's record (~/.config/acs/remotes.json) and work
+        directories writable, which choose the programs that server runs
+        outside the sandbox: not strict."""
+        project, config = setup
+        settings = _user(config)
+        deny = [
+            r for r in required_rules(project, config) if "/.config/acs/**" not in r
+        ]
+        deny += [
+            f"Edit(/{form}/.config/acs/audit.key)"
+            for form in _forms(os.path.expanduser("~"))
+        ]
+        settings["permissions"]["deny"] = deny
+        _write(config / "settings.json", settings)
+        result = run_hook(project, config)
+        assert_gated(result, "permissions.deny in user or managed settings has no")
+        assert "/.config/acs/**)" in result.stderr, result.stderr
 
     def test_bare_tool_rules_do_not_count(self, setup: tuple[Path, Path]) -> None:
         project, config = setup
@@ -1325,35 +1348,80 @@ def test_the_refusal_names_no_command_that_does_not_exist() -> None:
     ).exists()
     for path in (
         HOOK,
+        ROOT / "README.md",
+        ROOT / "grounded_agency" / "remote_writes.py",
         ROOT / "hooks" / "README.md",
         ROOT / "spec" / "SECURITY.md",
         ROOT / "CHANGELOG.md",
         ROOT / "CLAUDE.md",
     ):
         if "/grounded-setup" in path.read_text(encoding="utf-8"):
-            assert shipped, f"{path.name} names /grounded-setup, which is not shipped"
+            assert shipped, (
+                f"{path.relative_to(ROOT)} names /grounded-setup, which is not shipped"
+            )
+
+
+def test_the_refusal_gives_the_setup_scripts_terminal_line(tmp_path: Path) -> None:
+    """With the sandbox unverified, the refusal names the setup script's
+    apply line for a terminal: a script that exists, this project, and the
+    user's CLAUDE_CONFIG_DIR passed through env -i, every path quoted."""
+    project = _repo(tmp_path / "pro ject")
+    config = tmp_path / "con fig"
+    _write(config / "settings.json", {})
+    result = run_hook(project, config)
+    assert_gated(result)
+    found = re.search(
+        r"run (/usr/bin/env -i .*? apply --project .*?) \(", result.stderr
+    )
+    assert found, result.stderr
+    words = shlex.split(found.group(1))
+    assert words[:3] == ["/usr/bin/env", "-i", f"CLAUDE_CONFIG_DIR={config}"]
+    assert words[3:5] == ["/usr/bin/python3", "-I"]
+    script = Path(words[5])
+    assert script == (ROOT / "grounded_agency" / "sandbox_settings.py").resolve()
+    assert script.is_file()
+    assert words[6:] == ["apply", "--project", str(project)]
 
 
 @needs_sandbox_system
-def test_the_setup_commands_settings_verify(tmp_path: Path) -> None:
+@pytest.mark.parametrize("layout", ["top", "below-top", "worktree"])
+@pytest.mark.parametrize("config_dir", [False, True], ids=["home", "config-dir"])
+def test_the_setup_commands_settings_verify(
+    tmp_path: Path, layout: str, config_dir: bool
+) -> None:
     """The settings the setup command computes for a project make the hook
     relax a read-only command there (runs once that command is in the
-    package)."""
+    package): for a project at its repository's top level, below it, and in
+    a linked worktree, with and without CLAUDE_CONFIG_DIR."""
     setup_settings = pytest.importorskip("grounded_agency.sandbox_settings")
     project = _repo(tmp_path / "project")
+    if layout == "below-top":
+        project = project / "pkg"
+        project.mkdir()
+    elif layout == "worktree":
+        _git(project, "worktree", "add", "-q", str(tmp_path / "wt"))
+        project = tmp_path / "wt"
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
+    environ = {"HOME": str(home)}
+    settings_dir = home / ".claude"
+    if config_dir:
+        settings_dir = tmp_path / "config"
+        settings_dir.mkdir()
+        environ["CLAUDE_CONFIG_DIR"] = str(settings_dir)
     computed = setup_settings.compute_settings(
         str(project),
         str(home),
         sys.platform,
         str(ROOT),
         extra_domains=("example.com",),
+        environ=environ,
     )
-    _write(home / ".claude" / "settings.json", computed.settings)
-    env = {**os.environ, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project)}
+    _write(settings_dir / "settings.json", computed.settings)
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("AUDIT_HMAC_KEY", None)
+    env.update(environ)
     done = subprocess.run(
         ["bash", str(HOOK)],
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),

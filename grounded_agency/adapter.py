@@ -49,15 +49,18 @@ import json
 import logging
 import os
 import re
+import sys
+import sysconfig
 import threading
+import weakref
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from . import _core
+from . import _core, layer_records
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
@@ -76,6 +79,26 @@ from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import DEFAULT_REDACTOR, Redactor
 from .state.snapshots import FileSnapshotStore
 from .utils.project_settings import refused_project_env
+from .utils.sandbox import (
+    CHECKED_PERMISSION_MODES,
+    CREDENTIAL_NAME,
+    BoundaryPaths,
+    boundary_faults,
+    boundary_paths,
+    cli_faults,
+    deny_rules,
+    flag_settings,
+    git_dirs,
+    git_toplevel,
+    linked_files,
+    mcp_server_lists,
+    parse_settings,
+    server_files,
+    source_faults,
+    source_state,
+    strict_sandbox,
+    widening_rules,
+)
 
 if TYPE_CHECKING:
     from .coordination.orchestrator import OrchestrationRuntime
@@ -111,6 +134,48 @@ _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 # refused it) leaves one. The oldest goes first; the permission callback
 # refuses a call whose record went (R407).
 _HOOK_CHECK_LIMIT = 4096
+
+
+# The extra_args flags that change no settings, permission, tool, directory,
+# plugin or MCP server of the CLI: any other leaves the boundary unverified.
+_HARMLESS_EXTRA_ARGS = frozenset({"debug-to-stderr"})
+
+
+def _options_digest(options: Any) -> str:
+    """A digest of what the boundary's verification read from ``options``:
+    a later change to them is not what was verified."""
+    members = (
+        "allowed_tools",
+        "extra_args",
+        "add_dirs",
+        "plugins",
+        "env",
+        "setting_sources",
+        "mcp_servers",
+        "strict_mcp_config",
+        "cli_path",
+        "cwd",
+    )
+    document = [flag_settings(options)] + [
+        getattr(options, name, None) for name in members
+    ]
+    text = json.dumps(document, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+class _WrappedBoundary(NamedTuple):
+    """What ``wrap_options`` verified of the boundary in the options it
+    built and the other settings sources the CLI reads (``faults``, empty
+    when they hold it), and what is read again before each Bash call: the
+    settings files of ``project_dir`` and ``setting_sources``, compared
+    with ``source_state``, and the hard links of ``paths``."""
+
+    faults: tuple[str, ...]
+    project_dir: str
+    setting_sources: tuple[str, ...] | None
+    env: dict[str, str] | None
+    paths: BoundaryPaths
+    source_state: tuple[tuple[str, str | None], ...]
 
 
 class _HookCheck(NamedTuple):
@@ -406,6 +471,30 @@ class GroundedAgentConfig:
             and a minimum confidence still read the output the one text item
             carries. Claude Code's own tools return results in their own
             forms, which carry no capability output, and are never checked.
+        sandbox: Whether ``wrap_options`` turns on a strict sandbox for Bash
+            when the options carry no sandbox of their own (STANDARD 1.2.0
+            section 5.18.3, RFC-0011): on, refusing to run a command when
+            the sandbox cannot start, with no route outside it, a network
+            limited to ``sandbox_allowed_domains``, and the user's, Claude
+            Code's and the layer's credentials out of reach. On (default).
+            ``False`` leaves the options without one: every Bash call is
+            then its worst case, a gated ``mutate`` and ``send`` that needs
+            a checkpoint and approval (still class SL). Options that carry
+            their own sandbox (``sandbox``, or a ``sandbox`` member of
+            ``settings``) keep it either way.
+        sandbox_allowed_domains: The hosts a sandboxed command may reach
+            (the sandbox's ``network.allowedDomains``, with
+            ``strictAllowlist`` on). Empty (default): none. While a
+            destination policy is in force (``allowed_destinations``, a
+            profile's), a non-empty list leaves the boundary unverified,
+            and every Bash call is its worst case.
+        sandbox_deny_paths: More files or directories holding credentials,
+            which a sandboxed command and the Read tool may not read, each
+            absolute or relative to the home directory (``~/`` too), beside
+            those the adapter always denies.
+        sandbox_deny_env: More environment variables the sandbox unsets
+            for its commands, beside the token variables and every variable
+            whose name looks like a credential's.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -432,9 +521,25 @@ class GroundedAgentConfig:
     allowed_destinations: Sequence[str] | None = None
     snapshots: FileSnapshotStore | None = None
     check_outputs: bool = True
+    sandbox: bool = True
+    sandbox_allowed_domains: Sequence[str] = ()
+    sandbox_deny_paths: Sequence[str] = ()
+    sandbox_deny_env: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
+        if isinstance(self.sandbox_allowed_domains, str) or not all(
+            isinstance(d, str) and d for d in self.sandbox_allowed_domains
+        ):
+            raise ValueError("sandbox_allowed_domains must be a sequence of names")
+        self.sandbox_allowed_domains = tuple(self.sandbox_allowed_domains)
+        for name in ("sandbox_deny_paths", "sandbox_deny_env"):
+            value = getattr(self, name)
+            if isinstance(value, str) or not all(
+                isinstance(v, str) and v for v in value
+            ):
+                raise ValueError(f"{name} must be a sequence of non-empty strings")
+            setattr(self, name, tuple(value))
         if self.approval not in ("ask", "off"):
             raise ValueError(f"approval must be 'ask' or 'off', got {self.approval!r}")
         if self.profiles and self.approval == "off":
@@ -854,6 +959,10 @@ class GroundedAgentAdapter:
             self.checkpoint_tracker.has_commit(commit, since=started_at)
         )
         self._state_lock = threading.Lock()
+        # The boundary each wrap_options call verified (_note_boundary).
+        self._wrapped_boundaries: list[_WrappedBoundary] = []
+        self._wrapped_options: list[tuple[Callable[[], Any], str]] = []
+        self._last_source_faults = ""
         self._executed: set[str] = set()
         # Calls this layer allowed, by (tool, digest of the arguments), not
         # yet run, each with its call id (tool_use_id) when it has one, in
@@ -877,6 +986,13 @@ class GroundedAgentAdapter:
         # does not clear it (it records what was checked, and authorises
         # nothing). Bounded by _HOOK_CHECK_LIMIT, oldest first.
         self._hook_checks: OrderedDict[str, _HookCheck] = OrderedDict()
+        # Whether the operating-system boundary held when the PreToolUse
+        # hook classified each Bash call, by call id: a call classified
+        # after it ran is its worst case unless the boundary was verified
+        # before it ran (STANDARD 1.2.0 section 5.18.3), so that no
+        # checkpoint or prerequisite is read from the text of a call that
+        # ran unrelaxed. Bounded by _HOOK_CHECK_LIMIT, oldest first.
+        self._bash_boundary: OrderedDict[str, bool] = OrderedDict()
         # The tools create_grounded_mcp_server serves, which check their own
         # output (section 5.20); the PostToolUse hook checks other servers'
         # bound MCP tools. Tools a policy would check but whose results carry
@@ -1689,6 +1805,46 @@ class GroundedAgentAdapter:
         with self._state_lock:
             return self._hook_checks.pop(call, None)
 
+    def _note_bash_boundary(self, call: str, held: bool) -> None:
+        """Keep whether the boundary held when the PreToolUse hook
+        classified the Bash call ``call``."""
+        with self._state_lock:
+            self._bash_boundary.pop(call, None)
+            self._bash_boundary[call] = held
+            while len(self._bash_boundary) > _HOOK_CHECK_LIMIT:
+                self._bash_boundary.popitem(last=False)
+
+    def _bash_boundary_held(self, call: str | None) -> bool:
+        """Whether the boundary held when the PreToolUse hook classified the
+        Bash call ``call``: False for a call it kept nothing of."""
+        if call is None:
+            return False
+        with self._state_lock:
+            return self._bash_boundary.get(call, False)
+
+    def _ran_mapping(
+        self, tool_name: str, tool_input: Any, cwd: str | None, call: str | None
+    ) -> ToolMapping:
+        """The mapping of a call that ran, classified after it ran: a Bash
+        call is its worst case unless the boundary held when the PreToolUse
+        hook classified it (STANDARD 1.2.0 section 5.18.3: the boundary is
+        verified before the call runs)."""
+        if tool_name == "Bash" and not self._bash_boundary_held(call):
+            return self.mapper.bash_worst_case()
+        return self.mapper.map_tool(
+            tool_name,
+            tool_input if isinstance(tool_input, dict) else {},
+            cwd,
+            boundary=self._kept_boundary(tool_name, call),
+        )
+
+    def _kept_boundary(self, tool_name: str, call: str | None) -> bool | None:
+        """For a Bash call, whether the boundary held when the PreToolUse
+        hook classified it (False for a call it kept nothing of), so that a
+        later classification of the call uses that decision; None for any
+        other tool."""
+        return self._bash_boundary_held(call) if tool_name == "Bash" else None
+
     def _kept_call_dir(self, call: str | None) -> str | None:
         """The directory the PreToolUse hook classified ``call`` in (what it
         kept of it), keeping it."""
@@ -1881,6 +2037,24 @@ class GroundedAgentAdapter:
 
         Injects:
         - enable_file_checkpointing=True for SDK-level rollback
+        - the operating-system boundary Bash runs under (STANDARD 1.2.0
+          section 5.18.3, RFC-0011): ``permissions.deny`` rules in
+          ``settings`` for this adapter's records, the plugin hooks' records
+          (:func:`~.layer_records.deny_settings`: the project's and
+          ``acs/`` in each git directory of the repository), the
+          repository's git configuration and hooks, the host's
+          configuration and the credential files
+          (:func:`~.utils.sandbox.deny_rules`; a ``settings`` file is read
+          and passed inline), and, where the options carry no sandbox of
+          their own (``sandbox``, or a ``sandbox`` member of ``settings``)
+          and ``config.sandbox`` is on, the strict sandbox
+          (:func:`~.utils.sandbox.strict_sandbox`), whose
+          ``filesystem.denyWrite`` names the hooks' records. The
+          Bash classifier relaxes a call only while every options this
+          adapter wrapped hold the boundary
+          (:func:`~.utils.sandbox.boundary_faults`) and no other settings
+          source the CLI loads weakens it; otherwise every Bash call is
+          its worst case, a gated ``mutate`` and ``send``
         - a PreToolUse hook for the rate limit, the prerequisites, the
           checkpoint rule and the approval rule, whose matcher has
           ``on_failure="block"`` (the SDK then refuses to connect to a
@@ -1968,11 +2142,19 @@ class GroundedAgentAdapter:
         cwd_option = getattr(base, "cwd", None)
         self.mapper.project_dir = os.fspath(cwd_option) if cwd_option else None
 
+        # The operating-system boundary Bash runs under (STANDARD 1.2.0
+        # section 5.18.3, RFC-0011): a strict sandbox unless the options
+        # carry their own, and deny rules for the layer's records.
+        project_dir = os.fspath(cwd_option) if cwd_option else os.getcwd()
+        paths, code_faults = self._boundary_paths(project_dir, env, base)
+        sandbox_kwargs = self._sandbox_options(base, paths)
+
         # Add evidence collector
         evidence_hook = create_evidence_collector(
             store=self.evidence_store,
             mapper=self.mapper,
             include_tool_input=self.config.evidence_include_tool_input,
+            boundary_held=self._bash_boundary_held,
         )
         post_hooks.append(self._wrap_hook(evidence_hook))
 
@@ -1984,6 +2166,7 @@ class GroundedAgentAdapter:
             expiry_minutes=self.config.expiry_minutes,
             refuses_output=self._refuses_host_result,
             call_dir=self._kept_call_dir,
+            boundary_held=self._bash_boundary_held,
         )
         post_hooks.append(self._wrap_hook(recorder))
 
@@ -2068,6 +2251,7 @@ class GroundedAgentAdapter:
         kwargs: dict[str, Any] = {
             "enable_file_checkpointing": True,
             "hooks": merged_hooks,
+            **sandbox_kwargs,
         }
 
         # The permission callback. The SDK refuses can_use_tool beside a
@@ -2116,7 +2300,358 @@ class GroundedAgentAdapter:
                 if sdk_agents:
                     kwargs["agents"] = sdk_agents
 
-        return replace(base, **kwargs)
+        wrapped = replace(base, **kwargs)
+        self._note_boundary(wrapped, project_dir, paths, code_faults)
+        return wrapped
+
+    def _boundary_paths(
+        self, project_dir: str, env: Any, base: Any
+    ) -> tuple[BoundaryPaths, list[str]]:
+        """What the boundary keeps from a sandboxed command of a session in
+        ``project_dir`` (:func:`~.utils.sandbox.boundary_paths`): this
+        layer's records (its checkpoint directory, audit log, snapshot store
+        and evidence file), the plugin hooks' records with the deny rules
+        and ``denyWrite`` paths :func:`~.layer_records.deny_settings` gives
+        for them, the repository's git configuration and hooks, the code
+        that runs outside the sandbox (:meth:`_code_outside`), and the
+        credentials. Returns the paths and the faults: code it could not
+        resolve, or hooks' records it could not name (the boundary is then
+        unverified)."""
+        records: list[str | os.PathLike[str]] = [
+            self.config.checkpoint_dir,
+            self.config.audit_log_path,
+        ]
+        skipped: list[str] = []
+        store = getattr(self.config.snapshots, "_store", None)
+        if isinstance(store, (str, os.PathLike)):
+            records.append(store)
+            # The content objects: written by this layer and checked by
+            # their digest, and too many to walk before each call.
+            skipped.append(os.path.join(os.path.abspath(store), "objects"))
+        evidence_path = getattr(self.evidence_store, "path", None)
+        if isinstance(evidence_path, (str, os.PathLike)):
+            records.append(evidence_path)
+        env_map = (
+            {str(k): str(v) for k, v in env.items()}
+            if isinstance(env, Mapping)
+            else None
+        )
+        code, code_files, faults = self._code_outside(project_dir, env_map, base)
+        record_rules: list[str] = []
+        record_deny_write: list[str] = []
+        try:
+            fragment = layer_records.deny_settings(project_dir)
+        except layer_records.LayerRecordsError as e:
+            faults.append(f"the plugin hooks' records cannot be denied: {e}")
+        else:
+            record_rules = fragment["permissions"]["deny"]
+            record_deny_write = fragment["sandbox"]["filesystem"]["denyWrite"]
+        paths = boundary_paths(
+            project_dir,
+            git_dirs(project_dir),
+            records,
+            env_map,
+            toplevel=git_toplevel(project_dir),
+            code=code,
+            code_files=code_files,
+            credential_files=self.config.sandbox_deny_paths,
+            credential_vars=self.config.sandbox_deny_env,
+            link_skipped=skipped,
+            record_rules=record_rules,
+            record_deny_write=record_deny_write,
+        )
+        return paths, faults
+
+    @staticmethod
+    def _code_outside(
+        project_dir: str, env: dict[str, str] | None, base: Any
+    ) -> tuple[list[str], list[str], list[str]]:
+        """The code that runs outside the sandbox, which a sandboxed command
+        must not write (STANDARD 1.2.0 section 5.18.3, Writes): this
+        package, the Agent SDK's (with the CLI it bundles), the interpreter
+        and its packages (``sys.prefix`` too where it lies in the project),
+        the CLI ``cli_path`` names, each local plugin, and the files each
+        stdio MCP server runs, of the options' ``mcp_servers`` and, unless
+        ``strict_mcp_config``, of the project's ``.mcp.json`` and the user's
+        ``.claude.json``. Returns the paths, the files among them to check
+        for a second hard link, and the faults: a server list given as a
+        file or text, or one that cannot be read."""
+        project = os.path.realpath(project_dir)
+        code: list[str] = [os.path.dirname(os.path.realpath(__file__))]
+        files: list[str] = []
+        faults: list[str] = []
+        try:
+            import claude_agent_sdk
+
+            code.append(os.path.dirname(os.path.realpath(claude_agent_sdk.__file__)))
+        except ImportError:
+            pass
+        for key in ("purelib", "platlib"):
+            where = sysconfig.get_paths().get(key)
+            if where:
+                code.append(os.path.realpath(where))
+        code.append(os.path.realpath(sys.executable))
+        prefix = os.path.realpath(sys.prefix)
+        if prefix == project or prefix.startswith(project + os.sep):
+            code.append(prefix)
+        cli_path = getattr(base, "cli_path", None)
+        if cli_path:
+            cli = os.path.realpath(os.path.join(project, os.fspath(cli_path)))
+            code.append(cli)
+            files.append(cli)
+        for plugin in getattr(base, "plugins", None) or []:
+            where = plugin.get("path") if isinstance(plugin, Mapping) else None
+            if isinstance(where, (str, os.PathLike)):
+                real = os.path.realpath(os.path.join(project, os.fspath(where)))
+                code.append(real)
+                files.extend(
+                    os.path.join(real, name)
+                    for name in ("hooks", ".mcp.json", ".claude-plugin")
+                )
+            else:
+                faults.append("a plugin of the options names no path")
+        lists: list[tuple[str, Any]] = []
+        servers = getattr(base, "mcp_servers", None)
+        if isinstance(servers, (str, os.PathLike)):
+            faults.append(
+                "mcp_servers is a file or text this layer does not read for "
+                "the code its servers run"
+            )
+        elif servers:
+            lists.append(("mcp_servers", servers))
+        if not getattr(base, "strict_mcp_config", False):
+            lists.extend(mcp_server_lists(project_dir, env))
+        for where, entries in lists:
+            found, bad = server_files(entries, project, env)
+            code.extend(found)
+            files.extend(found)
+            faults.extend(f"{where}: {fault}" for fault in bad)
+        return (
+            list(dict.fromkeys(code)),
+            list(dict.fromkeys(files)),
+            faults,
+        )
+
+    def _sandbox_options(self, base: Any, paths: BoundaryPaths) -> dict[str, Any]:
+        """The ``sandbox`` and ``settings`` of the wrapped options: the
+        settings object (inline JSON or a file the SDK would read, read now
+        and passed inline) with a ``permissions.deny`` rule for each path
+        :func:`~.utils.sandbox.deny_rules` names added, and, where neither
+        ``base.sandbox`` nor a ``sandbox`` member of the settings is set and
+        ``config.sandbox`` is on, the strict sandbox. Settings that cannot
+        be read are passed on unchanged (the boundary is then unverified)."""
+        out: dict[str, Any] = {}
+        names = {f.name for f in fields(base)}
+        document = parse_settings(getattr(base, "settings", None))
+        if "settings" not in names:
+            logger.warning(
+                "These options have no settings field: no deny rules are "
+                "added for the layer's records, and every Bash call is its "
+                "worst case"
+            )
+            own_sandbox: Any = getattr(base, "sandbox", None)
+        elif document is None:
+            logger.warning(
+                "The options' settings cannot be read as a JSON object: they "
+                "are passed on unchanged, with no deny rules for the layer's "
+                "records, and every Bash call is its worst case"
+            )
+            own_sandbox = True
+        else:
+            own_sandbox = getattr(base, "sandbox", None)
+            if own_sandbox is None:
+                own_sandbox = document.get("sandbox")
+            permissions = document.get("permissions", {})
+            if isinstance(permissions, dict):
+                deny = permissions.get("deny", [])
+                deny = list(deny) if isinstance(deny, list) else []
+                deny.extend(r for r in deny_rules(paths) if r not in deny)
+                document = {**document, "permissions": {**permissions, "deny": deny}}
+                out["settings"] = json.dumps(document)
+            else:
+                logger.warning(
+                    "The options' settings hold a permissions member that is "
+                    "not an object: no deny rules are added for the layer's "
+                    "records, and every Bash call is its worst case"
+                )
+        if own_sandbox is None and self.config.sandbox:
+            if "sandbox" in names:
+                out["sandbox"] = strict_sandbox(
+                    paths, self.config.sandbox_allowed_domains
+                )
+            else:
+                logger.warning(
+                    "This claude-agent-sdk's options have no sandbox field: "
+                    "Bash runs unsandboxed, and every Bash call is its worst "
+                    "case"
+                )
+        return out
+
+    def _note_boundary(
+        self,
+        wrapped: Any,
+        project_dir: str,
+        paths: BoundaryPaths,
+        code_faults: Sequence[str] = (),
+    ) -> None:
+        """Verify the boundary in the options this adapter built
+        (:func:`~.utils.sandbox.boundary_faults`) and in the other settings
+        sources the CLI reads (:func:`~.utils.sandbox.source_faults`), and
+        keep the result with the state of those files, so that the mapper
+        relaxes a Bash call only while every options this adapter wrapped
+        hold it (:meth:`_boundary_holds`)."""
+        env = getattr(wrapped, "env", None)
+        env = (
+            {str(k): str(v) for k, v in env.items()}
+            if isinstance(env, Mapping)
+            else None
+        )
+        sources = getattr(wrapped, "setting_sources", None)
+        faults = boundary_faults(
+            flag_settings(wrapped),
+            paths,
+            destination_policies=bool(self._destinations),
+        )
+        # Allow rules the CLI is given as arguments widen the sandbox as
+        # those of a settings file do.
+        faults.extend(
+            f"allowed_tools has {rule}"
+            for rule in widening_rules(
+                list(getattr(wrapped, "allowed_tools", None) or [])
+            )
+        )
+        # The SDK passes extra_args to the CLI after its own flags, so one
+        # can override a flag the options set (settings, setting sources,
+        # allowed tools, added directories, plugins, MCP servers): only
+        # flags known to change none of them pass.
+        extra = getattr(wrapped, "extra_args", None) or {}
+        if not isinstance(extra, Mapping):
+            faults.append("extra_args is not a mapping")
+            extra = {}
+        faults.extend(
+            f"extra_args passes --{key}"
+            for key in extra
+            if str(key) not in _HARMLESS_EXTRA_ARGS
+        )
+        # The CLI lets a sandboxed command write each directory added to
+        # the session.
+        if getattr(wrapped, "add_dirs", None):
+            faults.append("add_dirs adds directories the sandbox may write")
+        # The CLI's version decides which sources it reads and which values
+        # it honours from each: one this layer has not checked leaves the
+        # boundary unverified (STANDARD 1.2.0 section 5.18.3).
+        faults.extend(cli_faults(wrapped))
+        # So does a permission mode it has not checked; the PreToolUse hook
+        # checks the mode each call runs in as well (the session's mode can
+        # change).
+        mode = getattr(wrapped, "permission_mode", None)
+        if mode is not None and not (
+            isinstance(mode, str) and mode in CHECKED_PERMISSION_MODES
+        ):
+            faults.append(
+                f"the options' permission_mode {mode!r} is a mode this layer "
+                f"has not checked"
+            )
+        faults.extend(code_faults)
+        faults.extend(source_faults(project_dir, sources, env))
+        digest = _options_digest(wrapped)
+        entry = _WrappedBoundary(
+            tuple(faults),
+            project_dir,
+            tuple(sources) if sources is not None else None,
+            env,
+            paths,
+            source_state(project_dir, sources, env),
+        )
+        try:
+            ref: Callable[[], Any] = weakref.ref(wrapped)
+        except TypeError:
+            ref = lambda: wrapped  # noqa: E731 - options that take no weak reference
+        with self._state_lock:
+            # Options wrapped again alike (grounded_query wraps per query)
+            # add nothing to check.
+            if entry not in self._wrapped_boundaries:
+                self._wrapped_boundaries.append(entry)
+            # The options themselves, while the caller holds them: a change
+            # made to them after the wrap is not what was verified.
+            self._wrapped_options = [
+                (r, d) for r, d in self._wrapped_options if r() is not None
+            ]
+            self._wrapped_options.append((ref, digest))
+        self.mapper.os_boundary = self._boundary_holds
+        if faults:
+            logger.warning(
+                "Bash runs without a verified operating-system boundary, so "
+                "every Bash call is its worst case (a gated mutate and send, "
+                "STANDARD 1.2.0 section 5.18.3): %s",
+                "; ".join(faults),
+            )
+
+    def _boundary_holds(self) -> bool:
+        """Whether every options this adapter wrapped hold the boundary
+        (:meth:`_note_boundary`: in the options and in the other settings
+        sources the CLI reads), no settings file of those sources changed
+        since the options were wrapped (the CLI may have loaded it before
+        the change, or reload it after), and no record or credential file
+        has a second hard link (:func:`~.utils.sandbox.linked_files`), read
+        now. False before any options were wrapped."""
+        with self._state_lock:
+            wrapped = list(self._wrapped_boundaries)
+            options = list(self._wrapped_options)
+        if not wrapped:
+            return False
+        for ref, digest in options:
+            held = ref()
+            if held is not None and _options_digest(held) != digest:
+                self._warn_boundary("options this adapter wrapped changed since")
+                return False
+        for entry in wrapped:
+            if entry.faults:
+                return False
+            # A credential variable set in this process after the wrap
+            # reaches a CLI started from these options afterwards.
+            unset = [
+                name
+                for name in os.environ
+                if CREDENTIAL_NAME.search(name)
+                and os.environ[name] != ""
+                and name not in entry.paths.credential_env
+            ]
+            if unset:
+                self._warn_boundary(
+                    "the environment sets a credential variable the sandbox "
+                    "does not unset: " + ", ".join(sorted(unset))
+                )
+                return False
+            now = source_state(entry.project_dir, entry.setting_sources, entry.env)
+            changed = [
+                f"{path} changed since the options were wrapped"
+                for (path, before), (_, after) in zip(
+                    entry.source_state, now, strict=False
+                )
+                if before != after
+            ]
+            if len(now) != len(entry.source_state):
+                changed.append("the managed settings files changed")
+            weakening = [
+                *changed,
+                *(f"{p} has another hard link" for p in linked_files(entry.paths)),
+            ]
+            if weakening:
+                self._warn_boundary("; ".join(weakening))
+                return False
+        return True
+
+    def _warn_boundary(self, shown: str) -> None:
+        """Log, once until it changes, why the boundary no longer holds."""
+        if shown != self._last_source_faults:
+            self._last_source_faults = shown
+            logger.warning(
+                "The operating-system boundary verified when the options were "
+                "wrapped no longer holds, so every Bash call is its worst "
+                "case: %s",
+                shown,
+            )
 
     @staticmethod
     def _entry_hooks(entry: Any) -> list[Any]:
@@ -2458,15 +2993,34 @@ class GroundedAgentAdapter:
                             )
                         )
 
+                bash_args = (
+                    (tool_input if isinstance(tool_input, dict) else {})
+                    if tool_name == "Bash"
+                    else None
+                )
+                # Section 5.18.3: whether the boundary holds is decided once
+                # for the call, in the permission mode it runs in, and both
+                # its classification now and after it ran use that decision.
+                boundary: bool | None = None
+                if bash_args is not None:
+                    boundary = mapper.boundary_holds(
+                        bash_args,
+                        input_data.get("permission_mode") or options_mode or "default",
+                    )
                 try:
-                    mapping = mapper.map_tool(tool_name, tool_input, cwd)
+                    mapping = mapper.map_tool(
+                        tool_name, tool_input, cwd, boundary=boundary
+                    )
                 except Exception:
                     logger.exception(
                         "Could not classify %s; treating it as unbound", tool_name
                     )
                     mapping = UNCLASSIFIED_TOOL
+                    boundary = False if boundary is not None else None
                 if isinstance(call, str):
                     checked_under[call] = mapping
+                    if boundary is not None:
+                        self._note_bash_boundary(call, boundary)
 
                 if mapping.control:
                     try:
@@ -2759,7 +3313,6 @@ class GroundedAgentAdapter:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
-        mapper = self.mapper
 
         async def record_after_call(
             input_data: dict[str, Any],
@@ -2790,7 +3343,7 @@ class GroundedAgentAdapter:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                mapping = mapper.map_tool(tool_name, tool_input, call_dir)
+                mapping = self._ran_mapping(tool_name, tool_input, call_dir, holder)
                 tool_response = input_data.get("tool_response")
                 try:
                     fault = self._host_result_fault(
@@ -2891,8 +3444,11 @@ class GroundedAgentAdapter:
                     # person_required (section 5.21.3). A mapping that fails
                     # loses neither the record nor the failure.
                     try:
-                        mapping: ToolMapping | None = self.mapper.map_tool(
-                            tool_name, input_data.get("tool_input", {}), call_dir
+                        mapping: ToolMapping | None = self._ran_mapping(
+                            tool_name,
+                            input_data.get("tool_input", {}),
+                            call_dir,
+                            holder,
                         )
                     except Exception as e:
                         logger.warning("Failure recorder cannot map: %s", e)
@@ -3046,7 +3602,11 @@ class GroundedAgentAdapter:
                 cwd = checked.cwd if checked is not None else None
                 if checked is not None and checked.asked_at is not None:
                     requested = min(requested, checked.asked_at)
-                mapping0 = mapper.map_tool(tool_name, input_data, cwd)
+                # A Bash call keeps the boundary its PreToolUse hook decided.
+                kept_boundary = self._kept_boundary(tool_name, holder)
+                mapping0 = mapper.map_tool(
+                    tool_name, input_data, cwd, boundary=kept_boundary
+                )
                 if mapping0.control:
                     return allow(input_data), input_data
 
@@ -3188,7 +3748,9 @@ class GroundedAgentAdapter:
                 # again, and one whose binding changed is checked again
                 # under the new one, and refused where it requires approval
                 # (the decision was asked under the other).
-                mapping_now = mapper.map_tool(tool_name, input_data, cwd)
+                mapping_now = mapper.map_tool(
+                    tool_name, input_data, cwd, boundary=kept_boundary
+                )
                 if mapping_now != mapping0:
                     refusal = self._changed_binding_refusal(
                         mapping_now, tool_name, holder, input_data
@@ -3226,7 +3788,9 @@ class GroundedAgentAdapter:
                 mapping1 = mapping_now
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
-                    mapping1 = mapper.map_tool(tool_name, args1, cwd)
+                    mapping1 = mapper.map_tool(
+                        tool_name, args1, cwd, boundary=kept_boundary
+                    )
                     refusal = (
                         self._secret_refusal(mapping1, tool_name, holder, args1)
                         or self._destination_refusal(mapping1, tool_name, holder, args1)

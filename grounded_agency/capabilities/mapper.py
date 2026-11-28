@@ -37,7 +37,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..errors import ErrorCode, Severity, ValidationError, text_form
+from ..remote_writes import binding_records as _remote_write_bindings
 from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
+from ..utils.sandbox import CHECKED_PERMISSION_MODES
 from .registry import CapabilityNode, CapabilityRegistry
 
 if TYPE_CHECKING:
@@ -1185,6 +1187,11 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "ListMcpResourcesTool": "observe",
     "ReadMcpResourceTool": "retrieve",
     "ExitPlanMode": "inquire",
+    # The plugin's typed remote writes, under the names Claude Code gives its
+    # MCP server's tools (grounded_agency/remote_writes.py): each a gated
+    # mutate. A host that offers the server under another name loads
+    # remote_writes.binding_records(<its prefix>) with load_bindings.
+    **{r["tool"]: r["capability"] for r in _remote_write_bindings()},
 }
 
 # Tools whose call loads a definition that runs commands no hook sees, with
@@ -1228,6 +1235,12 @@ def _get_default_registry() -> CapabilityRegistry:
                 )
             _default_registry = CapabilityRegistry(path)
         return _default_registry
+
+
+def _stays_sandboxed(tool_input: dict[str, Any]) -> bool:
+    """Whether a Bash call's input leaves ``dangerouslyDisableSandbox``
+    unset or false."""
+    return tool_input.get("dangerouslyDisableSandbox", False) is False
 
 
 class ToolCapabilityMapper:
@@ -1366,6 +1379,13 @@ class ToolCapabilityMapper:
         self.command_may_be_content: Callable[
             [str, str | None, str | None, str | None], bool
         ] = command_may_be_content
+        # Whether an operating-system boundary holds for a Bash call now
+        # (STANDARD 1.2.0 section 5.18.3, RFC-0011): Bash is
+        # a shell-like tool, and its classifier relaxes a call below the
+        # worst case only while this returns True. The adapter sets it from
+        # the sandbox of the options it wraps (``wrap_options``). None, a
+        # False, or a check that raises: every Bash call is its worst case.
+        self.os_boundary: Callable[[], bool] | None = None
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1725,7 +1745,12 @@ class ToolCapabilityMapper:
         return self.register_binding(record)
 
     def map_tool(
-        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        cwd: str | None = None,
+        *,
+        boundary: bool | None = None,
     ) -> ToolMapping:
         """
         Map a tool invocation to its capability metadata.
@@ -1744,15 +1769,26 @@ class ToolCapabilityMapper:
                 None: this process's working directory. Only a git
                 command's class depends on it (:attr:`git_may_fetch`,
                 :attr:`git_dir_may_be_content`).
+            boundary: For a Bash call, whether the operating-system
+                boundary held when the call was checked
+                (:meth:`boundary_holds`, decided once per call); None: check
+                it now. A call that sets ``dangerouslyDisableSandbox`` is
+                the worst case either way.
 
         Returns:
             ToolMapping with capability metadata, raised by the applied
             domain profiles (section 5.21.3)
         """
-        return self._apply_profiles(self._map_tool(tool_name, tool_input, cwd))
+        return self._apply_profiles(
+            self._map_tool(tool_name, tool_input, cwd, boundary)
+        )
 
     def _map_tool(
-        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        cwd: str | None = None,
+        boundary: bool | None = None,
     ) -> ToolMapping:
         """:meth:`map_tool` before domain profiles."""
         # Handle Bash specially - analyze command content. Input that is
@@ -1761,6 +1797,12 @@ class ToolCapabilityMapper:
         if tool_name == "Bash":
             if not isinstance(tool_input, dict):
                 tool_input = {}
+            if boundary is None:
+                held = self.boundary_holds(tool_input)
+            else:
+                held = boundary and _stays_sandboxed(tool_input)
+            if not held:
+                return self._worst_case()
             return self._classify_bash_command(tool_input, cwd)
 
         # Check dynamic mappings (MCP tools, etc.)
@@ -1779,6 +1821,42 @@ class ToolCapabilityMapper:
         # Unknown tool: nothing says what it does, so assume the strictest
         # case instead of a read.
         return UNCLASSIFIED_TOOL
+
+    def boundary_holds(
+        self, tool_input: dict[str, Any], permission_mode: str | None = None
+    ) -> bool:
+        """Whether the Bash call with ``tool_input`` runs under a verified
+        operating-system boundary (:attr:`os_boundary`), so that its
+        classifier may relax it. Never for a call that asks to run outside
+        the sandbox (``dangerouslyDisableSandbox`` set to anything but
+        false): whether the host honours that argument is the host's
+        configuration, which a call cannot settle (STANDARD 1.2.0 section
+        5.18.3). Never in a ``permission_mode`` outside
+        :data:`~grounded_agency.utils.sandbox.CHECKED_PERMISSION_MODES`:
+        the layer does not know, for that mode, which settings sources the
+        host reads and which values it honours from each. None: the caller
+        names no mode."""
+        if not _stays_sandboxed(tool_input):
+            return False
+        if permission_mode is not None and not (
+            isinstance(permission_mode, str)
+            and permission_mode in CHECKED_PERMISSION_MODES
+        ):
+            return False
+        check = self.os_boundary
+        if check is None:
+            return False
+        try:
+            return check() is True
+        except Exception:
+            logger.exception("Could not verify the operating-system boundary")
+            return False
+
+    def bash_worst_case(self) -> ToolMapping:
+        """Bash's worst case, a gated ``mutate`` and ``send``, with the
+        flags the applied profiles raise: what every Bash call is without a
+        verified operating-system boundary (section 5.18.3)."""
+        return self._apply_profiles(self._worst_case())
 
     def person_required(self, mapping: ToolMapping) -> bool:
         """Whether the applied profiles require a person for a call with

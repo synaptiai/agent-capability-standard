@@ -25,6 +25,8 @@ const PLAN_EXCLUDED = [
   /^AGENTS\.md$/,
   /^\.github\//,
   /^\.claude\//,
+  // The plugin's slash commands are instructions to Claude Code, as CLAUDE.md is.
+  /^commands\//,
 ];
 const publicMd = tracked.filter((p) => p.endsWith('.md') && !PLAN_EXCLUDED.some((re) => re.test(p)));
 

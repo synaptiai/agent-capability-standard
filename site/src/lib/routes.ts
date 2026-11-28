@@ -106,6 +106,7 @@ export const EXCLUSIONS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /^AGENTS\.md$/, reason: 'agent instructions (llms.txt links it on GitHub)' },
   { pattern: /^\.github\//, reason: 'repository plumbing' },
   { pattern: /^\.claude\//, reason: 'agent configuration and memory' },
+  { pattern: /^commands\//, reason: "the plugin's slash commands: instructions to Claude Code, documented in hooks/README.md" },
   { pattern: /^docs\/(MEDIUM_ARTICLE[^/]*|PROJECT_ARTICLE|TWITTER_THREAD)\.md$/, reason: 'drafts' },
   { pattern: /^docs\/proposals\/GROUNDED_HARNESS_V3\.md$/, reason: 'empty draft' },
 ];
@@ -315,6 +316,7 @@ export function buildRoutes(): Route[] {
   add(
     'guides',
     { source: null, url: '/guides/', title: 'Overview', template: 'listing' },
+    prose('docs/guides/ADOPTION.md', '/guides/adoption/', 'Adopting the Standard'),
     prose('docs/guides/RUNNING_WORKFLOWS.md', '/guides/running-workflows/', 'Running workflows'),
     prose('docs/guides/ORCHESTRATION_EXTENSIONS.md', '/guides/orchestration-extensions/', 'Orchestration extensions'),
     prose('docs/guides/MODALITY_HANDLING.md', '/guides/modality-handling/', 'Modality handling'),
@@ -393,6 +395,11 @@ export function buildRoutes(): Route[] {
       ['nonconformity_procedure.md', 'Nonconformity procedure'],
     ].map(([f, t]) => prose(`${iso}/${f}`, `/compliance/iso-42001/${kebab(f!)}/`, t!, 'ISO/IEC 42001')),
     prose('docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md', '/compliance/nist-ai-rmf/', 'NIST AI RMF profile'),
+    ...[
+      ['decommissioning_procedure.md', 'Decommissioning procedure'],
+      ['third_party_risk_procedure.md', 'Third-party AI risk procedure'],
+      ['tabletop_exercise_template.md', 'Tabletop exercise template'],
+    ].map(([f, t]) => prose(`docs/compliance/nist-ai-rmf/${f}`, `/compliance/nist-ai-rmf/${kebab(f!)}/`, t!)),
   );
 
   add('rfcs', { source: null, url: '/rfcs/', title: 'Overview and process', template: 'rfcs-index' });
@@ -425,6 +432,7 @@ export function buildRoutes(): Route[] {
     ...[
       [`${res}/failure_taxonomy.md`, 'Failure taxonomy'],
       [`${res}/replanning_capabilities.md`, 'Replanning capabilities'],
+      [`${res}/safety_layer_failure_classes.md`, 'Safety-layer failure classes'],
       [`${res}/analysis/OASF_comparison.md`, 'OASF comparison'],
       [`${res}/analysis/capability_mapping.md`, 'Capability mapping'],
     ].map(([f, t]) => prose(f!, `/background/research/${kebab(f!.split('/').at(-1)!)}/`, t!, 'Research')),

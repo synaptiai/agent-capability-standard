@@ -1,0 +1,1146 @@
+{
+  "description": "Merge and split vectors (Agent Capability Standard, section 7.3 as RFC-0012 proposes it for 1.3.0). Proposed, not normative: RFC-0012 is a Draft, and Standard 1.2.0 states section 7.3 as a requirement on hosts with no vectors. A record is a world-state entity: an id of section 7.1, a type, and attributes. Its class is what its type denotes in `classes` (a class name or alias of schemas/entity_taxonomy.yaml 1.1.0, mapped to its class name), or the type itself for a vendor class x-...; the class part of its id must denote the same class, and an id whose class part is neither a class, an alias nor a vendor class is not an id of section 7.1 (invalid_entity_id). A merge combines at least two records with distinct ids, all of one class, of which no two give a unique attribute (one listed in `unique_attributes`, which a host supplies) different values; a missing or null value conflicts with none, and values are compared as JSON values (numbers by value, strings exactly, a boolean is not a number). The merged id is one of the records' ids or a new id of their class. A split gives at least two records with distinct ids, none the split record's id, all of the split record's class; it has no identifier constraint. A check refuses with the reason of the first constraint violated, in this order: merge: too_few_entities, each record (invalid_entity, invalid_entity_id, unknown_class, class_mismatch), duplicate_id, incompatible_types, conflicting_identifier, the merged id (invalid_entity_id, class_mismatch); split: the split record, too_few_entities, each new record, duplicate_id, reused_id, incompatible_types. An allowed operation gives its lineage record: operation, class, from (the ids merged or split, in the given order) and into (the resulting ids, in the given order).",
+  "rfc": "RFC-0012",
+  "target": "1.3.0",
+  "section": "7.3",
+  "status": "proposed",
+  "fields": {
+    "name": "The vector's id.",
+    "about": "What the vector shows.",
+    "entities": "merge: the records merged.",
+    "entity": "split: the record split.",
+    "into": "merge: the merged id; split: the records it becomes.",
+    "unique_attributes": "merge: the attribute keys that identify an entity uniquely.",
+    "expect": "{ok: true, lineage} or {ok: false, reason}."
+  },
+  "classes": {
+    "art": "artifact",
+    "artifact": "artifact",
+    "asset": "asset",
+    "container": "container",
+    "ctr": "container",
+    "database": "database",
+    "dataset": "dataset",
+    "db": "database",
+    "doc": "document",
+    "document": "document",
+    "ds": "dataset",
+    "endpoint": "endpoint",
+    "ep": "endpoint",
+    "event": "event",
+    "evt": "event",
+    "host": "host",
+    "job": "job",
+    "loc": "location",
+    "location": "location",
+    "mat": "material",
+    "material": "material",
+    "node": "host",
+    "org": "organization",
+    "organization": "organization",
+    "person": "person",
+    "proc": "process",
+    "process": "process",
+    "q": "queue",
+    "queue": "queue",
+    "sensor": "sensor",
+    "service": "service",
+    "svc": "service"
+  },
+  "merge": [
+    {
+      "name": "same_class_same_identifier",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/crm/contact/889",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "person",
+          "from": [
+            "person:acme/hr/employee/12345",
+            "person:acme/crm/contact/889"
+          ],
+          "into": [
+            "person:acme/hr/employee/12345"
+          ]
+        }
+      }
+    },
+    {
+      "name": "alias_and_class_name_are_one_class",
+      "about": "svc is an alias of service, so both records are of class service.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "service:acme/payments/prod/payments-api",
+          "type": "service",
+          "attributes": {}
+        }
+      ],
+      "into": "svc:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "service",
+          "from": [
+            "svc:acme/payments/prod/api",
+            "service:acme/payments/prod/payments-api"
+          ],
+          "into": [
+            "svc:acme/payments/prod/api"
+          ]
+        }
+      }
+    },
+    {
+      "name": "missing_identifier_conflicts_with_none",
+      "about": "Only one record gives serial; the merged id is new and of the same class.",
+      "entities": [
+        {
+          "id": "host:acme/oslo/cluster-a/node-7",
+          "type": "host",
+          "attributes": {
+            "serial": "SN-1001"
+          }
+        },
+        {
+          "id": "node:acme/oslo/inventory/srv-7",
+          "type": "node",
+          "attributes": {}
+        }
+      ],
+      "into": "host:acme/oslo/cluster-a/node-7-merged",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "host",
+          "from": [
+            "host:acme/oslo/cluster-a/node-7",
+            "node:acme/oslo/inventory/srv-7"
+          ],
+          "into": [
+            "host:acme/oslo/cluster-a/node-7-merged"
+          ]
+        }
+      }
+    },
+    {
+      "name": "null_identifier_conflicts_with_none",
+      "about": "A null value counts as a missing one.",
+      "entities": [
+        {
+          "id": "host:acme/oslo/cluster-a/node-7",
+          "type": "host",
+          "attributes": {
+            "serial": "SN-1001"
+          }
+        },
+        {
+          "id": "host:acme/oslo/cluster-a/node-8",
+          "type": "host",
+          "attributes": {
+            "serial": null
+          }
+        }
+      ],
+      "into": "host:acme/oslo/cluster-a/node-7",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "host",
+          "from": [
+            "host:acme/oslo/cluster-a/node-7",
+            "host:acme/oslo/cluster-a/node-8"
+          ],
+          "into": [
+            "host:acme/oslo/cluster-a/node-7"
+          ]
+        }
+      }
+    },
+    {
+      "name": "numbers_equal_by_value",
+      "about": "1002 and 1002.0 are the same JSON number.",
+      "entities": [
+        {
+          "id": "sensor:acme/factory/line-3/temp-02",
+          "type": "sensor",
+          "attributes": {
+            "serial": 1002
+          }
+        },
+        {
+          "id": "sensor:acme/factory/line-3/t2",
+          "type": "sensor",
+          "attributes": {
+            "serial": 1002.0
+          }
+        }
+      ],
+      "into": "sensor:acme/factory/line-3/temp-02",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "sensor",
+          "from": [
+            "sensor:acme/factory/line-3/temp-02",
+            "sensor:acme/factory/line-3/t2"
+          ],
+          "into": [
+            "sensor:acme/factory/line-3/temp-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "other_attributes_may_differ",
+      "about": "version is not a unique attribute, so different values do not refuse the merge.",
+      "entities": [
+        {
+          "id": "doc:acme/payments/specs/prd-v2",
+          "type": "doc",
+          "attributes": {
+            "version": "2"
+          }
+        },
+        {
+          "id": "doc:acme/payments/specs/prd-2",
+          "type": "document",
+          "attributes": {
+            "version": "3"
+          }
+        }
+      ],
+      "into": "doc:acme/payments/specs/prd-v2",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "document",
+          "from": [
+            "doc:acme/payments/specs/prd-v2",
+            "doc:acme/payments/specs/prd-2"
+          ],
+          "into": [
+            "doc:acme/payments/specs/prd-v2"
+          ]
+        }
+      }
+    },
+    {
+      "name": "same_vendor_class",
+      "entities": [
+        {
+          "id": "x-robot:acme/factory/r12",
+          "type": "x-robot",
+          "attributes": {}
+        },
+        {
+          "id": "x-robot:acme/factory/robot-12",
+          "type": "x-robot",
+          "attributes": {}
+        }
+      ],
+      "into": "x-robot:acme/factory/r12",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "x-robot",
+          "from": [
+            "x-robot:acme/factory/r12",
+            "x-robot:acme/factory/robot-12"
+          ],
+          "into": [
+            "x-robot:acme/factory/r12"
+          ]
+        }
+      }
+    },
+    {
+      "name": "three_records",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/crm/contact/889",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345"
+          }
+        },
+        {
+          "id": "person:acme/badge/holder/12345",
+          "type": "person",
+          "attributes": {}
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "merge",
+          "class": "person",
+          "from": [
+            "person:acme/hr/employee/12345",
+            "person:acme/crm/contact/889",
+            "person:acme/badge/holder/12345"
+          ],
+          "into": [
+            "person:acme/hr/employee/12345"
+          ]
+        }
+      }
+    },
+    {
+      "name": "conflicting_unique_identifier",
+      "about": "Both records give employee_id, with different values.",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/hr/employee/777",
+          "type": "person",
+          "attributes": {
+            "employee_id": "777"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "conflicting_identifier"
+      }
+    },
+    {
+      "name": "conflict_with_the_third_record",
+      "about": "The first two agree; the third gives another employee_id.",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/crm/contact/889",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345"
+          }
+        },
+        {
+          "id": "person:acme/hr/employee/777",
+          "type": "person",
+          "attributes": {
+            "employee_id": "777"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "conflicting_identifier"
+      }
+    },
+    {
+      "name": "strings_compared_exactly",
+      "about": "Values are compared as JSON values, case-sensitively; a host normalises them before the check if it means them to match.",
+      "entities": [
+        {
+          "id": "asset:acme/factory/line-3/robot-12",
+          "type": "asset",
+          "attributes": {
+            "serial": "SN-12"
+          }
+        },
+        {
+          "id": "asset:acme/factory/line-3/r12",
+          "type": "asset",
+          "attributes": {
+            "serial": "sn-12"
+          }
+        }
+      ],
+      "into": "asset:acme/factory/line-3/robot-12",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "conflicting_identifier"
+      }
+    },
+    {
+      "name": "boolean_is_not_a_number",
+      "about": "true and 1 are different JSON values.",
+      "entities": [
+        {
+          "id": "sensor:acme/f/a",
+          "type": "sensor",
+          "attributes": {
+            "serial": 1
+          }
+        },
+        {
+          "id": "sensor:acme/f/b",
+          "type": "sensor",
+          "attributes": {
+            "serial": true
+          }
+        }
+      ],
+      "into": "sensor:acme/f/a",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "conflicting_identifier"
+      }
+    },
+    {
+      "name": "different_classes",
+      "about": "service and database are different classes.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "db:acme/payments/prod/postgres-main",
+          "type": "db",
+          "attributes": {}
+        }
+      ],
+      "into": "svc:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "incompatible_types"
+      }
+    },
+    {
+      "name": "vendor_and_taxonomy_class",
+      "about": "A vendor class is compatible only with itself.",
+      "entities": [
+        {
+          "id": "x-robot:acme/factory/r12",
+          "type": "x-robot",
+          "attributes": {}
+        },
+        {
+          "id": "asset:acme/factory/line-3/robot-12",
+          "type": "asset",
+          "attributes": {}
+        }
+      ],
+      "into": "x-robot:acme/factory/r12",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "incompatible_types"
+      }
+    },
+    {
+      "name": "different_vendor_classes",
+      "entities": [
+        {
+          "id": "x-robot:acme/factory/r12",
+          "type": "x-robot",
+          "attributes": {}
+        },
+        {
+          "id": "x-arm:acme/factory/r12",
+          "type": "x-arm",
+          "attributes": {}
+        }
+      ],
+      "into": "x-robot:acme/factory/r12",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "incompatible_types"
+      }
+    },
+    {
+      "name": "type_before_identifier",
+      "about": "Both constraints are violated; the class constraint is checked first.",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/1",
+          "type": "person",
+          "attributes": {
+            "serial": "A"
+          }
+        },
+        {
+          "id": "asset:acme/hr/badge/1",
+          "type": "asset",
+          "attributes": {
+            "serial": "B"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/1",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "incompatible_types"
+      }
+    },
+    {
+      "name": "one_record",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "too_few_entities"
+      }
+    },
+    {
+      "name": "same_record_twice",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "duplicate_id"
+      }
+    },
+    {
+      "name": "subtype_is_not_a_class",
+      "about": "employee is a subtype of person in the taxonomy, not a class or alias; an entity's type is a class.",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {
+            "employee_id": "12345",
+            "email": "kari@acme.example"
+          }
+        },
+        {
+          "id": "person:acme/hr/employee/9",
+          "type": "employee",
+          "attributes": {}
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "unknown_class"
+      }
+    },
+    {
+      "name": "id_and_type_disagree",
+      "about": "The id's class part (svc, service) and the type (database) name different classes.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "svc:acme/payments/prod/db",
+          "type": "database",
+          "attributes": {}
+        }
+      ],
+      "into": "svc:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "class_mismatch"
+      }
+    },
+    {
+      "name": "invalid_id",
+      "about": "The id has no '/' after its class.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "svc:acme",
+          "type": "svc",
+          "attributes": {}
+        }
+      ],
+      "into": "svc:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "id_class_not_in_taxonomy",
+      "about": "The id's class part, employee, is a subtype, so the id is not an id of section 7.1 under the taxonomy (as the entity id vector class_not_in_taxonomy).",
+      "entities": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "employee:acme/hr/staff/12345",
+          "type": "person",
+          "attributes": {}
+        }
+      ],
+      "into": "person:acme/hr/employee/12345",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "into_of_another_class",
+      "about": "The merged id must be of the records' class.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "service:acme/payments/prod/payments-api",
+          "type": "service",
+          "attributes": {}
+        }
+      ],
+      "into": "db:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "class_mismatch"
+      }
+    },
+    {
+      "name": "into_not_an_id",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "service:acme/payments/prod/payments-api",
+          "type": "service",
+          "attributes": {}
+        }
+      ],
+      "into": "api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "into_class_not_in_taxonomy",
+      "about": "A merged id whose class part is not in the taxonomy is not an id of section 7.1.",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        {
+          "id": "service:acme/payments/prod/payments-api",
+          "type": "service",
+          "attributes": {}
+        }
+      ],
+      "into": "nosuch:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "record_not_an_object",
+      "entities": [
+        {
+          "id": "svc:acme/payments/prod/api",
+          "type": "svc",
+          "attributes": {}
+        },
+        "svc:acme/payments/prod/web"
+      ],
+      "into": "svc:acme/payments/prod/api",
+      "unique_attributes": [
+        "serial",
+        "employee_id"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity"
+      }
+    }
+  ],
+  "split": [
+    {
+      "name": "two_new_records",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "person:acme/hr/employee/12345-b",
+          "type": "person",
+          "attributes": {
+            "employee_id": "54321"
+          }
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "split",
+          "class": "person",
+          "from": [
+            "person:acme/hr/employee/12345"
+          ],
+          "into": [
+            "person:acme/hr/employee/12345-a",
+            "person:acme/hr/employee/12345-b"
+          ]
+        }
+      }
+    },
+    {
+      "name": "alias_children_three_records",
+      "about": "node is an alias of host.",
+      "entity": {
+        "id": "host:acme/oslo/cluster-a/node-7",
+        "type": "host",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "node:acme/oslo/cluster-a/node-7a",
+          "type": "node",
+          "attributes": {}
+        },
+        {
+          "id": "host:acme/oslo/cluster-a/node-7b",
+          "type": "host",
+          "attributes": {}
+        },
+        {
+          "id": "host:acme/oslo/cluster-a/node-7c",
+          "type": "host",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "split",
+          "class": "host",
+          "from": [
+            "host:acme/oslo/cluster-a/node-7"
+          ],
+          "into": [
+            "node:acme/oslo/cluster-a/node-7a",
+            "host:acme/oslo/cluster-a/node-7b",
+            "host:acme/oslo/cluster-a/node-7c"
+          ]
+        }
+      }
+    },
+    {
+      "name": "conflicting_identifiers_are_allowed",
+      "about": "A split separates records that a unique attribute tells apart; it has no identifier constraint.",
+      "entity": {
+        "id": "asset:acme/f/robot-12",
+        "type": "asset",
+        "attributes": {
+          "serial": "SN-1"
+        }
+      },
+      "into": [
+        {
+          "id": "asset:acme/f/robot-12a",
+          "type": "asset",
+          "attributes": {
+            "serial": "SN-1"
+          }
+        },
+        {
+          "id": "asset:acme/f/robot-12b",
+          "type": "asset",
+          "attributes": {
+            "serial": "SN-2"
+          }
+        }
+      ],
+      "expect": {
+        "ok": true,
+        "lineage": {
+          "operation": "split",
+          "class": "asset",
+          "from": [
+            "asset:acme/f/robot-12"
+          ],
+          "into": [
+            "asset:acme/f/robot-12a",
+            "asset:acme/f/robot-12b"
+          ]
+        }
+      }
+    },
+    {
+      "name": "one_record",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "too_few_entities"
+      }
+    },
+    {
+      "name": "keeps_the_split_id",
+      "about": "Each record of a split gets a new id; the split id stays in lineage.",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "person:acme/hr/employee/12345-b",
+          "type": "person",
+          "attributes": {
+            "employee_id": "54321"
+          }
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "reused_id"
+      }
+    },
+    {
+      "name": "same_new_id_twice",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "duplicate_id"
+      }
+    },
+    {
+      "name": "child_of_another_class",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "org:acme/hr/team/12345",
+          "type": "org",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "incompatible_types"
+      }
+    },
+    {
+      "name": "split_record_invalid",
+      "entity": {
+        "id": "person:acme",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "person:acme/hr/employee/12345-b",
+          "type": "person",
+          "attributes": {
+            "employee_id": "54321"
+          }
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity_id"
+      }
+    },
+    {
+      "name": "child_unknown_class",
+      "about": "customer is a subtype of person, not a class.",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "person:acme/hr/employee/x",
+          "type": "customer",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "unknown_class"
+      }
+    },
+    {
+      "name": "child_id_and_type_disagree",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        {
+          "id": "org:acme/hr/employee/x",
+          "type": "person",
+          "attributes": {}
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "class_mismatch"
+      }
+    },
+    {
+      "name": "child_not_a_record",
+      "about": "A record the split gives must be an entity record, not a bare id.",
+      "entity": {
+        "id": "person:acme/hr/employee/12345",
+        "type": "person",
+        "attributes": {}
+      },
+      "into": [
+        {
+          "id": "person:acme/hr/employee/12345-a",
+          "type": "person",
+          "attributes": {}
+        },
+        "person:acme/hr/employee/12345-b"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "invalid_entity"
+      }
+    }
+  ]
+}

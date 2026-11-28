@@ -35,22 +35,11 @@ The Agent Capability Standard provides structural reliability:
 | Debug time for agent issues | 50-80% reduction |
 | Data corruption from failed workflows | Near elimination |
 | Compliance audit preparation | Automatic decision lineage |
-| Integration bugs caught pre-production | 90%+ with L3 conformance |
+| Integration bugs caught pre-production | 90%+ with the validator in CI (`--strict`) |
 
 ### Adoption Recommendation
 
-- **Start small**: Run the validator on existing workflows (1 day)
-- **Add safety**: Implement checkpoints for high-risk mutations (1 week)
-- **Expand**: Progress to full conformance as value is demonstrated (1 quarter)
-
-```mermaid
----
-title: The recommended adoption path
----
-flowchart LR
-  accDescr: Start by running the validator on existing workflows in about a day, add checkpoints for high-risk mutations in about a week, and progress to full conformance over a quarter as the value shows.
-  s1["Start small: validate existing workflows, 1 day"] --> s2["Add safety: checkpoints for high-risk mutations, 1 week"] --> s3["Expand: full conformance, 1 quarter"]
-```
+Adopt the standard in stages, from the validator in CI to a safety layer (class SL) and an executor (class EX); the [adoption guide](../docs/guides/ADOPTION.md) gives each stage's component and the check that ends it.
 
 The standard is framework-agnostic and modular. Adopt what you need; expand as complexity grows.
 
@@ -801,15 +790,17 @@ The `capability_gap_analysis` workflow:
 
 **Semantic Validation**: We validate structural correctness, not semantic correctness. A syntactically valid workflow can still do the wrong thing.
 
-**Prompt Injection**: The standard provides structure but not content filtering. Prompt injection defense requires additional runtime measures.
+**Prompt Injection**: The layers that implement Standard 1.2.0 enforce person-only approval of tool calls, destination policies and the always-ask mark, but no rule yet stops content a step reads from steering the model within what those checks allow; see [SECURITY.md §2.2.1](SECURITY.md#221-prompt-injection).
 
 ### 10.2 Future Directions
 
-**Cryptographic Checkpoints**: Sign checkpoints for tamper detection
-**Role-Based Authorization**: Restrict capability access by role
-**Automated Anomaly Detection**: Learn normal patterns and flag deviations
-**Multi-Party Approval**: Require multiple approvals for high-risk actions
-**Cross-Agent Coordination**: Protocols for agent-to-agent workflows
+The security roadmap is kept in [SECURITY.md §9.1](SECURITY.md#91-planned-enhancements), which says for each item what ships and what is planned. In summary:
+
+- **Checkpoint integrity**: shipped in part. The plugin's checkpoint records are keyed with HMAC-SHA-256, and an executor refuses a saved run whose MAC does not verify under a key the host gives; a signature that a party without the key can verify is planned.
+- **Multi-party approval**: shipped in part. `min_approvers` and an approver `role` are part of Standard 1.1.0 and 1.2.0, and the reference executor and the Standard Agents binding count distinct approvers. The SDK adapter and the plugin's hooks decide through the host's permission prompt, one person per call.
+- **Allowed capabilities per deployment**: planned. An approval `role` restricts who decides, but no layer yet refuses a call because its capability is outside a deployment's allowed set.
+- **Anomaly detection**: planned, over the audit records the layers already write.
+- **Cross-agent coordination**: shipped in part. Standard 1.2.0 defines delegation to other agents, agent manifests, quorum and sender identity ([§5.15](STANDARD-v1.2.0.md#515-delegation) to [§5.17](STANDARD-v1.2.0.md#517-sender-identity)); how a host obtains agent manifests and authenticates the parties is outside the standard.
 
 ---
 

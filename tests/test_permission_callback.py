@@ -88,16 +88,42 @@ async def test_a_stop_of_another_session_while_the_call_waits_is_f501(
     assert result.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 @pytest.mark.asyncio
 async def test_changed_arguments_that_need_a_checkpoint_are_f501(
     adapter: GroundedAgentAdapter,
 ) -> None:
     adapter.create_checkpoint(["*"], "t")
-    await pre_tool_use(adapter, "Bash", {"command": "ls"}, "b1")
+    await pre_tool_use(
+        adapter, "Bash", {"command": "ls"}, "b1", permission_mode="bypassPermissions"
+    )
     callback = adapter._make_permission_callback(_host({"command": "rm -rf x"}))
     result = await callback("Bash", {"command": "ls"}, _ctx("b1"))
     assert result.message.startswith("F501 CHECKPOINT_REQUIRED:")
     assert adapter.has_valid_checkpoint()
+
+
+@pytest.mark.usefixtures("bash_under_sandbox")
+@pytest.mark.asyncio
+async def test_changed_arguments_keep_the_boundary_the_hook_decided(
+    adapter: GroundedAgentAdapter,
+) -> None:
+    """A Bash call the PreToolUse hook gave the worst case, here because it
+    runs in `plan` (a permission mode the adapter has not checked, STANDARD
+    1.2.0 section 5.18.3), keeps that decision in the permission callback:
+    changed arguments are classified again with the boundary not holding,
+    so a read-only command the host substitutes is still the worst case,
+    and the decision, asked on other arguments, is refused."""
+    adapter.create_checkpoint(["*"], "t")
+    out = await pre_tool_use(
+        adapter, "Bash", {"command": "ls"}, "b1", permission_mode="plan"
+    )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert not adapter._bash_boundary_held("b1")
+    callback = adapter._make_permission_callback(_host({"command": "ls -la"}))
+    result = await callback("Bash", {"command": "ls"}, _ctx("b1"))
+    assert not _allowed(result)
+    assert result.message.startswith("F502 APPROVAL_REQUIRED:")
 
 
 @pytest.mark.asyncio

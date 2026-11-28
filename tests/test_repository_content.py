@@ -42,13 +42,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PRE = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
 TAKE = ROOT / "hooks" / "posttooluse_take_checkpoint.sh"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None
-    or shutil.which("bash") is None
-    or shutil.which("jq") is None
-    or shutil.which("openssl") is None,
-    reason="needs git, bash, jq and openssl",
-)
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = [
+    pytest.mark.usefixtures("bash_under_sandbox"),
+    pytest.mark.skipif(
+        shutil.which("git") is None
+        or shutil.which("bash") is None
+        or shutil.which("jq") is None
+        or shutil.which("openssl") is None,
+        reason="needs git, bash, jq and openssl",
+    ),
+]
 
 ENV = {
     "GIT_AUTHOR_NAME": "t",

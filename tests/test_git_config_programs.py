@@ -54,13 +54,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PRE = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
 TAKE = ROOT / "hooks" / "posttooluse_take_checkpoint.sh"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None
-    or shutil.which("bash") is None
-    or shutil.which("jq") is None
-    or shutil.which("openssl") is None,
-    reason="needs git, bash, jq and openssl",
-)
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = [
+    pytest.mark.usefixtures("bash_under_sandbox"),
+    pytest.mark.skipif(
+        shutil.which("git") is None
+        or shutil.which("bash") is None
+        or shutil.which("jq") is None
+        or shutil.which("openssl") is None,
+        reason="needs git, bash, jq and openssl",
+    ),
+]
 
 READS = [
     "git status",
@@ -207,12 +212,22 @@ class TestTheFixture:
         assert runs(sentinel) > after_status
 
     def test_a_post_index_change_hook_runs_on_git_status(
-        self, home: Path, tmp_path: Path
+        self, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """git status writes the index, and so runs the hook, when its
+        refresh updates an entry or when an entry's mtime is not older than
+        the index's (compared to the second where git is built without
+        USE_NSEC). a.txt is changed, so refresh never updates its entry: a
+        test that touched only a.txt saw the hook run only when the commit
+        wrote the index in the second the files were written. .gitattributes
+        is tracked and unchanged, so with other times every refresh updates
+        its entry and status writes the index. Status takes the index lock
+        only with optional locks on."""
+        monkeypatch.delenv("GIT_OPTIONAL_LOCKS", raising=False)
         project = base_repository(tmp_path / "proj")
         sentinel = tmp_path / "sentinel"
         sentinel_script(project / ".git" / "hooks" / "post-index-change", sentinel)
-        os.utime(project / "a.txt", (1_000_000_000, 1_000_000_000))
+        os.utime(project / ".gitattributes", (1_000_000_000, 1_000_000_000))
         git(project, "status")
         assert runs(sentinel) >= 1
 
@@ -708,7 +723,12 @@ class TestFiltersInAnyScope:
                 ["*"], "git stash create", metadata={"commit": COMMIT}
             )
             out = await pre_tool_use(
-                adapter, "Bash", {"command": command}, "t1", cwd=str(project)
+                adapter,
+                "Bash",
+                {"command": command},
+                "t1",
+                cwd=str(project),
+                permission_mode="bypassPermissions",
             )
             specific = out.get("hookSpecificOutput") or {}
             return (

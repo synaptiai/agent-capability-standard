@@ -54,6 +54,13 @@ python tools/validate_workflows.py --catalog examples/digital_twin_sync_loop.wor
 Validated alone, each qualified id is W607 (its catalog is not in the set),
 which fails under `--strict`.
 
+`tainted_input_gate.workflow_catalog.yaml` holds `tainted_input_summary`,
+the tainted input gate pattern of
+[Workflow Patterns §4.4](../docs/WORKFLOW_PATTERNS.md#44-tainted-input-gate-pattern):
+it summarises a retrieved page and sends the summary to a destination the
+person gave, after `constrain` has checked the outgoing message. It is in
+no catalog the site or the skills read; CI validates it in strict mode.
+
 The workflow skills run the reference catalog's workflows step by step:
 - `skills/debug-workflow/` - Diagnose and fix a bug (`debug_code_change`)
 - `skills/capability-gap-analysis/` - Identify missing capabilities (`capability_gap_analysis`)

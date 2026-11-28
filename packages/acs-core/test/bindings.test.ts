@@ -16,6 +16,7 @@ interface Fixture {
   offered?: Record<string, string | null>;
   host_actions?: { action: string; tool: string }[];
   host_takes_checkpoints?: boolean;
+  shell_tools?: Record<string, 'none' | 'declared'>;
   expect: {
     errors: { code: string; tool: string }[];
     warnings: { code: string; tool: string }[];
@@ -39,7 +40,7 @@ const pairs = (list: { code: string; location?: { tool: string }; tool?: string 
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(36);
+    expect(CASES).toHaveLength(37);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {
@@ -49,6 +50,7 @@ describe('binding fixtures', () => {
             offered: fixture.offered ?? {},
             hostActions: fixture.host_actions ?? [],
             hostTakesCheckpoints: fixture.host_takes_checkpoints ?? false,
+            shellTools: fixture.shell_tools ?? {},
           }
         : {};
     const { effective, diagnostics } = checkBindings(fixture.records, options);
@@ -278,5 +280,50 @@ describe('annotationRecord', () => {
     const loaded = checkBindings([loads]);
     expect(loaded.diagnostics).toEqual([]);
     expect(Object.hasOwn(loaded.effective, 'wipe')).toBe(true);
+  });
+});
+
+describe('tool names a plain object holds on its prototype (security round 6)', () => {
+  // `checkBindings` read the loaded bindings and the bindings known earlier
+  // with `effective[name]`, so an offered or invoked name such as
+  // `constructor`, `toString` or `__proto__` found the object's prototype:
+  // the check threw where the Python loader reports W617 or F506, and a
+  // record whose `tool` is `__proto__` set the prototype of the bindings
+  // returned instead of being among them.
+  const NAMES = ['constructor', 'toString', 'hasOwnProperty', '__proto__'];
+  const retrieve = (tool: string) => ({ tool, ontology: '2.2.0', capability: 'retrieve' });
+
+  for (const name of NAMES) {
+    it(`reports an offered, unloaded '${name}' as unbound (W617)`, () => {
+      const offered = Object.fromEntries([[name, name]]) as Record<string, string | null>;
+      const { diagnostics } = checkBindings([], { offered });
+      expect(diagnostics.map((d) => [d.code, d.location.tool])).toEqual([['W617', name]]);
+    });
+
+    it(`ties a host action to an unloaded '${name}' as F506`, () => {
+      const { diagnostics } = checkBindings([], { offered: {}, hostActions: [{ action: 'stopTool', tool: name }] });
+      expect(diagnostics.map((d) => [d.code, d.location.tool])).toEqual([['F506', name]]);
+    });
+
+    it(`loads a record whose tool is '${name}' as its own binding`, () => {
+      const { effective, diagnostics } = checkBindings([retrieve(name)]);
+      expect(diagnostics).toEqual([]);
+      expect(Object.hasOwn(effective, name)).toBe(true);
+      expect(Object.getPrototypeOf(effective)).toBe(Object.prototype);
+      expect(effective[name]?.capabilities).toEqual(['retrieve']);
+    });
+
+    it(`resolves no invokes name '${name}' among bindings known earlier that hold none (V107)`, () => {
+      const { effective, diagnostics } = checkBindings([{ ...retrieve('batch'), capability: 'invoke', invokes: [name] }], {
+        known: {},
+      });
+      expect(Object.hasOwn(effective, 'batch')).toBe(false);
+      expect(diagnostics.map((d) => d.code)).toEqual(['V107']);
+    });
+  }
+
+  it('reports an offered, loaded tool as before (control)', () => {
+    const { diagnostics } = checkBindings([retrieve('fetch')], { offered: { fetch: 'fetch', other: null } });
+    expect(diagnostics.map((d) => [d.code, d.location.tool])).toEqual([['W617', 'other']]);
   });
 });

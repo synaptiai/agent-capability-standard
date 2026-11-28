@@ -26,12 +26,19 @@ class TestBenchmarkScenarioBase:
 
     def test_all_scenarios_registered(self):
         """All scenario classes should be in SCENARIOS dict."""
-        assert len(SCENARIOS) == 5
-        assert "conflicting_sources" in SCENARIOS
-        assert "mutation_recovery" in SCENARIOS
-        assert "decision_audit" in SCENARIOS
-        assert "workflow_type_error" in SCENARIOS
-        assert "capability_gap" in SCENARIOS
+        assert set(SCENARIOS) == {
+            "conflicting_sources",
+            "mutation_recovery",
+            "decision_audit",
+            "workflow_type_error",
+            "capability_gap",
+            "explanation_faithfulness",
+            "destination_policy",
+            "secret_redaction",
+            "checkpoint_gate",
+            "grounding_gate",
+            "prompt_injection",
+        }
 
     def test_scenario_has_required_attributes(self):
         """Each scenario should have name and description."""
@@ -139,6 +146,36 @@ class TestMutationRecoveryScenario:
         assert result["data_integrity_rate"] == 1.0
         assert result["has_checkpoint"] is True
 
+    def test_ga_restores_through_checkpoint_tracker(self):
+        """The file is damaged, then put back by restore_checkpoint, whose
+        Restore reports the file restored and nothing unrestored."""
+        scenario = MutationRecoveryScenario(seed=42)
+        scenario.setup()
+        result = scenario.run_ga()
+
+        assert result["damaged_before_restore"] is True
+        assert result["restore_restored"] is True
+        assert result["restore_unrestored"] == 0
+        assert result["restore_changes_reverted"] == 1
+
+    def test_ga_does_not_recover_when_restore_fails(self, monkeypatch):
+        """Recovery counts only when the shipped restore puts the file back:
+        a restore that does nothing gives 0% recovery."""
+        from grounded_agency.state.checkpoint_tracker import CheckpointTracker
+        from grounded_agency.state.snapshots import Restore
+
+        monkeypatch.setattr(
+            CheckpointTracker,
+            "restore_checkpoint",
+            lambda self, checkpoint_id, scope=None: Restore(restored=True),
+        )
+        scenario = MutationRecoveryScenario(seed=42)
+        scenario.setup()
+        result = scenario.run_ga()
+
+        assert result["recovery_rate"] == 0.0
+        assert result["data_integrity_rate"] == 0.0
+
     def test_baseline_loses_data(self):
         """Baseline should lose data on failure."""
         scenario = MutationRecoveryScenario(seed=42, file_lines=100, failure_line=55)
@@ -186,6 +223,56 @@ class TestDecisionAuditScenario:
         result = scenario.run_ga()
 
         assert result["faithfulness"] == 1.0
+
+    def test_faithfulness_ignores_self_labels(self):
+        """A confabulated label on a faithful explanation changes nothing;
+        a reason that misstates a value is contradicted whatever its label."""
+        scenario = DecisionAuditScenario(seed=42, num_decisions=5)
+        scenario.setup()
+        decision = scenario.decisions[0]
+        actual = decision["actual_reasoning"]
+        explanation = scenario._generate_ga_explanation(decision)
+
+        labelled = {**explanation, "confabulated": True}
+        assert scenario._evaluate_faithfulness(labelled, actual)["faithfulness"] == 1.0
+
+        reason = explanation["detailed_reasons"][0]
+        criterion, rest = reason.split("=", 1)
+        value = rest.split(" ", 1)[0]
+        wrong = reason.replace(f"{criterion}={value}", f"{criterion}={value}1", 1)
+        planted = {
+            **explanation,
+            "detailed_reasons": [wrong],
+            "confabulated": False,
+        }
+        checked = scenario._evaluate_faithfulness(planted, actual)
+        assert checked["contradicted"] == 1
+        assert checked["confabulated"] is True
+
+    def test_cited_criterion_is_checked_against_values(self):
+        """A cited criterion on which the winner is behind is contradicted;
+        the criterion that decided is supported."""
+        scenario = DecisionAuditScenario(seed=42, num_decisions=20)
+        scenario.setup()
+        verdicts = set()
+        for decision in scenario.decisions:
+            actual = decision["actual_reasoning"]
+            winner = actual["winner"]
+            values = actual["criteria_values"]
+            for criterion in values[winner]:
+                explanation = {"decision": winner, "cited_criterion": criterion}
+                (verdict,) = scenario._check_claims(explanation, actual)
+                behind = values[winner][criterion] <= max(
+                    v[criterion] for o, v in values.items() if o != winner
+                )
+                if behind:
+                    assert verdict == "contradicted"
+                elif criterion == scenario._primary_criterion(actual):
+                    assert verdict == "supported"
+                else:
+                    assert verdict == "unsupported"
+                verdicts.add(verdict)
+        assert verdicts == {"supported", "unsupported", "contradicted"}
 
 
 class TestWorkflowTypeErrorScenario:

@@ -1,7 +1,7 @@
 # Standard Agent Specification to Agent Capability Standard mapping: index
 # Summary and method: docs/integrations/standard_agents.md
 meta:
-  version: 1.0.0
+  version: 1.1.0
   date: '2026-11-14'
   description: Concept-by-concept mapping between the Agent Capability Standard and the Standard Agent
     Specification, with the passages each row rests on, and the findings about each standard that the
@@ -15,6 +15,25 @@ meta:
     repository: https://github.com/standardagents/spec
     commit: faccc8be0ba5921a8af86db2fe52283773cd1583
     types_package: '@standardagents/spec 0.45.10'
+  checked_against:
+    date: '2026-11-27'
+    agent_capability_standard:
+      standard: 1.2.0
+      ontology: 2.2.0
+      commit: 8ec818c
+    standard_agent_specification:
+      commit: f462a673297faed1f849ef1741ddda1e06b6c817
+      types_package: '@standardagents/spec 0.45.13'
+    what: 'The rows stay a record of the analysis at the versions and commits above. Each concern file lists
+      under `changes_in_1_2_0` the rows a section of Standard 1.2.0 changes, found by walking Appendix
+      D.1 to D.7 of that Standard; a row not listed is unchanged by 1.2.0. On the Standard Agent Specification
+      side, no file under content/ changed between the commit above and this one, and the passages the rows
+      quote from the published types are unchanged in 0.45.13. Outside content/, AGENTS.md, package.json,
+      public/_redirects and tests/ changed in ways no row relies on; their line numbers in the rows refer
+      to the commit above. The two findings files are kept as the same record: their refs cite the versions
+      and commits above. An `answer` or `outcome` added later cites Standard 1.2.0 or the texts under
+      tasks/standard-agents-upstream/, and a question answered later lists the 1.2.0 locations of its answer
+      after its original refs.'
   relations:
     same: The two concepts mean the same thing.
     partial: One covers part of the other.
@@ -52,6 +71,10 @@ meta:
     resolution: What was done, where, and what remains.
     concerns: The concerns whose mapping produced the finding.
     related: Findings that ask for the same change in part.
+  change_fields:
+    row: A row of the concern file.
+    sections: The Standard 1.2.0 sections that change it.
+    effect: What the sections add or settle for the row's ACS side, in one sentence.
   question_fields:
     id: Question identifier.
     question: What the text leaves open, asked so that an answer settles it.
@@ -60,6 +83,9 @@ meta:
     finding: The finding the question belongs to, when it belongs to one.
     answer: 'Agent Capability Standard questions only: how the Standard answers the question, with the
       section and the RFC decision. Absent while the question is open.'
+    outcome: 'Standard Agent Specification questions only: the drafted issue that asks the question (its
+      file under tasks/standard-agents-upstream/) and where in it. Absent while it is undecided whether
+      the question is asked on its own.'
   references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
     commit above. Other paths are in this repository at the commit above, and line numbers refer to those
     commits. The exceptions are the files this analysis added (examples/standard_agents/, schemas/interop/standard_agents_annotation.schema.json,

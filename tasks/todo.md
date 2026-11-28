@@ -210,9 +210,11 @@ adapter, the TypeScript binding, the redactors). Each round: six finders
 with distinct lenses, a deduplication against every finding seen before, an
 independent verifier per finding that tried to refute it by reproducing it
 on a clean copy, then fix batches (root cause, every implementation sharing
-the rule, a test that fails on the old code). It was to stop after two
-rounds in a row with nothing new of medium severity or worse, or after five
-rounds. Every defect, fix and test is recorded in
+the rule, a test that fails on the old code). Rounds 1 to 5 covered all of
+these layers and were to stop after two rounds in a row with nothing new of
+medium severity or worse, or after five rounds. From round 6, rounds run
+per layer group as open pull requests land, and convergence is counted per
+group (decision 23 (b)). Every defect, fix and test is recorded in
 `progress/SECURITY-LOOP.md`.
 
 | Round | Reported | New | Confirmed | High | Medium | Low |
@@ -222,16 +224,22 @@ rounds. Every defect, fix and test is recorded in
 | 3 | 28 | 22 | 20 | 2 | 15 | 3 |
 | 4 | 32 | 26 | 24 | 2 | 18 | 4 |
 | 5 | 28 | 26 | 24 | 0 | 21 | 3 |
-| **All** | 167 | 147 | 130 | 9 | 101 | 20 |
+| 6 | 7 | 6 | 4 | 0 | 3 | 1 |
+| **All** | 174 | 153 | 134 | 9 | 104 | 21 |
 
-All 130 are fixed. Every fix batch ended done, and no finding was lost or
+All 134 are fixed. Every fix batch ended done, and no finding was lost or
 left unverified.
 
-*Not converged.* The loop stopped at its five-round cap, not because it ran
-dry. Each round still confirmed about 20 medium defects, mostly in reading
-shell text the way bash or zsh reads it: quoting, expansions, locales,
-program lookup and the programs' own configuration files. Round 5 was the
-first with no high defect after verification. The pattern says the
+*Not converged.* Rounds 1 to 5 stopped at the five-round cap, not because
+they ran dry. Each of them confirmed about 20 medium defects, mostly in
+reading shell text the way bash or zsh reads it: quoting, expansions,
+locales, program lookup and the programs' own configuration files. Round 5
+was the first with no high defect after verification. Round 6 (#142) is the
+first per-group round: it covered only the Standard Agents binding and the
+TypeScript package, one reviewer ran its six lenses and reproduced each
+finding with a test, in place of six finders and a verifier per finding,
+and it confirmed 3 medium defects and 1 low, so that group has not
+converged either. The pattern of rounds 1 to 5 says the
 text-reading layers (the hooks and the Bash classifier) will keep yielding
 edge cases. The structural answer is to classify fewer forms: refuse or
 take the worst case for anything outside a small grammar, rather than model
@@ -300,13 +308,17 @@ shell grammar are not written.
 paragraphs above, the progress records, the open questions in the
 findings file and the PVC review, checked against the tree.
 1. **Upstream issues.**
-   - Check that the passages they quote from SA 0.2.0 are unchanged since
-     `78fa54c`: upstream edits 0.2.0 in place.
-   - Run `tasks/standard-agents-upstream/file-issues.sh --file` (it files
-     06 first, then 01).
-   - Add the links to the folder's README and to the integration guide.
-   - Eleven candidate findings are not drafted, and SA-Q01 to SA-Q30 have
-     no answer.
+   - Done: the quoted passages were checked against upstream `f462a67` on
+     2026-11-27 (#139); the eleven candidate findings are in texts 01, 02
+     and the new 10 to 12, and 20 of SA-Q01 to SA-Q30 name the text that
+     asks them (#140).
+   - Open: the maintainer decides whether SA-Q05, Q08, Q15, Q17, Q18, Q19,
+     Q23, Q27, Q28 and Q30 are asked on their own, and from which account
+     the issues are filed.
+   - On the day of filing: re-check upstream `content/`, pin the links to
+     `main`'s head (folder README, Filing), run
+     `tasks/standard-agents-upstream/file-issues.sh --file` (06 first, then
+     01), and add the links to the folder's README and the integration guide.
 2. **Release 3.0.0.**
    - Versions: `plugin.json`, `pyproject.toml` and `__version__` (0.1.0;
      the foundation design planned 0.2.0), and both `CITATION.cff` files
@@ -320,7 +332,11 @@ findings file and the PVC review, checked against the tree.
      step that fails, a version-1 restore), which are already in Upgrading.
    - Close issue #77, which the Candidate delivers; #83 stays open for Go
      and Java.
-3. **ACS-Q10** (attendance of a thread no trigger started) is open.
+3. **ACS-Q10** (attendance of a thread no trigger started): answered as
+   guidance in the two guides and the findings file (#152). Open: whether
+   the rule (attended when a person can answer within the request's
+   `expires`) becomes a requirement, a candidate for a 1.3 RFC alongside
+   the RFC questions of #151.
 4. **npm:** a tag `acs-core-v0.1.0` on main, with `NPM_PUBLISH_ENABLED` and
    `NPM_TOKEN` set; otherwise the job is a dry run. The site's deploy has
    the same kind of gate (`SITE_DEPLOY_ENABLED` and the Cloudflare
@@ -333,13 +349,16 @@ findings file and the PVC review, checked against the tree.
    - Audit-log integrity needs a witness kept out of the agent's reach
      (`verify_audit_log.py --witness`), which a deployment must set up.
 7. **The PVC review's actions:** 33 P1 and 25 P2.
-8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer implements them.
+8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer merges or splits
+   entities. SECURITY.md §1.4 states the merge constraints as a requirement
+   on hosts (PVC action ASSUR-601-D). RFC-0012, a Draft for Standard 1.3.0,
+   proposes §7.3 as checks with vectors and §7.2 as informative; the status
+   line of Standard 1.2.0 still says §7.2 and §7.3 are not implemented.
 9. **Smaller items.**
-   - The Astro advisory in `site/package-lock.json`.
    - The margins of the figure-gap runs.
    - The three workflows the digital-twin example copies.
    - The RFCs' open questions; RFC-0002 is still a Draft.
-   - The 319-row mapping is dated against 1.1.0.
+   - The 319-row mapping: done. The rows stay a 1.1.0 record, and each concern file lists the rows Standard 1.2.0 changes (#154).
    - Default redaction leaves an S3 presigned URL's `X-Amz-Signature`.
 
 ## Round 2: fix our side, pull request, merge

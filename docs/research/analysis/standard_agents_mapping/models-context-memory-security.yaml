@@ -2,6 +2,82 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: models-context-memory-security
 title: Models, context, memory, profiles and security
+changes_in_1_2_0:
+- row: models-02
+  sections: '§5.15, §5.17'
+  effect: 'Model families are derived from the model identifier by one rule, and `model_id` is added.'
+- row: context-01
+  sections: '§3.1, §5.20'
+  effect: 'Grounding is defined, and F505 is raised under `grounding@1`.'
+- row: context-02
+  sections: '§6.3, §6.4'
+  effect: 'Retention applies to the store, and audit records are specified.'
+- row: context-04
+  sections: '§4.1.1, §6.5'
+  effect: 'Every contract declares `confidence`, `inference_method` and `uncertainty`, and anchors are one
+    type.'
+- row: perceive-03
+  sections: '§5.13.1'
+  effect: '`receive` items can carry `inquiry_id` and `answers`.'
+- row: remember-01
+  sections: '§4.5, §6.7'
+  effect: '`persist` and `recall` gain `scope`, a `ttl` grammar, `stored_at` and `expires_at`; a `persist`
+    of a secret is refused.'
+- row: remember-02
+  sections: '§4.5'
+  effect: 'Memory scopes and their lifetimes are defined, with host guarantees.'
+- row: modality-01
+  sections: '§6.5'
+  effect: 'Anchor kinds are defined, with vendor kinds.'
+- row: modality-02
+  sections: '§5.2.4'
+  effect: 'Step `domain` values are domain ids with a host selection rule.'
+- row: profile-01
+  sections: '§5.21'
+  effect: 'Domain profiles are normative: hosts, safety layers and validators apply them.'
+- row: profile-02
+  sections: '§5.21.3'
+  effect: '`risk_thresholds` raise `requires_approval` by risk, and `require_human` and `block_autonomous`
+    require a person.'
+- row: profile-03
+  sections: '§5.21.3'
+  effect: '`checkpoint_policy` keys are `*` or capability ids, and the policy raises `requires_checkpoint`
+    by risk.'
+- row: profile-04
+  sections: '§5.21.3'
+  effect: '`evidence_policy` tightens evidence and confidence for the steps it covers.'
+- row: profile-05
+  sections: '§5.21, §8.1, §8.3'
+  effect: 'A profile replaces trust weights, and the trust score is defined by its formula.'
+- row: secrets-01
+  sections: '§6.7'
+  effect: 'Secrets have normative rules: never in evidence, records, diagnostics, traces or persisted
+    memory, with redaction and its marker.'
+- row: secrets-02
+  sections: '§4.4.2, §5.21.3'
+  effect: 'Destination policies and a profile''s `allowed_destinations` bound where `send` may transmit.'
+- row: secrets-03
+  sections: '§5.15.2'
+  effect: '`read_only` is refused where the host cannot enforce it, and fails unattested in a 1.2
+    delegation.'
+- row: security-02
+  sections: '§5.18.8'
+  effect: 'A safety layer that cannot classify, read its records or complete a check fails closed (R407).'
+- row: identity-01
+  sections: '§5.17'
+  effect: 'Approver identities are checked against the requested kind and role.'
+- row: hooks-01
+  sections: '§5.18'
+  effect: 'Safety checks over tool calls are specified for safety layers.'
+- row: ground-01
+  sections: '§3.1, §6.5'
+  effect: 'An anchor grounds a claim only if its producer had the evidence.'
+- row: identity-02
+  sections: '§5.17'
+  effect: '`agent_identity` gains `model_id`.'
+- row: portability-01
+  sections: '§6.4'
+  effect: 'A capture failure is never silent, and required capture is declared.'
 rows:
 - id: models-01
   relation: sa_only

@@ -84,6 +84,42 @@ record already has `user_id` for its owner, and of creating a thread it says:
 caller. The request **MUST NOT** be able to name a different owner."
 ([§6](https://standardagentspec.org/0.2.0/specification/threads/client-api#6-creating-a-thread))
 
+### The same guarantee for a child's messages to its parent
+
+A child's completion, failure and `notifyParent` content are queued into the
+parent "on the **owning side's perspective**", which is `user` for a
+side-A-owned relationship
+([Subagents §2.1](https://standardagentspec.org/0.2.0/specification/subagents#21-the-owning-side)),
+the role of a client's message. The record's `subagent_id` is the "Subagent
+reference UUID associated with the message"
+([Messages §1](https://standardagentspec.org/0.2.0/specification/threads/messages#1-message-structure)),
+but no rule says when the runtime sets it, and nothing keeps a writer from
+setting it: the record `before_create_message` returns "**MUST** be used for
+insertion"
+([Hooks §4.1](https://standardagentspec.org/0.2.0/specification/hooks#41-before_create_message)).
+`metadata.subagent_id` is an optional convention
+([Subagents §6.5](https://standardagentspec.org/0.2.0/specification/subagents#65-provenance-metadata)),
+and `metadata` "may include runtime status markers such as `status_kind`"
+(Messages §1) with no values given. Code in the parent therefore cannot
+tell a child's report from typed input, or a child that stopped from one
+that failed
+([Subagents §6.2](https://standardagentspec.org/0.2.0/specification/subagents#62-child--parent-completion-and-failure)),
+without parsing the message text.
+
+The same rule as for `user_id` would close this:
+
+- On a message the runtime generates from a child (completion, failure,
+  `notifyParent` content), the runtime **MUST** set `subagent_id` to the
+  child's reference. Nothing else sets it: it is not settable through any
+  input type, the send route or the value a message hook returns, as for
+  `user_id` above.
+- The text states how `subagent_id` relates to `metadata.subagent_id`, and
+  defines the values of `metadata.status_kind` that tell a stop from a
+  failure.
+
+With both fields, code can tell a client's message, a child's report and
+every other message apart.
+
 ### What this does not ask for
 
 The Agents page says: "The specification deliberately does **not** define who
@@ -139,4 +175,7 @@ that expose the Thread Client API in the version that adds it. Checks: a
 message accepted through the send route has the caller's id; messages created
 by `queueMessage()` and `injectMessage()`, by `subagent_message`, and by a
 child's completion have `null`; no input type and no message hook can set or
-change it.
+change it. For a child's messages to its parent: a completion, a failure and
+`notifyParent` content carry the child's `subagent_id`, every other message
+has `null` there unless the runtime relates it to a child, and no input type
+and no message hook can set or change it.

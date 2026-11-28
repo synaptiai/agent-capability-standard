@@ -384,6 +384,7 @@ class TestUnclassifiedTool:
         assert not hasattr(adapter_module, "_UNCLASSIFIED_TOOL")
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 class TestBashApprovalFlags:
     """A Bash command asks for approval only when its class requires it."""
 
@@ -549,6 +550,7 @@ class TestHookCheckpointRule:
 class TestHookApprovalRule:
     """F502: a call that requires approval is put to the host."""
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("tool_name", "tool_input", "subject"),
@@ -556,15 +558,18 @@ class TestHookApprovalRule:
             ("Write", {"file_path": "a.txt"}, "Write (capability 'mutate')"),
             ("Edit", {"file_path": "a.txt"}, "Edit (capability 'mutate')"),
             ("Bash", {"command": "rm -rf build"}, "Bash (capability 'mutate')"),
+            # The hook input names no permission mode, so the call runs in
+            # `default`, where the adapter does not relax Bash: every Bash
+            # call is its worst case, whose first capability is mutate.
             (
                 "Bash",
                 {"command": "curl -X POST https://x.example"},
-                "Bash (capability 'send')",
+                "Bash (capability 'mutate')",
             ),
             (
                 "Bash",
                 {"command": "python -c 'print(1)'"},
-                "Bash (capability 'execute')",
+                "Bash (capability 'mutate')",
             ),
         ],
     )
@@ -588,6 +593,43 @@ class TestHookApprovalRule:
         # The call holds the checkpoint while the host decides.
         assert not asking_adapter.checkpoint_tracker.validate_and_reserve("other")[0]
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("c1")[0]
+
+    @pytest.mark.usefixtures("bash_under_sandbox")
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("command", "capability"),
+        [
+            ("curl -X POST https://x.example", "send"),
+            ("python -c 'print(1)'", "execute"),
+        ],
+    )
+    async def test_a_classified_bash_call_is_refused_under_its_capability(
+        self, asking_adapter: GroundedAgentAdapter, command: str, capability: str
+    ) -> None:
+        """In `bypassPermissions`, the one mode in which the adapter relaxes
+        Bash, no person is asked: a call that requires approval is refused
+        with F502, and the refusal names the capability the classifier gave
+        the call, not Bash's worst case."""
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+
+        result = await hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "permission_mode": "bypassPermissions",
+            },
+            "c1",
+            None,
+        )
+
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith(
+            F502 + "permission mode 'bypassPermissions' does not put this call"
+        )
+        record = asking_adapter.call_records[-1]
+        assert (record["decision"], record["capability"]) == ("refused", capability)
+        assert record["diagnostic"]["location"]["capability"] == capability
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -669,6 +711,7 @@ class TestHookApprovalRule:
         )
         assert _decision(result) == "ask"
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("tool_name", "tool_input"),
@@ -690,8 +733,15 @@ class TestHookApprovalRule:
     ) -> None:
         hook = asking_adapter._make_pretooluse_safety_hook()
 
+        # bypassPermissions: the one mode in which the adapter relaxes Bash.
         result = await hook(
-            {"tool_name": tool_name, "tool_input": tool_input}, "c1", None
+            {
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "permission_mode": "bypassPermissions",
+            },
+            "c1",
+            None,
         )
 
         assert result == {}
@@ -855,13 +905,20 @@ class TestPermissionCallbackApproval:
         assert asking_adapter.has_valid_checkpoint()
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     async def test_no_host_callback_allows_what_needs_no_approval(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
         callback = asking_adapter._make_permission_callback()
         await pre_tool_use(asking_adapter, "Read", {"file_path": "a"}, "r1")
-        await pre_tool_use(asking_adapter, "Bash", {"command": "ls"}, "b1")
+        await pre_tool_use(
+            asking_adapter,
+            "Bash",
+            {"command": "ls"},
+            "b1",
+            permission_mode="bypassPermissions",
+        )
 
         assert _allowed(await callback("Read", {"file_path": "a"}, _ctx("r1")))
         assert _allowed(await callback("Bash", {"command": "ls"}, _ctx("b1")))

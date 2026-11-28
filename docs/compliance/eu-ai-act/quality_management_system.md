@@ -146,7 +146,7 @@ flowchart TB
 | Market surveillance authority communication | Serious incident reporting procedure; corrective action reporting | EUAIA-PMM-001 Section 7 |
 | Notified body interaction | Conformity assessment routing; documentation provision | EUAIA-NTB-001 Section 6 |
 | Deployer communication | Deployer notification at L2+ escalation levels | EUAIA-PMM-001 Section 6.1 |
-| Stakeholder communication | Stakeholder analysis with communication requirements | AIMS-STK-001 (stakeholder analysis) |
+| Stakeholder communication | Stakeholder analysis with communication requirements | AIMS-CTX-001 (stakeholder analysis) |
 | EU database registration | Technical documentation and declaration for Art. 49 registration | EUAIA-TEC-001, Art. 47 declaration |
 
 **ISO 42001 Cross-Reference:** Clause 7.4 (Communication), Annex A.6 (Communication)
@@ -207,7 +207,7 @@ flowchart TB
 | (e) Risk management | 6.1, Annex A.2, A.7 | AIMS-RSK-001 | EUAIA-CLS-001 |
 | (f) Post-market monitoring | 9.1, 10.1 | — | EUAIA-PMM-001 |
 | (g) Incident reporting | 10.1, 10.2 | AIMS-NCR-001 | EUAIA-PMM-001 (Section 7) |
-| (h) Communication with authorities | 7.4, Annex A.6 | AIMS-STK-001 | EUAIA-NTB-001 |
+| (h) Communication with authorities | 7.4, Annex A.6 | AIMS-CTX-001 | EUAIA-NTB-001 |
 | (i) Record keeping | 7.5, Annex A.3 | — | EUAIA-TEC-001, EUAIA-PMM-001 (Section 9) |
 | (j) Resource management | 7.1, 7.2, Annex A.3 | AIMS-CMP-001 | — |
 | (k) Accountability framework | 5.1, 5.3 | AIMS-CMP-001, AIMS-MGR-001 | EUAIA-PMM-001 (Section 6) |

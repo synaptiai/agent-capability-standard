@@ -42,6 +42,11 @@ export interface LintDiagnostic {
 
 type Tools = Record<string, { annotations?: Record<string, unknown> }>;
 
+/** Set `record[key]` as an own member: a tool may be named `__proto__`. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /**
  * The binding records the offered tools carry, what each offered name
  * carries (the record of the name the tool states, its `tool`, or null for
@@ -69,12 +74,12 @@ function recordsOf(tools: Tools): {
       name;
     const record = annotationRecord(stated, annotation);
     if (!record) {
-      offered[name] = null;
+      setOwn(offered, name, null);
       continue;
     }
-    offered[name] = stated;
+    setOwn(offered, name, stated);
     const computed = computedFlags(tool);
-    if (computed !== undefined) raised[stated] = Object.hasOwn(raised, stated) ? joinFlags(raised[stated]!, computed) : computed;
+    if (computed !== undefined) setOwn(raised, stated, Object.hasOwn(raised, stated) ? joinFlags(raised[stated]!, computed) : computed);
     if (!seen.has(stated)) {
       seen.add(stated);
       records.push(record);
@@ -84,7 +89,9 @@ function recordsOf(tools: Tools): {
 }
 
 function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
-  const annotation = tools[name]?.annotations?.[ANNOTATION_KEY] as { capability?: unknown } | undefined;
+  const annotation = (Object.hasOwn(tools, name) ? tools[name]?.annotations?.[ANNOTATION_KEY] : undefined) as
+    | { capability?: unknown }
+    | undefined;
   return typeof annotation?.capability === 'string' ? (annotation.capability as CapabilityId) : undefined;
 }
 
@@ -99,8 +106,11 @@ function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
  * - A tool whose capability `requires` another, or needs a checkpoint, when
  *   the prompt offers no tool of that capability, is V102 (error): the model
  *   could never get the call accepted. A host that takes checkpoints itself
- *   (`hostTakesCheckpoints`), or an offered tool whose binding names a
- *   `classifier`, counts as performing it.
+ *   (`hostTakesCheckpoints`) counts as performing `checkpoint`. A tool whose
+ *   binding names a `classifier` performs only its own capability: this
+ *   binding applies no classifier and gives such a tool its worst case, as
+ *   §5.18.2 states for a shell-like tool with no declared operating-system
+ *   boundary, so it is passed to the check as such a tool.
  *
  * A tool defined here is checked with the flags it computed, those its
  * domain profiles and the layer's raise included (§5.21.3), which its
@@ -112,11 +122,14 @@ export function lintPromptTools(
   options: { hostTakesCheckpoints?: boolean } = {},
 ): LintDiagnostic[] {
   const { records, offered, raised } = recordsOf(tools);
+  // No classifier is applied: every offered tool performs only its worst case.
+  const shellTools = Object.fromEntries(Object.keys(offered).map((name) => [name, 'none' as const]));
   const { diagnostics } = checkBindings(records, {
     offered,
     raised,
     hostActions: [],
     hostTakesCheckpoints: options.hostTakesCheckpoints ?? false,
+    shellTools,
   });
   return diagnostics
     .filter((d): d is BindingDiagnostic & { code: 'V102' | 'W617' | 'V111' } => ['V102', 'W617', 'V111'].includes(d.code))
@@ -172,7 +185,7 @@ export function lintAgentBindings(
       .map(([action, tool]) => ({ action, tool }));
     if (hostActions.length === 0) continue;
     const named: Record<string, string | null> = { ...offered };
-    for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) named[tool] = null;
+    for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) setOwn(named, tool, null);
     const { diagnostics } = checkBindings(records, { offered: named, hostActions, raised });
     for (const d of diagnostics) {
       if (d.code !== 'F506') continue;

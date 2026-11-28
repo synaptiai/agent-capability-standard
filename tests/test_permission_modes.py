@@ -87,6 +87,7 @@ async def test_no_mode_in_the_input_falls_back_to_the_options(
     assert _decision(await hook(_write(None), "w2", None)) == "deny"
 
 
+@pytest.mark.usefixtures("bash_under_sandbox")
 @pytest.mark.asyncio
 async def test_a_call_needing_no_approval_is_not_affected(
     asking: GroundedAgentAdapter,

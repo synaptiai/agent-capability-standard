@@ -29,10 +29,14 @@ concurrency:
   group: site-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Each job's timeout-minutes is at least twice its slowest recent run and never
+# under 15 minutes, so a hung runner is cut off instead of held for GitHub's
+# default of 360 minutes.
 jobs:
   build:
     name: Build the site
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: site
@@ -57,6 +61,14 @@ jobs:
       # allowed here on purpose.
       - name: Install dependencies
         run: npm ci --ignore-scripts
+
+      # Warns, and never fails: an advisory published upstream must not stop
+      # the build or the deploy of main. A run with advisories shows one warning
+      # annotation that names the vulnerable packages, and the run summary lists
+      # them; a run where the audit cannot run shows a warning that says why.
+      # Dependabot alerts report advisories as well.
+      - name: Report npm advisories
+        run: node scripts/report-audit.mjs
 
       - name: Type-check and check the design data
         run: npm run check
@@ -98,6 +110,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SITE_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: production
       url: https://acs.synapti.ai

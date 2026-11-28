@@ -43,6 +43,10 @@ from grounded_agency.capabilities.mapper import ToolCapabilityMapper, ToolMappin
 from grounded_agency.capabilities.registry import CapabilityRegistry
 from tests.conftest import _git, missing_objects
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = pytest.mark.usefixtures("bash_under_sandbox")
+
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
 POLICY = ["https://hooks.example.com/*"]

@@ -2,6 +2,65 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: packaging-conformance-governance
 title: Packaging, versions, diagnostics, conformance and governance
+changes_in_1_2_0:
+- row: pkg-06
+  sections: '§5.1.1, §5.21'
+  effect: 'Catalog manifests are added, and domain profiles are loaded and applied by hosts, safety layers
+    and validators (`profile_schema.yaml` 1.0.0).'
+- row: pkg-08
+  sections: '§5.18.5'
+  effect: '`requires` is also checked over calls by safety layers.'
+- row: pkg-09
+  sections: '§5.18'
+  effect: 'Safety layers over calls are specified.'
+- row: naming-01
+  sections: '§5.1.1, Appendix B'
+  effect: 'Workflow names should be identifiers (W620), and `x-acs-` is reserved.'
+- row: naming-02
+  sections: '§5.1.1'
+  effect: 'Catalog sets and qualified workflow ids add a namespace for workflows.'
+- row: naming-03
+  sections: '§2'
+  effect: 'Terms are added: tool-calling host, call, tool binding, safety layer, executor, host, run,
+    action, agent manifest, catalog manifest, domain profile, among others.'
+- row: disc-03
+  sections: '§5.15.1'
+  effect: 'Agent manifests are a normative way to declare what an agent may do.'
+- row: ver-01
+  sections: '§11.6, §11.7'
+  effect: 'How the ontology is versioned and cited, and the artifacts of a version, are stated.'
+- row: ver-02
+  sections: '§11.5'
+  effect: '1.0, 1.1 and 1.2 are supported, W616 covers a feature newer than the target, and the catalog
+    header is an explicit start value.'
+- row: ver-05
+  sections: 'Appendix D'
+  effect: 'Standard 1.2.0 records its changes from 1.1.0 in Appendix D, one section per accepting RFC.'
+- row: diag-01
+  sections: '§9.8'
+  effect: 'Every location key is defined, with `path` and `catalog`, and locations for findings about
+    profiles and tools.'
+- row: diag-02
+  sections: '§9, §9.1'
+  effect: 'Codes are added (V110, V111, R407, R408, F506, W617 to W626), and implementation-defined codes
+    keep out of the standard form.'
+- row: diag-03
+  sections: '§5.18.8, §9'
+  effect: 'Safety layers raise the same codes over calls, and F506 and R407 are added.'
+- row: diag-04
+  sections: '§5.19.5'
+  effect: 'A cancelled run ends with R408.'
+- row: conf-01
+  sections: '§10.4, §10.5'
+  effect: 'Conformance classes SL (safety layers) and EX (executors) are added beside the validator
+    levels.'
+- row: conf-02
+  sections: '§10.3, §10.4'
+  effect: 'Trigger, grounding, trust, profile, entity id and digest vectors are normative, and binding and
+    call-sequence fixtures are added.'
+- row: gov-02
+  sections: '§11.5'
+  effect: 'Versions 1.0, 1.1 and 1.2 are supported, and 1.2.0 is the Candidate Standard.'
 rows:
 - id: pkg-01
   relation: fits

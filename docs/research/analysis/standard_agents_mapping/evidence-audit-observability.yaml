@@ -2,6 +2,99 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: evidence-audit-observability
 title: Evidence, provenance, audit and observability
+changes_in_1_2_0:
+- row: anchors-01
+  sections: '§4.1.1, §6.5'
+  effect: 'Every output contract declares the common output fields, and `evidence_anchors` items are
+    anchors of one defined type.'
+- row: anchors-02
+  sections: '§6.5'
+  effect: 'One `Anchor` type with `digest`, the kind `record` and vendor kinds is shared by outputs,
+    events and records.'
+- row: anchors-03
+  sections: '§6.6'
+  effect: 'Evidence records and stores are specified: what a store keeps and states.'
+- row: anchors-04
+  sections: '§6.5'
+  effect: 'The `acs:` ref scheme is defined.'
+- row: collect-01
+  sections: '§6.6, §5.20'
+  effect: 'Evidence stores are specified, and with `grounding@1` a host reports the evidence a producer
+    saw (`evidence_seen`).'
+- row: collect-02
+  sections: '§6.4, §6.7'
+  effect: 'Action records carry `tool`, `call_id` and `details`, and secrets are replaced before anything
+    is recorded.'
+- row: collect-03
+  sections: '§6.4'
+  effect: 'Capture is required or best effort as declared, and a capture failure is never silent.'
+- row: store-01
+  sections: '§6.6'
+  effect: 'What an evidence store keeps and states is specified, with the optional `acs.evidence_recorded`
+    notification.'
+- row: audit-01
+  sections: '§6.4'
+  effect: '`audit` records its event in a record of its own, with `require_record` and the output `record`
+    (ontology 2.2.0).'
+- row: audit-02
+  sections: '§6.4, §4.4.1'
+  effect: 'Action records carry `prev_hmac` and `hmac`, and a rollback never restores records.'
+- row: retention-01
+  sections: '§6.3'
+  effect: '`retention_policy` applies to the store the records are written to, and `audit.retention` is a
+    duration (W614 otherwise).'
+- row: audit-03
+  sections: '§6.4, §5.19.8'
+  effect: 'The record mode `actions` and the run record every host keeps are specified.'
+- row: audit-04
+  sections: '§8.4, §6.4'
+  effect: 'Manual trust overrides are specified, and `require_record` makes a step depend on its record.'
+- row: action-01
+  sections: '§6.4'
+  effect: '`ActionRecord` gains `run_id`, `frame`, `step`, `capability`, `tool`, `call_id`,
+    `checkpoint_id`, `code`, `reason_code`, `details`, `recorded_by`, `prev_hmac`, `hmac` and the status
+    `cancelled`.'
+- row: prov-01
+  sections: '§6.5'
+  effect: 'Anchors in provenance are the shared `Anchor` type.'
+- row: prov-03
+  sections: '§8.1, §8.3'
+  effect: 'The trust score is defined by a formula, and evidence without a static weight has no score.'
+- row: prov-04
+  sections: '§5.20'
+  effect: 'With `grounding@1`, an `invoke` step carries its nested run''s anchors.'
+- row: trust-01
+  sections: '§8.1, §8.2, §8.4'
+  effect: 'The trust score is `weight × confidence × decay`, the conflict strategies are defined with a
+    default, and manual overrides are specified.'
+- row: trust-02
+  sections: '§4.1.1'
+  effect: '`confidence` is defined, and events and the world state share one `Uncertainty`.'
+- row: trust-03
+  sections: '§3.1, §5.20'
+  effect: 'Grounding is defined, and F505 is raised under `grounding@1` and can fire a failure mode.'
+- row: policy-01
+  sections: '§5.21.3'
+  effect: 'An applied profile tightens evidence and confidence requirements.'
+- row: transform-01
+  sections: '§6.2, §6.7'
+  effect: 'A canonical event''s `raw` is unmodified except that each secret is replaced.'
+- row: events-01
+  sections: '§6.2, §6.5'
+  effect: '`raw` has secrets replaced, events may record `redactions`, and anchors are the shared type.'
+- row: events-02
+  sections: '§6.6'
+  effect: 'The optional `acs.evidence_recorded` notification is a defined evidence event.'
+- row: provider-01
+  sections: '§6.5'
+  effect: 'Anchor kinds are defined, with vendor kinds.'
+- row: privacy-01
+  sections: '§6.7'
+  effect: 'Rules on secrets are normative: redaction, its marker, and secrets never in evidence, records,
+    diagnostics, traces or persisted memory.'
+- row: entity-01
+  sections: '§7.1'
+  effect: 'Entity ids take the taxonomy''s form `<class>:<namespace>/<local_id>`.'
 rows:
 - id: anchors-01
   relation: acs_only
