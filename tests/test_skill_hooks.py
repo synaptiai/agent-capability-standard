@@ -1922,9 +1922,13 @@ class TestPersistCommandHook:
             }
             return edit, write
 
+        # BSD grep (macOS) reads about ten times slower than GNU grep, and a
+        # busy runner took over 30 s for the 64 000 lines there
+        limit = 30 if GNU_GREP else 300
+
         def seconds_of(call: dict[str, Any]) -> float:
             started = time.monotonic()
-            result = run_command(hook, call, tmp_path, shell)
+            result = run_command(hook, call, tmp_path, shell, timeout=limit)
             assert result.returncode == 0, result.stderr
             return time.monotonic() - started
 

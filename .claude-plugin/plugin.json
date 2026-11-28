@@ -18,5 +18,22 @@
     "generation",
     "agentic"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "mcpServers": {
+    "remote": {
+      "command": "/usr/bin/env",
+      "args": [
+        "-u",
+        "DEVELOPER_DIR",
+        "-u",
+        "TOOLCHAINS",
+        "-u",
+        "SDKROOT",
+        "/usr/bin/python3",
+        "-I",
+        "${CLAUDE_PLUGIN_ROOT}/grounded_agency/remote_writes.py",
+        "serve"
+      ]
+    }
+  }
 }

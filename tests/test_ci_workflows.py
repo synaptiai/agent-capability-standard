@@ -9,7 +9,8 @@ pushed tag (release.yml's guard), checks out the tag and refuses one whose
 commit is not on `main`, and that every job that builds the WebAssembly
 module names the toolchain that has the wasm32 target. It also checks that
 each script a CI step runs can import what it needs from what its job has
-installed by then.
+installed by then, and that only a pull request's superseded runs are
+cancelled.
 """
 
 from __future__ import annotations
@@ -49,6 +50,22 @@ def test_every_job_has_a_time_limit() -> None:
         for name, job in doc["jobs"].items():
             limit = job.get("timeout-minutes")
             assert isinstance(limit, int) and limit >= 15, name
+
+
+def test_only_a_pull_requests_superseded_runs_are_cancelled() -> None:
+    """A pull request's runs share a group keyed on its ref, so a newer push
+    cancels the older run. Any other run gets a group of its own (keyed on
+    its run id): a group holds one pending run and a newer run cancels it even
+    when `cancel-in-progress` is false, so pushes to main sharing a group
+    would lose the CI result of a commit merged between two others."""
+    concurrency = CI["concurrency"]
+    assert concurrency["cancel-in-progress"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
+    assert concurrency["group"] == (
+        "ci-${{ github.event_name == 'pull_request' && github.ref"
+        " || github.run_id }}-${{ github.event_name }}"
+    )
 
 
 def test_publish_uses_cis_toolchain() -> None:
