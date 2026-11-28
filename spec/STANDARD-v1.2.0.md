@@ -4399,8 +4399,8 @@ reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
 **Binding fixtures.** Each fixture holds an `ontology` version, `records`,
 optionally `needs`, `offered` (each name the host offers a tool under,
 mapped to the `tool` of the record it carries, or null), `host_actions`
-(each an `action` and a `tool`) and `host_takes_checkpoints` (default
-false), and `expect`: the exact lists of error and warning codes, each
+(each an `action` and a `tool`), `host_takes_checkpoints` (default
+false) and `shell_tools` (as in a statement), and `expect`: the exact lists of error and warning codes, each
 with the tool it names, in any order, and the effective flags of each
 loaded record. A layer
 passes a fixture when it reports exactly those diagnostics and computes

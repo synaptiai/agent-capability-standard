@@ -339,7 +339,8 @@ reference layers run every fixture whose `needs` their statement supports:
 | Standard Agents binding (`examples/standard_agents/`) | `standard_agents_binding.json` | `packages/acs-core/test/bindings.test.ts`, `examples/standard_agents/test/calls.test.ts` |
 
 To run a new layer against them: load each binding fixture's `records`
-(and, with `offered_tools`, check its `offered` tools and `host_actions`) and
+(and, with `offered_tools`, check its `offered` tools and `host_actions`,
+taking its `shell_tools` as a statement's) and
 compare the diagnostics, as code and tool pairs in any order, and the
 effective flags of the records that loaded; play each call fixture's
 `sequence` in one scope, recording decisions before a call that has

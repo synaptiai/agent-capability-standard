@@ -149,8 +149,9 @@ here and marked so.
   sandbox is verified, and a Bash call it gave the worst case takes no
   checkpoint when it reports back, even where the sandbox is verified by
   then. An allowlist entry the setup command would not list (a
-  trailing-dot or hex form of a local address, a wildcard such as `*.*`)
-  leaves the sandbox unverified. Where the options carry no sandbox of their own,
+  trailing-dot or hex form of a local address, a wildcard such as `*.*`),
+  a `metadata.` name, a port or an IPv6 literal leaves the sandbox
+  unverified. Where the options carry no sandbox of their own,
   `wrap_options()` sets a strict one: on, refusing to start when it cannot
   sandbox (`failIfUnavailable`), no unsandboxed commands, no excluded
   commands, a network allowlist of
@@ -1936,6 +1937,14 @@ here and marked so.
   §9.8 diagnostics, records that name the layer, and capability outputs on a
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
+- Offered-tool checks, `check_offered` (Python) and `checkBindings`
+  (TypeScript): a `shell_tools` (`shellTools`) argument names the layer's
+  shell-like tools as its statement does, and one with no declared
+  boundary performs only its worst case, so its `classifier` does not count
+  it as able to perform any capability (STANDARD 1.2.0 §5.18.2); binding
+  fixtures may carry `shell_tools`. The Standard Agents binding's
+  `lintPromptTools` counts a classified tool only as its own capability, since the binding applies no classifier: a prompt
+  whose only checkpoint route was a classified tool now gets V102.
 - Safety-layer conformance fixtures: 37 binding fixtures in
   `tests/conformance/bindings/` and 33 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
