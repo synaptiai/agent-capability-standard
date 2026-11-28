@@ -27,7 +27,6 @@ from tests.brace_readings import BY_VERSION, READINGS, assert_reading
 from tests.conftest import (
     BASH_4,
     GNU_GREP,
-    SHELL_SCAN_PENDING,
     assert_linear,
     enter_checkpoint_commit,
 )
@@ -346,15 +345,6 @@ class TestFrontmatterHooks:
         end = command.index("# END shell-words") + len("# END shell-words")
         assert command[start:end] == source
 
-    def test_the_pending_vectors_are_text_vectors(self) -> None:
-        """Each vector the shell scan has not yet taken is one it runs."""
-        text = {
-            v["name"]
-            for v in CREDENTIALS["vectors"]
-            if isinstance(v["input"], str) and not v["secret_values"]
-        }
-        assert SHELL_SCAN_PENDING <= text
-
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
         "vector",
@@ -379,11 +369,7 @@ class TestFrontmatterHooks:
             check=False,
         )
         assert result.returncode == 0, result.stderr
-        holds = vector["expect"]["holds"]
-        if vector["name"] in SHELL_SCAN_PENDING:
-            # The scan has not yet taken the rule this vector pins.
-            holds = not holds
-        expected = "yes" if holds else "no"
+        expected = "yes" if vector["expect"]["holds"] else "no"
         assert result.stdout.strip() == expected, vector["name"]
 
     @pytest.mark.parametrize("shell", SHELLS)
@@ -402,6 +388,14 @@ class TestFrontmatterHooks:
             "login a " * 50_000,
             "\\u0022" * 66_000,
             "a:\\/\\/b:" * 40_000,
+            # `sk-` read where a token starts, and a signed URL's signature
+            # read after `?` or `&` and stopped at `&` and `?` (#147, #148).
+            "ask-" * 100_000,
+            "&sig=" * 80_000,
+            "?sig=a%3F" * 45_000,
+            "?Signature=a%26" * 27_000,
+            "%3FX-Goog-Signature%3D" * 18_000,
+            "\\u0026sig\\u003da" * 24_000,
         ],
         ids=[
             "scheme_run",
@@ -414,6 +408,12 @@ class TestFrontmatterHooks:
             "netrc",
             "quote_escapes",
             "slash_escapes",
+            "sk_after_letters",
+            "signature_parameters",
+            "signature_stops_at_question_mark",
+            "signature_stops_at_ampersand",
+            "signature_percent_encoded",
+            "signature_json_escaped",
         ],
     )
     def test_secret_scan_reads_in_linear_time_in_a_multibyte_locale(

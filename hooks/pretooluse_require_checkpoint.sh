@@ -367,9 +367,16 @@ PERSIST_TOOLS=(TodoWrite TaskCreate TaskUpdate)
 # value the layer holds itself (secret_held).
 # The shapes of keys and tokens (the first two may hold whitespace)
 SECRET_SPACED='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
-SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+# sk- is read only where a token starts, not after an ASCII letter or digit, since its two letters end common words
+# (task-, risk-, disk-); the longer prefixes are read anywhere
+SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
 # ... and service tokens by their prefix (Stripe, Google, GitLab, npm, Vault, SendGrid) and a Slack webhook's path
 SECRET_ERE="$SECRET_ERE"'|[rs]k_(live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\.[A-Za-z0-9_-]{24,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]{16,}'
+# A signed URL's signature, read in any letter case (grep -i): the value, 16 or more characters, of an X-Amz-Signature
+# (S3 SigV4), X-Goog-Signature (Cloud Storage), sig (Azure SAS) or Signature (S3 SigV2, CloudFront) query parameter, read
+# only after ? or & (as themselves, percent-encoded or as their JSON escapes), so prose such as signature= is not read; the
+# value stops at & and ? in any of those forms (%26, %3F)
+SECRET_SIGNED='([?&]|%3F|%26|\\u00(3F|26))(x-amz-signature|x-goog-signature|sig|signature)(=|%3D|\\u003D)([A-Za-z0-9._~+/=-]|\\/|%([014-9A-F][0-9A-F]|2[0-57-9A-F]|3[0-9A-E])){16,}'
 SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
 # A quote, or an escaped one (\" in JSON text inside a JSON string)
 SECRET_Q="\\\\*[\"']"
@@ -464,6 +471,7 @@ secret_lines() (
     *'\u00'* | *'\/'*) SECRET_TEXT="$(secret_decoded "$1")" || return 0 ;;
   esac
   printf '%s' "$SECRET_TEXT" | grep -Eq -- "$SECRET_ERE" && return 0
+  printf '%s' "$SECRET_TEXT" | grep -Eiq -- "$SECRET_SIGNED" && return 0
   # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once; its
   # slashes escaped or not)
   printf '%s' "$SECRET_TEXT" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*:(\\*/){2}[^[:space:]/:@]*:[^[:space:]/@]+@' |

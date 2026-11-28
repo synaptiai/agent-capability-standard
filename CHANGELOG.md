@@ -731,7 +731,11 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   URL's signature (F504), and reads `sk-` only where a token starts, so
   text such as `feature/task-12345-update-readme-file` is no longer
   refused; the longer prefixes are refused as before, glued after a letter
-  or digit too. The plugin's shell scan is unchanged.
+  or digit too. The plugin's shell scan (`hooks/secret_scan.sh`, the
+  pre-tool-use and log hooks, the `persist` and `audit` skills) takes the
+  same two refusal rules: a `TodoWrite` holding such a slug is no longer
+  refused (F504), and one holding a signed URL's signature is, so the
+  plugin and the SDK adapter refuse the same `persist` data.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no

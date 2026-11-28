@@ -24,7 +24,6 @@ from grounded_agency import GroundedAgentAdapter
 from grounded_agency.adapter import SAFETY_HOOK_TIMEOUT_S
 from tests.conftest import (
     GNU_GREP,
-    SHELL_SCAN_PENDING,
     assert_linear,
     enter_checkpoint_commit,
 )
@@ -1220,11 +1219,7 @@ class TestShellHookPersistSecrets:
             refused = result.returncode == 2
             denied = _decision(out) == "deny"
             assert denied == v["expect"]["holds"], v["name"]
-            if v["name"] in SHELL_SCAN_PENDING:
-                # The shell scan has not yet taken the rule this vector pins.
-                assert refused != denied, (v["name"], result.stderr)
-            else:
-                assert refused == denied, (v["name"], result.stderr)
+            assert refused == denied, (v["name"], result.stderr)
 
     # Security round 5, batch 4: the scan read one line at a time, so a
     # value on the line after its name passed the hook (TodoWrite is
