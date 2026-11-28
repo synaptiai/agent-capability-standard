@@ -335,7 +335,7 @@ Build a runtime interpreter for `workflow_catalog.yaml`:
 
 Extend the current 15-category mapping to full bidirectional synchronization:
 - **Bidirectional sync** (import OASF skills, export Grounded Agency capabilities)
-- **Proposed safety extensions** adoption (per `docs/proposals/OASF_SAFETY_EXTENSIONS.md`)
+- **Proposed safety extensions** (`docs/proposals/OASF_SAFETY_EXTENSIONS.md`, a reference document; submitting it to the OASF project is a separate decision)
 - **Automated mapping validation** (detect drift between OASF versions)
 - **OASF conformance test suite** for interop validation
 - Track OASF version updates (currently mapped to v0.8.0)

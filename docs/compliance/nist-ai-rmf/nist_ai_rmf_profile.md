@@ -134,7 +134,7 @@ flowchart TB
 | **GV-1.4** — Risk management process established | Three-tier risk model structurally embedded in ontology; risk treatment plan documents controls per tier | `schemas/capability_ontology.yaml` (risk fields), `docs/compliance/iso42001/risk_treatment_plan.md` | Full |
 | **GV-1.5** — Processes for ongoing monitoring | EvidenceStore tracks tool executions; audit hooks log every tool call that runs; management review process defined | `grounded_agency/state/evidence_store.py`, `hooks/hooks.json`, `docs/compliance/iso42001/management_review.md` | Full |
 | **GV-1.6** — Mechanisms for inventory and documentation | Capability ontology serves as formal inventory; technical documentation covers all Annex IV elements | `schemas/capability_ontology.yaml`, `docs/compliance/eu-ai-act/annex_iv_technical_documentation.md` | Full |
-| **GV-1.7** — Processes for decommissioning | Gap — No formal AI system decommissioning procedure documented | — | Gap |
+| **GV-1.7** — Processes for decommissioning | Decommissioning procedure: stop the system from acting, preserve and verify the audit log, its key and the checkpoint records, keep a way back, then retain and dispose; the framework retires its own capabilities, workflows and profiles through its deprecation policy | `docs/compliance/nist-ai-rmf/decommissioning_procedure.md` | Full |
 
 ### 4.2 GV-2: Accountability Structures
 
@@ -176,7 +176,7 @@ flowchart TB
 
 | Category | Framework Implementation | Coverage |
 |----------|--------------------------|----------|
-| **GV-6** | Trust model defines source weights for external data (`hardware_sensor: 0.95`, `system_of_record: 0.92`, down to `human_note: 0.55`). `invoke` capability handles external API calls with typed contracts. No formal third-party AI vendor assessment procedure. Evidence: `schemas/authority_trust_model.yaml` | Partial — Trust weights for data sources exist; third-party vendor assessment is a gap |
+| **GV-6** | Trust model defines source weights for external data (`hardware_sensor: 0.95`, `system_of_record: 0.92`, down to `human_note: 0.55`). `invoke` capability handles external API calls with typed contracts; a tool with no binding is treated as `mutate`. The third-party risk procedure tiers each component by the capability it is used through and assesses it before use. Evidence: `schemas/authority_trust_model.yaml`, `docs/compliance/nist-ai-rmf/third_party_risk_procedure.md` | Full |
 
 > **GOVERN Function — Tier Assessment**
 >
@@ -184,8 +184,8 @@ flowchart TB
 > |-----------|-----------|
 > | **Current Tier** | **Tier 2 — Risk Informed** |
 > | **Target Tier** | Tier 3 — Repeatable |
-> | **Justification** | Domain profiles, risk treatment plan, competency framework, and compliance documentation provide risk-informed governance. GV-1.7 (decommissioning), GV-3 (DEIA), and GV-6 (third-party vendor assessment) are gaps that prevent Tier 3 classification. Organizational adoption depends on deployer commitment. |
-> | **Key gaps** | Decommissioning procedure (GV-1.7), DEIA policies (GV-3), third-party vendor assessment (GV-6) |
+> | **Justification** | Domain profiles, risk treatment plan, competency framework, decommissioning and third-party risk procedures, and compliance documentation provide risk-informed governance. GV-3 (DEIA) is the gap that prevents Tier 3 classification. Organizational adoption depends on deployer commitment. |
+> | **Key gaps** | DEIA policies (GV-3) |
 
 ---
 
@@ -271,8 +271,8 @@ flowchart TB
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
 | **ME-2.1** — Evaluation conducted | Conformance test suite validates structural properties; 6 validators check ontology, workflows, profiles, skill refs, transform refs, YAML sync | `scripts/run_conformance.py`, `tools/validate_ontology.py`, `tools/validate_workflows.py`, `tools/validate_profiles.py`, `tools/validate_skill_refs.py`, `tools/validate_transform_refs.py`, `tools/validate_yaml_util_sync.py` | Full |
-| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records every tool call that runs | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally but aggregated reporting/dashboards are a gap |
-| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture every tool call that runs, in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are gaps |
+| **ME-2.2** — Evaluation results documented | EvidenceStore captures tool executions as evidence anchors; checkpoint tracker records state transitions; audit log records every tool call that runs | `grounded_agency/state/evidence_store.py`, `grounded_agency/state/checkpoint_tracker.py`, `.claude/audit.log` | Partial — Evidence is captured structurally; aggregated reporting is a gap (G-05), and a dashboard that shows it is the deployer's (G-06) |
+| **ME-2.3** — Continuous monitoring implemented | EvidenceStore tracks executions; temporal decay model degrades trust over time (`half_life: P10D`); audit hooks capture every tool call that runs, in real time | `grounded_agency/state/evidence_store.py`, `schemas/authority_trust_model.yaml` (decay_model), `hooks/hooks.json` | Partial — Real-time alerting and dashboard visualization are the deployer's (G-06) |
 
 ### 6.3 ME-3: Trustworthy AI Actor Competency
 
@@ -288,7 +288,7 @@ flowchart TB
 
 | Category | Framework Implementation | Evidence | Coverage |
 |----------|--------------------------|----------|----------|
-| **ME-4** | `inquire` capability enables runtime escalation to humans. Stakeholder analysis defines communication channels. Management review process collects measurement feedback quarterly. No automated external feedback collection mechanism. | `skills/inquire/SKILL.md`, `docs/compliance/iso42001/stakeholder_analysis.md`, `docs/compliance/iso42001/management_review.md` | Partial — Structural support exists; automated feedback collection is a gap |
+| **ME-4** | `inquire` capability enables runtime escalation to humans. Stakeholder analysis defines communication channels. Management review process collects measurement feedback quarterly. No automated external feedback collection mechanism. | `skills/inquire/SKILL.md`, `docs/compliance/iso42001/stakeholder_analysis.md`, `docs/compliance/iso42001/management_review.md` | Partial — Structural support exists; automated feedback collection is the deployer's (G-07) |
 
 > **MEASURE Function — Tier Assessment**
 >
@@ -296,8 +296,8 @@ flowchart TB
 > |-----------|-----------|
 > | **Current Tier** | **Tier 2 — Risk Informed** |
 > | **Target Tier** | Tier 3 — Repeatable |
-> | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. However, real-time monitoring dashboards, aggregated reporting, alerting infrastructure, and automated external feedback collection are gaps. These prevent consistent, organization-wide measurement. |
-> | **Key gaps** | Real-time monitoring dashboard (ME-2.3), aggregated evaluation reporting (ME-2.2), automated feedback collection (ME-4) |
+> | **Justification** | Confidence scores and evidence anchors are structurally enforced on all outputs. Six validators provide repeatable structural evaluation. Temporal decay model tracks information freshness. Aggregated evaluation reporting (ME-2.2, G-05, planned under [#80](https://github.com/synaptiai/agent-capability-standard/issues/80)) is the gap that prevents Tier 3. The real-time dashboard and alerting (ME-2.3, G-06) and automated feedback collection (ME-4, G-07) belong to the deployer, since only a running deployment has the data and the feedback channels. |
+> | **Key gaps** | Aggregated evaluation reporting (ME-2.2). The deployer owns the real-time dashboard (ME-2.3) and automated feedback collection (ME-4) |
 
 ---
 
@@ -323,7 +323,7 @@ flowchart TB
 | Sub-Category | Framework Implementation | Evidence | Coverage |
 |-------------|--------------------------|----------|----------|
 | **MG-2.1** — Response plans documented | Post-market monitoring plan defines escalation procedures and incident response; nonconformity procedure defines detection → containment → correction → verification workflow | `docs/compliance/eu-ai-act/post_market_monitoring.md`, `docs/compliance/iso42001/nonconformity_procedure.md` | Full |
-| **MG-2.2** — Response plans tested | Recovery loop limits (`max_loops`) prevent infinite retry; rollback restores prior checkpoints; `constrain` capability enforces operational bounds. Conformance test suite validates structural properties. | `schemas/capability_ontology.yaml` (max_loops), `skills/rollback/SKILL.md`, `skills/constrain/SKILL.md`, `scripts/run_conformance.py` | Partial — Tabletop exercises and scenario testing are not documented |
+| **MG-2.2** — Response plans tested | Recovery loop limits (`max_loops`) prevent infinite retry; rollback restores prior checkpoints; `constrain` capability enforces operational bounds. Conformance test suite validates structural properties. A tabletop exercise template plays an approved Write that must be undone, with its expected codes, records and recovery commands, and a test plays its steps against the plugin's hooks. | `schemas/capability_ontology.yaml` (max_loops), `skills/rollback/SKILL.md`, `skills/constrain/SKILL.md`, `scripts/run_conformance.py`, `docs/compliance/nist-ai-rmf/tabletop_exercise_template.md`, `tests/test_tabletop_exercise.py` | Full |
 | **MG-2.3** — Incident documentation maintained | Audit log records every tool call that runs, with a timestamp; ProvenanceRecord chains track claim lineage; world state versioning preserves history with parent links | `.claude/audit.log`, `schemas/world_state_schema.yaml` (provenance), `grounded_agency/state/evidence_store.py` | Full |
 
 ### 7.3 MG-3: Third-Party Risk Management
@@ -332,7 +332,7 @@ flowchart TB
 
 | Category | Framework Implementation | Evidence | Coverage |
 |----------|--------------------------|----------|----------|
-| **MG-3** | Trust model assigns weights to external sources; `invoke` capability uses typed contracts for external API calls; temporal decay degrades trust in stale third-party data. No formal third-party risk monitoring procedure. | `schemas/authority_trust_model.yaml`, `skills/invoke/SKILL.md`, `schemas/capability_ontology.yaml` (invoke capability) | Partial — Trust weights exist; formal third-party monitoring procedure is a gap |
+| **MG-3** | Trust model assigns weights to external sources; `invoke` capability uses typed contracts for external API calls; temporal decay degrades trust in stale third-party data. The third-party risk procedure sets a monitoring cadence per tier and names the signals in the records (failed calls, refusals for confidence, grounding or destination, version changes in `recorded_by`). | `schemas/authority_trust_model.yaml`, `skills/invoke/SKILL.md`, `schemas/capability_ontology.yaml` (invoke capability), `docs/compliance/nist-ai-rmf/third_party_risk_procedure.md` | Full |
 
 ### 7.4 MG-4: Risk Treatment Documentation and Monitoring
 
@@ -348,8 +348,8 @@ flowchart TB
 > |-----------|-----------|
 > | **Current Tier** | **Tier 3 — Repeatable** |
 > | **Target Tier** | Tier 4 — Adaptive |
-> | **Justification** | Strong structural enforcement: checkpoint-before-mutation is mandatory, rollback is available for state recovery, three-tier risk model assigns response priority, audit hooks provide comprehensive logging, and nonconformity procedure defines corrective action workflow. Risk treatment and documentation (MG-1.2, MG-2.1, MG-2.3, MG-4) are formalized and repeatable. Automated incident detection (MG-1.4) and tabletop scenario testing (MG-2.2) gaps prevent Tier 4. |
-> | **Key gaps** | Automated incident detection (MG-1.4), tabletop exercises (MG-2.2), formal third-party risk monitoring (MG-3) |
+> | **Justification** | Strong structural enforcement: checkpoint-before-mutation is mandatory, rollback is available for state recovery, three-tier risk model assigns response priority, audit hooks provide comprehensive logging, and nonconformity procedure defines corrective action workflow. Risk treatment and documentation (MG-1.2, MG-2.1, MG-2.3, MG-4), tested response plans (MG-2.2) and third-party monitoring (MG-3) are formalized and repeatable. The automated incident detection gap (MG-1.4) prevents Tier 4. |
+> | **Key gaps** | Automated incident detection (MG-1.4) |
 
 ---
 
@@ -359,31 +359,33 @@ flowchart TB
 
 | Function | Current Tier | Target Tier | Gap Count | Key Strengths |
 |----------|-------------|-------------|-----------|---------------|
-| **GOVERN** | Tier 2 — Risk Informed | Tier 3 — Repeatable | 3 | Domain profiles, risk treatment plan, competency framework, compliance suites |
+| **GOVERN** | Tier 2 — Risk Informed | Tier 3 — Repeatable | 1 | Domain profiles, risk treatment plan, competency framework, decommissioning and third-party procedures, compliance suites |
 | **MAP** | Tier 3 — Repeatable | Tier 4 — Adaptive | 1 | Typed contracts, 7 domain profiles, 3-tier risk model, 7 edge types |
 | **MEASURE** | Tier 2 — Risk Informed | Tier 3 — Repeatable | 3 | Confidence scores, evidence anchors, temporal decay, 6 validators |
-| **MANAGE** | Tier 3 — Repeatable | Tier 4 — Adaptive | 3 | Checkpoint enforcement, rollback, audit hooks, nonconformity procedure |
+| **MANAGE** | Tier 3 — Repeatable | Tier 4 — Adaptive | 1 | Checkpoint enforcement, rollback, audit hooks, nonconformity procedure, tested tabletop exercise |
 
 ### 8.2 Overall Maturity
 
 **Weighted assessment:** Tier 2.5 (between Risk Informed and Repeatable)
 
-The framework is strongest in MAP and MANAGE functions, where typed contracts and structural safety enforcement provide repeatable, formalized risk management. GOVERN and MEASURE functions require additional organizational and monitoring infrastructure to reach Tier 3.
+The framework is strongest in MAP and MANAGE functions, where typed contracts and structural safety enforcement provide repeatable, formalized risk management. GOVERN reaches Tier 3 when the AI policy template has its DEIA section (G-02). MEASURE reaches Tier 3 with aggregated reporting from the audit log and the EvidenceStore (G-05); its real-time dashboard (G-06) and feedback collection (G-07) belong to the deployer.
 
 ### 8.3 Gap Inventory
 
-| ID | Gap | Function | Category | Priority | Effort |
-|----|-----|----------|----------|----------|--------|
-| G-01 | AI system decommissioning procedure | GOVERN | GV-1.7 | Medium | Low |
-| G-02 | DEIA policies for AI risk management | GOVERN | GV-3 | Medium | Medium |
-| G-03 | Third-party AI vendor assessment | GOVERN | GV-6 | High | Medium |
-| G-04 | Population-specific impact assessment | MAP | MP-5 | Medium | High |
-| G-05 | Aggregated evaluation reporting | MEASURE | ME-2.2 | High | Medium |
-| G-06 | Real-time monitoring dashboard | MEASURE | ME-2.3 | High | High |
-| G-07 | Automated external feedback collection | MEASURE | ME-4 | Low | Medium |
-| G-08 | Automated incident detection | MANAGE | MG-1.4 | High | High |
-| G-09 | Tabletop exercises and scenario testing | MANAGE | MG-2.2 | Medium | Low |
-| G-10 | Third-party risk monitoring procedure | MANAGE | MG-3 | Medium | Medium |
+The framework is infrastructure (Section 1), so a gap is closed in this repository when the framework can own it, and is the deployer's when only a running deployment can close it.
+
+| ID | Gap | Function | Category | Status | Delivered by, or owner and reason |
+|----|-----|----------|----------|--------|-----------------------------------|
+| G-01 | AI system decommissioning procedure | GOVERN | GV-1.7 | Closed | [Decommissioning procedure](decommissioning_procedure.md) (NIST-DCM-001) |
+| G-02 | DEIA policies for AI risk management | GOVERN | GV-3 | Planned | This repository: a DEIA section in the AI policy template that the deployer fills in ([#159](https://github.com/synaptiai/agent-capability-standard/issues/159)). The deployer writes and applies the policy, since workforce policy belongs to the organization |
+| G-03 | Third-party AI vendor assessment | GOVERN | GV-6 | Closed | [Third-party AI risk procedure](third_party_risk_procedure.md) (NIST-TPR-001), sections 3 and 4 |
+| G-04 | Population-specific impact assessment | MAP | MP-5 | Planned | This repository: an impact assessment methodology as a template ([#159](https://github.com/synaptiai/agent-capability-standard/issues/159)). The deployer assesses its own populations, since they depend on the deployment |
+| G-05 | Aggregated evaluation reporting | MEASURE | ME-2.2 | Planned | This repository: reports built from the audit log and the EvidenceStore ([#80](https://github.com/synaptiai/agent-capability-standard/issues/80)). A dashboard that shows them is the deployer's, since only a running deployment has the data |
+| G-06 | Real-time monitoring dashboard | MEASURE | ME-2.3 | Deployer | The deployer, which runs the system and its alerting; the reports of [#80](https://github.com/synaptiai/agent-capability-standard/issues/80) are its input |
+| G-07 | Automated external feedback collection | MEASURE | ME-4 | Deployer | The deployer, since the feedback channels belong to the deployment's stakeholders; the framework provides `inquire` and the stakeholder analysis |
+| G-08 | Automated incident detection | MANAGE | MG-1.4 | Planned | This repository: anomaly rules on the audit records ([#165](https://github.com/synaptiai/agent-capability-standard/issues/165)) and an invariant monitor on the audit log ([#172](https://github.com/synaptiai/agent-capability-standard/issues/172)). MG-1.4 is re-assessed when they land |
+| G-09 | Tabletop exercises and scenario testing | MANAGE | MG-2.2 | Closed | [Tabletop exercise template](tabletop_exercise_template.md) (NIST-TTX-001), whose steps `tests/test_tabletop_exercise.py` plays |
+| G-10 | Third-party risk monitoring procedure | MANAGE | MG-3 | Closed | [Third-party AI risk procedure](third_party_risk_procedure.md) (NIST-TPR-001), sections 5 and 6 |
 
 ---
 
@@ -395,72 +397,49 @@ The Grounded Agency framework currently provides:
 
 - **Structural safety enforcement** — Checkpoint-before-mutation, typed contracts, risk metadata
 - **Domain-parameterized risk management** — 7 profiles with trust weights and compliance configuration
-- **Comprehensive documentation** — EU AI Act and ISO 42001 compliance suites
+- **Comprehensive documentation** — EU AI Act and ISO 42001 compliance suites, and the NIST decommissioning, third-party risk and tabletop exercise documents
 - **Auditability infrastructure** — Evidence anchors, audit hooks, provenance tracking
 
 ### 9.2 Target Profile
 
 The target profile achieves:
 
-- **GOVERN Tier 3** — Organization-wide policies with formal third-party and decommissioning procedures
-- **MAP Tier 4** — Adaptive context that updates from operational data with formal impact assessment
-- **MEASURE Tier 3** — Real-time monitoring with aggregated reporting and automated feedback
-- **MANAGE Tier 4** — Automated incident detection with predictive risk indicators
+- **GOVERN Tier 3** — Organization-wide policies, with the DEIA section of the AI policy template
+- **MAP Tier 4** — Formal impact assessment, and context that adapts from operational data
+- **MEASURE Tier 3** — Aggregated reporting from the audit log and the EvidenceStore, which the deployer's dashboard shows
+- **MANAGE Tier 4** — Automated incident detection from the audit records
 
 ### 9.3 Gap Remediation Roadmap
 
-#### Phase 1: Foundation (0–3 months)
+Planned in this repository:
 
-**Objective:** Close low-effort gaps and establish monitoring baseline.
+| Action | Closes Gap | Target Tier Impact | Deliverable | Issue |
+|--------|-----------|-------------------|-------------|-------|
+| Add a DEIA section to the AI policy template | G-02 (GV-3) | GOVERN → Tier 3 | A section of `docs/compliance/iso42001/ai_policy_template.md` the deployer fills in | [#159](https://github.com/synaptiai/agent-capability-standard/issues/159) |
+| Write an impact assessment methodology | G-04 (MP-5) | MAP → closer to Tier 4 | A template the deployer fills in | [#159](https://github.com/synaptiai/agent-capability-standard/issues/159) |
+| Report from the audit log and the EvidenceStore | G-05 (ME-2.2) | MEASURE → Tier 3 | Lineage, checkpoint coverage and conformance reports | [#80](https://github.com/synaptiai/agent-capability-standard/issues/80) |
+| Detect incidents from the audit records | G-08 (MG-1.4) | MANAGE → Tier 4 | Anomaly rules and an invariant monitor | [#165](https://github.com/synaptiai/agent-capability-standard/issues/165), [#172](https://github.com/synaptiai/agent-capability-standard/issues/172) |
+| Map each domain profile to NIST sub-categories | — (traceability) | Cross-cutting | A NIST mapping under each profile's informative `compliance` member, which `tools/validate_profiles.py` accepts | [#159](https://github.com/synaptiai/agent-capability-standard/issues/159) |
+| Add NIST function metrics to the management review inputs | — (integration) | GOVERN + MEASURE | Updated `docs/compliance/iso42001/management_review.md` | [#159](https://github.com/synaptiai/agent-capability-standard/issues/159) |
+| Tune domain profiles from operational data | — (advanced) | MAP → Tier 4 | Trust calibration from the records | [#78](https://github.com/synaptiai/agent-capability-standard/issues/78) |
 
-| Action | Closes Gap | Target Tier Impact | Deliverable |
-|--------|-----------|-------------------|-------------|
-| Document AI system decommissioning procedure | G-01 (GV-1.7) | GOVERN → closer to Tier 3 | `docs/compliance/nist-ai-rmf/decommissioning_procedure.md` |
-| Add NIST AI RMF sub-category references to domain profiles | — (traceability) | Cross-cutting | Updated `schemas/profiles/*.yaml` with `nist_mapping` field |
-| Document tabletop exercise template and schedule | G-09 (MG-2.2) | MANAGE → closer to Tier 4 | `docs/compliance/nist-ai-rmf/tabletop_exercise_template.md` |
-| Extend management review inputs to include NIST function metrics | — (integration) | GOVERN + MEASURE | Updated `docs/compliance/iso42001/management_review.md` |
+Owned outside this repository:
 
-#### Phase 2: Core Improvements (3–6 months)
-
-**Objective:** Build monitoring infrastructure and formalize assessment processes.
-
-| Action | Closes Gap | Target Tier Impact | Deliverable |
-|--------|-----------|-------------------|-------------|
-| Build monitoring dashboard from EvidenceStore + audit logs | G-05 (ME-2.2), G-06 (ME-2.3) | MEASURE → Tier 3 | Dashboard application with aggregated metrics |
-| Develop formal impact assessment methodology | G-04 (MP-5) | MAP → closer to Tier 4 | `docs/compliance/nist-ai-rmf/impact_assessment_methodology.md` |
-| Create third-party AI risk procedures | G-03 (GV-6), G-10 (MG-3) | GOVERN → Tier 3, MANAGE → closer to Tier 4 | `docs/compliance/nist-ai-rmf/third_party_risk_procedure.md` |
-| Document DEIA considerations for AI risk management | G-02 (GV-3) | GOVERN → Tier 3 | Policy addendum in AI policy template |
-
-#### Phase 3: Adaptive Maturity (6–12 months)
-
-**Objective:** Achieve adaptive maturity through automation and predictive capabilities.
-
-| Action | Closes Gap | Target Tier Impact | Deliverable |
-|--------|-----------|-------------------|-------------|
-| Implement automated incident detection from audit patterns | G-08 (MG-1.4) | MANAGE → Tier 4 | Anomaly detection on audit log patterns |
-| Build automated external feedback collection | G-07 (ME-4) | MEASURE → Tier 3+ | Feedback collection pipeline integrated with stakeholder channels |
-| Develop predictive risk indicators from confidence trends | — (advanced) | MEASURE → Tier 3+ | Trend analysis on EvidenceStore confidence data |
-| Enable continuous profile adaptation from operational data | — (advanced) | MAP → Tier 4 | Automated domain profile tuning based on operational metrics |
-
-```mermaid
----
-title: Which gaps each phase closes
----
-flowchart TB
-  accDescr: Phase 1, months 0 to 3, closes G-01 and G-09; Phase 2, months 3 to 6, closes G-02 to G-06 and G-10; Phase 3, months 6 to 12, closes G-07 and G-08.
-  p1["Phase 1, foundation, 0-3 months: G-01, G-09"] --> p2["Phase 2, core improvements, 3-6 months: G-02, G-03, G-04, G-05, G-06, G-10"]
-  p2 --> p3["Phase 3, adaptive maturity, 6-12 months: G-07, G-08"]
-```
+| Item | Owner | Reason |
+|------|-------|--------|
+| Real-time monitoring dashboard and alerting (G-06) | The deployer | Only a running deployment has the live data; the reports of [#80](https://github.com/synaptiai/agent-capability-standard/issues/80) are its input |
+| Automated external feedback collection (G-07) | The deployer | The feedback channels belong to the deployment's stakeholders |
+| Predictive risk indicators from confidence trends | The deployer | The trends come from a deployment's operational EvidenceStore data |
 
 ### 9.4 Roadmap Visualization
 
 ```
-Current State                    Target State
-─────────────                    ────────────
-GOVERN:  Tier 2 ──Phase 1+2──→  Tier 3
-MAP:     Tier 3 ──Phase 2+3──→  Tier 4
-MEASURE: Tier 2 ──Phase 2+3──→  Tier 3
-MANAGE:  Tier 3 ──Phase 1+3──→  Tier 4
+Current State                   Target State
+─────────────                   ────────────
+GOVERN:  Tier 2 ──G-02───────→  Tier 3
+MAP:     Tier 3 ──G-04, #78──→  Tier 4
+MEASURE: Tier 2 ──G-05───────→  Tier 3
+MANAGE:  Tier 3 ──G-08───────→  Tier 4
 ```
 
 ---
@@ -484,7 +463,7 @@ MANAGE:  Tier 3 ──Phase 1+3──→  Tier 4
 | GV-1 (Risk management) | Risk Treatment Plan | AIMS-RSK-001 |
 | GV-2 (Accountability) | Competency Framework | AIMS-CMP-001 |
 | GV-2 (Oversight) | Management Review | AIMS-MGR-001 |
-| GV-5 (Stakeholders) | Stakeholder Analysis | AIMS-STK-001 |
+| GV-5 (Stakeholders) | Stakeholder Analysis | AIMS-CTX-001 |
 | MP-2 (Categorization), MP-4 (Risks) | Risk Treatment Plan | AIMS-RSK-001 |
 | ME-2 (Evaluation) | Internal Audit Checklist | AIMS-AUD-001 |
 | MG-1 (Risk response) | Nonconformity Procedure | AIMS-NCR-001 |
@@ -561,6 +540,7 @@ This appendix provides a consolidated inventory of all framework files cited as 
 | `tools/validate_transform_refs.py` | Transform mapping reference validation | ME-2 |
 | `tools/validate_yaml_util_sync.py` | YAML utility sync validation | ME-2 |
 | `scripts/run_conformance.py` | Conformance test suite | ME-2 |
+| `tests/test_tabletop_exercise.py` | Plays the tabletop exercise's steps against the plugin's hooks | MG-2 |
 
 ### A.5 Compliance Documentation
 
@@ -576,8 +556,11 @@ This appendix provides a consolidated inventory of all framework files cited as 
 | `docs/compliance/iso42001/management_review.md` | Management review process (AIMS-MGR-001) | GV-2, MG-4 |
 | `docs/compliance/iso42001/nonconformity_procedure.md` | NCR workflow (AIMS-NCR-001) | MG-1, MG-2 |
 | `docs/compliance/iso42001/ai_policy_template.md` | AI policy template (AIMS-POL-001) | GV-1, GV-4 |
-| `docs/compliance/iso42001/stakeholder_analysis.md` | Stakeholder identification (AIMS-STK-001) | GV-5, MP-5, ME-4 |
+| `docs/compliance/iso42001/stakeholder_analysis.md` | Stakeholder identification (AIMS-CTX-001) | GV-5, MP-5, ME-4 |
 | `docs/compliance/iso42001/internal_audit_checklist.md` | Internal audit programme (AIMS-AUD-001) | ME-2, MG-4 |
+| `docs/compliance/nist-ai-rmf/decommissioning_procedure.md` | Decommissioning procedure (NIST-DCM-001) | GV-1 |
+| `docs/compliance/nist-ai-rmf/third_party_risk_procedure.md` | Third-party AI risk procedure (NIST-TPR-001) | GV-6, MG-3 |
+| `docs/compliance/nist-ai-rmf/tabletop_exercise_template.md` | Tabletop exercise template (NIST-TTX-001) | MG-2 |
 
 ### A.6 Specification and Methodology
 
@@ -610,7 +593,7 @@ This appendix provides a consolidated inventory of all framework files cited as 
 |-------|-------|
 | **Document ID** | NIST-RMF-001 |
 | **Title** | NIST AI RMF 1.0 Profile — Grounded Agency Framework |
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Date** | [YYYY-MM-DD] |
 | **Author** | [Name, Title] |
 | **Reviewer** | [Name, Title] |
@@ -623,6 +606,7 @@ This appendix provides a consolidated inventory of all framework files cited as 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | [YYYY-MM-DD] | Initial release — All 4 NIST AI RMF functions, 19 categories, tier assessments, maturity roadmap |
+| 1.1 | 2026-11-27 | G-01, G-03, G-09 and G-10 closed by the decommissioning procedure, the third-party AI risk procedure and the tabletop exercise template; every other gap names its owner |
 
 ### Review Triggers
 
