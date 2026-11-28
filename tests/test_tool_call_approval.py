@@ -594,6 +594,43 @@ class TestHookApprovalRule:
         assert not asking_adapter.checkpoint_tracker.validate_and_reserve("other")[0]
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("c1")[0]
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("command", "capability"),
+        [
+            ("curl -X POST https://x.example", "send"),
+            ("python -c 'print(1)'", "execute"),
+        ],
+    )
+    async def test_a_classified_bash_call_is_refused_under_its_capability(
+        self, asking_adapter: GroundedAgentAdapter, command: str, capability: str
+    ) -> None:
+        """In `bypassPermissions`, the one mode in which the adapter relaxes
+        Bash, no person is asked: a call that requires approval is refused
+        with F502, and the refusal names the capability the classifier gave
+        the call, not Bash's worst case."""
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+
+        result = await hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "permission_mode": "bypassPermissions",
+            },
+            "c1",
+            None,
+        )
+
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith(
+            F502 + "permission mode 'bypassPermissions' does not put this call"
+        )
+        record = asking_adapter.call_records[-1]
+        assert (record["decision"], record["capability"]) == ("refused", capability)
+        assert record["diagnostic"]["location"]["capability"] == capability
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "content",
