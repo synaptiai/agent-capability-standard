@@ -90,6 +90,19 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   `failed` with code R402. A version-1 snapshot of a run in progress
   restores with the record members 1.2 adds
   ([failed record](#upgrade-failed-record), [snapshots](#upgrade-snapshots)).
+- The plugin's hooks need Claude Code 2.1.295 or later, the first version
+  that honours `onFailure: "block"`; an older one runs a call whose hook
+  failed or timed out. Set `disableSkillShellExecution`: no hook sees the
+  shell commands a skill's file embeds
+  ([requirements](#upgrade-claude-code)).
+- The hooks' and the Python Bash classifier's reading of shell text is
+  advisory. The security review of the safety layers fixed 130 confirmed
+  defects in five rounds and stopped at its cap without converging, about
+  20 new medium defects a round, many of them in reading shell text. The
+  review of the other layers (the binding and the TypeScript package, the
+  redactors, the SDK adapter) has not converged either. Rely on Claude
+  Code's strict sandbox as the boundary for Bash, not on the hooks'
+  reading of commands ([review](#upgrade-review-not-converged)).
 
 **Requirements.**
 
@@ -97,6 +110,13 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   are no longer supported. The extension's stable-ABI floor is 3.14.
 - Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
   0.11 requires it.
+- <a id="upgrade-claude-code"></a>The plugin's hooks need Claude Code 2.1.295 or later, the first
+  version that honours `onFailure: "block"`; an older one runs a call
+  whose hook failed or timed out. Set Claude Code's
+  `disableSkillShellExecution` in user or managed settings: no hook sees
+  the shell commands a skill's file embeds, and the plugin's own verify,
+  search and audit skills embed such commands
+  ([SECURITY.md §5.5](spec/SECURITY.md#decisions-on-the-host-gaps)).
 
 **Python SDK: tool calls and the adapter (Standard 1.2.0 §5.18).**
 
@@ -1186,6 +1206,19 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   pass outright. Remove the other link outside the session. The hook needs
   perl, or `find`, `awk` and a GNU or BSD `stat`, to count the links (R407
   without them, or when a directory of the records cannot be read).
+- <a id="upgrade-review-not-converged"></a>Plugin hooks and the safety layers (released with plugin 3.0.0): the
+  hooks' and the Python Bash classifier's reading of shell text is
+  advisory. Rounds 1 to 5 of the security review of the safety layers
+  confirmed 30, 17, 15, 18 and 21 new medium defects (130 confirmed
+  defects in all, every one fixed) and stopped at their cap without
+  converging; many were in reading shell text. The review of the layers
+  outside shell reading has not converged either: round 6, on the
+  Standard Agents binding and the TypeScript package, confirmed 3 new
+  medium defects, and the redactors, the SDK adapter's permission callback
+  and checkpoint recorder, and the hooks' handling of their own records
+  have had no round since round 5. Rely on Claude Code's strict sandbox as
+  the boundary for Bash
+  ([SECURITY.md §5.5](spec/SECURITY.md#55-hooks-and-the-safety-layer-class)).
 - <a id="upgrade-jq-marker"></a>Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
@@ -1234,8 +1267,8 @@ that works with v2.0.0, each linked to its entry under Upgrading.
 - Plugin hooks, fail-closed fixes (released with plugin 3.0.0):
   - <a id="upgrade-every-tool"></a>The PreToolUse hook is registered for every tool (matcher `*`), with
     `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
-    cannot start or times out blocks the call where Claude Code supports
-    that setting. A tool the SDK mapper maps to a capability that needs
+    cannot start or times out blocks the call from Claude Code 2.1.295
+    ([requirements](#upgrade-claude-code)). A tool the SDK mapper maps to a capability that needs
     neither a checkpoint nor approval (Read, Grep, Glob, WebFetch,
     TodoWrite, ...) still needs nothing; `Skill`, `Agent` and `Task` are
     `mutate` (a skill's embedded shell commands and a subagent's hooks and
@@ -2859,6 +2892,12 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   - **A new file in the records directory.** An Edit or a Write through a link to the audit records' directory, naming a file not yet there, was allowed on macOS: BSD `readlink -f` fails when the last part of the path does not exist. The audit and send skills now resolve the directory and keep the name.
   - **A path into the records asked instead of refused.** Under bash 3.2, the records guard's path resolution joined the rest of a path into one word after following a link, so `touch ./deep/../notes/todo.md` (where `deep` links to `notes` and `notes/todo.md` to the records) was asked for approval rather than refused. The rest of the path is now copied part by part.
   - **The wrong file followed.** A link whose target ends in a line break was read as its target without that line break, because BSD `readlink` prints no extra line break after such a target. The hooks and the persist skill now read a link's target with perl where perl is installed.
+- The rollback skill's command hook ran `git rev-parse` with no time
+  bound, so a repository whose configuration includes a FIFO or
+  `/dev/ptmx` held it until its 30-second timeout. It now runs git as the
+  plugin's hooks do, for at most 5 seconds with no object fetched, and
+  refuses the restore (F503) when git does not answer, saying that git
+  did not answer (#145).
 - Python SDK: the I-JSON checks of a capability output and of a call's or a
   binding's arguments built each child's whole path when its parent was
   read, so a long member name above a wide array cost the name's length

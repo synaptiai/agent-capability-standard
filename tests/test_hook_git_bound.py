@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -315,3 +316,193 @@ def test_the_sdk_reads_such_a_settings_file_as_unreadable(
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "['.claude/settings.json (unreadable)']"
+
+
+# ---------------------------------------------------------------------------
+# The rollback skill's command hook bounds its git calls the same way (#145)
+# ---------------------------------------------------------------------------
+
+ROLLBACK_SKILL = ROOT / "skills" / "rollback" / "SKILL.md"
+SHELLS = [shell for shell in ("sh", "bash") if shutil.which(shell)]
+
+
+def rollback_hook() -> str:
+    """The rollback skill's PreToolUse command hook on Bash, as Claude Code
+    registers it from the skill's frontmatter."""
+    import yaml
+
+    text = ROLLBACK_SKILL.read_text(encoding="utf-8")
+    front = yaml.safe_load(text.split("---\n", 2)[1])
+    (command,) = [
+        hook["command"]
+        for group in front["hooks"]["PreToolUse"]
+        if group.get("matcher") == "Bash"
+        for hook in group["hooks"]
+        if hook["type"] == "command"
+    ]
+    assert isinstance(command, str)
+    return command
+
+
+def run_rollback_hook(
+    shell: str, project: Path, cwd: Path, command: str
+) -> tuple[int | None, str, float]:
+    """The hook under `shell`, in a process group of its own, so that a hook
+    that waits on git is stopped with every git it started; returns its
+    status (None when it gave no verdict within LIMIT_S), its stderr and its
+    time."""
+    import signal
+
+    start = time.monotonic()
+    proc = subprocess.Popen(
+        [shell, "-c", rollback_hook()],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=project,
+        env={
+            **os.environ,
+            **GIT_ENV,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "CLAUDE_PROJECT_DIR": str(project),
+        },
+        start_new_session=True,
+    )
+    payload = json.dumps(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(cwd),
+        }
+    )
+    try:
+        _, err = proc.communicate(payload, timeout=LIMIT_S)
+        status: int | None = proc.returncode
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        _, err = proc.communicate()
+        status = None
+    return status, err, time.monotonic() - start
+
+
+def recorded_checkpoint(project: Path) -> str:
+    """A checkpoint as the plugin takes it: `git stash create`, its commit
+    entered under <git dir>/acs/checkpoints/commits/ with its HMAC."""
+    from tests.conftest import enter_checkpoint_commit
+
+    git(project, "init", "-q")
+    (project / "a.txt").write_text("one\n")
+    git(project, "add", "a.txt")
+    git(project, "commit", "-q", "-m", "first")
+    (project / "a.txt").write_text("two\n")
+    sha = git(project, "stash", "create", "checkpoint:x")
+    enter_checkpoint_commit(project / ".git", sha)
+    return sha
+
+
+def include_that_waits(repo: Path, kind: str) -> None:
+    """Make the repository's own configuration include a file that holds a
+    read until someone writes: a FIFO, or the terminal /dev/ptmx."""
+    if kind == "fifo":
+        os.mkfifo(repo / ".git" / "inc.fifo")
+        target = "inc.fifo"
+    else:
+        target = "/dev/ptmx"
+    with (repo / ".git" / "config").open("a", encoding="utf-8") as config:
+        config.write(f"[include]\n\tpath = {target}\n")
+
+
+@pytest.mark.skipif(not SHELLS, reason="needs sh or bash")
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("kind", ["fifo", "ptmx"])
+def test_the_rollback_hook_refuses_a_restore_in_time_when_git_stalls(
+    tmp_path: Path, shell: str, kind: str
+) -> None:
+    """The project's git directory cannot be asked: the restore is refused
+    (F503, naming the stall), within LIMIT_S (before: no verdict until the
+    hook's 30-second timeout)."""
+    if kind == "ptmx" and not os.path.exists("/dev/ptmx"):
+        pytest.skip("needs /dev/ptmx")
+    project = tmp_path / "proj"
+    project.mkdir()
+    sha = recorded_checkpoint(project)
+    include_that_waits(project, kind)
+    status, err, took = run_rollback_hook(
+        shell, project, project, f"git stash apply {sha}"
+    )
+    assert status == 2, (status, err, took)
+    assert err.startswith("F503 ROLLBACK_FAILED: "), err
+    # The refusal names the stall, not a missing checkpoint: the
+    # checkpoint was recorded.
+    assert "git did not answer within 5 seconds" in err, err
+    assert "restores no checkpoint" not in err, err
+    assert took < LIMIT_S, took
+
+
+@pytest.mark.skipif(not SHELLS, reason="needs sh or bash")
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_rollback_hook_bounds_its_read_of_the_calls_directory(
+    tmp_path: Path, shell: str
+) -> None:
+    """The second git call, for the call's directory, is bounded too: a
+    call whose cwd is a repository that stalls is refused in time."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    sha = recorded_checkpoint(project)
+    other = tmp_path / "other"
+    other.mkdir()
+    git(other, "init", "-q")
+    include_that_waits(other, "fifo")
+    status, err, took = run_rollback_hook(
+        shell, project, other, f"git stash apply {sha}"
+    )
+    assert status == 2, (status, err, took)
+    assert err.startswith("F503 ROLLBACK_FAILED: "), err
+    # The refusal names the stall, not a missing checkpoint: the
+    # checkpoint was recorded.
+    assert "git did not answer within 5 seconds" in err, err
+    assert "restores no checkpoint" not in err, err
+    assert took < LIMIT_S, took
+
+
+@pytest.mark.skipif(not SHELLS, reason="needs sh or bash")
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_rollback_hook_accepts_a_recorded_restore_at_once(
+    tmp_path: Path, shell: str
+) -> None:
+    """Control: without the include the recorded restore is allowed, and
+    the bound adds no wait (the watchdog holds no output pipe)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    sha = recorded_checkpoint(project)
+    status, err, took = run_rollback_hook(
+        shell, project, project, f"git stash apply {sha}"
+    )
+    assert status == 0, (status, err)
+    assert took < 4, took
+
+
+def test_every_git_the_rollback_hook_runs_is_bounded() -> None:
+    """One git command line in the hook, inside rb_git; every git call goes
+    through rb_git."""
+    hook = rollback_hook()
+    # The jq program the hook embeds names git as text it reads, not as a
+    # program it runs.
+    start = hook.index("cat <<'JQ'")
+    end = hook.index("\nJQ\n", start)
+    code = hook[:start] + hook[end:]
+    runs = []
+    for line in code.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("printf "):
+            continue
+        if re.search(r"(^|[\s;&|($])git(\s|$)", stripped):
+            runs.append(stripped)
+    assert runs == [
+        'exec git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"'
+    ], runs
+    assert "GIT_NO_LAZY_FETCH=1" in hook
+    assert hook.count("rb_git -C ") == 2
+    assert "$G " not in hook
