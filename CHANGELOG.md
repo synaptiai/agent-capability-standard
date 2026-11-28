@@ -146,10 +146,13 @@ here and marked so.
   any other mode, or with no mode stated (it runs in `default`), is its
   worst case, and so is every call under options, or a settings file's
   `permissions.defaultMode`, in another mode. In `bypassPermissions` a call
-  that requires approval is refused with F502 unless `approval="off"`. The pre-tool-use check decides once for each call whether the
-  sandbox is verified, and a Bash call it gave the worst case takes no
-  checkpoint when it reports back, even where the sandbox is verified by
-  then. An allowlist entry the setup command would not list (a
+  that requires approval is refused with F502 unless `approval="off"`. The
+  pre-tool-use check decides once for each call whether the sandbox is
+  verified, and a Bash call it gave the worst case takes no checkpoint
+  when it reports back, even where the sandbox is verified by then; its
+  evidence is filed under the worst case's capability
+  (`create_evidence_collector` takes the decision as `boundary_held`). An
+  allowlist entry the setup command would not list (a
   trailing-dot or hex form of a local address, a wildcard such as `*.*`),
   a `metadata.` name, a port or an IPv6 literal leaves the sandbox
   unverified. Where the options carry no sandbox of their own,

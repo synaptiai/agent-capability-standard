@@ -849,6 +849,43 @@ async def test_a_checked_mode_relaxes(tmp_path: Path, project: Path, mode: str) 
     assert adapter._bash_boundary_held("t1")
 
 
+@pytest.mark.parametrize(
+    ("mode", "capability"), [("default", "mutate"), ("bypassPermissions", "observe")]
+)
+async def test_evidence_is_filed_under_the_class_the_hook_gave(
+    tmp_path: Path, project: Path, mode: str, capability: str
+) -> None:
+    """A Bash call is classified after it ran only as the PreToolUse hook
+    classified it: the evidence of an `ls` in a mode not checked is filed
+    under Bash's worst case, though the boundary holds for a call that
+    names no mode."""
+    adapter = _adapter(tmp_path)
+    wrapped = adapter.wrap_options(_options(project))
+    assert _relaxed(adapter)
+    (pre,) = [
+        fn
+        for entry in wrapped.hooks["PreToolUse"]
+        for fn in entry.hooks
+        if getattr(fn, "_grounded_adapter", None) is adapter
+    ]
+    call = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "tool_use_id": "t1",
+        "cwd": str(project),
+        "permission_mode": mode,
+    }
+    await pre(call, "t1", None)
+    assert adapter._bash_boundary_held("t1") is (mode == "bypassPermissions")
+    for entry in wrapped.hooks["PostToolUse"]:
+        for fn in entry.hooks:
+            await fn({**call, "tool_response": {"stdout": ""}}, "t1", None)
+    refs = [a.ref for a in adapter.evidence_store.get_for_capability(capability)]
+    assert "tool:Bash:t1" in refs
+    other = "observe" if capability == "mutate" else "mutate"
+    assert not adapter.evidence_store.get_for_capability(other)
+
+
 async def test_options_in_a_mode_not_checked_are_not_verified(
     tmp_path: Path, project: Path
 ) -> None:

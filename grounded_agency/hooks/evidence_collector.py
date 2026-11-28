@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import _core
@@ -49,6 +50,7 @@ def create_evidence_collector(
     *,
     include_tool_input: bool = False,
     required: bool = False,
+    boundary_held: Callable[[str | None], bool] | None = None,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that collects evidence anchors.
@@ -84,6 +86,14 @@ def create_evidence_collector(
             ``record_capture_failure`` when it has one. By default the
             capture is best-effort: a failure is logged as a warning, never
             silently dropped.
+        boundary_held: Whether the operating-system boundary held when the
+            PreToolUse hook classified a Bash call, by call id (STANDARD
+            1.2.0 section 5.18.3: a Bash call is classified after it ran
+            only as that hook classified it). A Bash call's anchors are
+            filed under the class it had then: its worst case for a call
+            for which this returns False. When omitted, the mapper checks
+            the boundary again, with no permission mode. The adapter
+            passes what its PreToolUse hook kept.
 
     Returns:
         Async hook callback function
@@ -136,7 +146,14 @@ def create_evidence_collector(
             capability_id = None
             if mapper_instance:
                 try:
-                    mapping = mapper_instance.map_tool(tool_name, tool_input)
+                    boundary = None
+                    if tool_name == "Bash" and boundary_held is not None:
+                        boundary = boundary_held(
+                            tool_use_id or input_data.get("tool_use_id")
+                        )
+                    mapping = mapper_instance.map_tool(
+                        tool_name, tool_input, boundary=boundary
+                    )
                     if mapping is not UNCLASSIFIED_TOOL:
                         capability_id = mapping.capability_id
                 except Exception:

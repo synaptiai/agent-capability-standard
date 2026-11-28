@@ -2154,6 +2154,7 @@ class GroundedAgentAdapter:
             store=self.evidence_store,
             mapper=self.mapper,
             include_tool_input=self.config.evidence_include_tool_input,
+            boundary_held=self._bash_boundary_held,
         )
         post_hooks.append(self._wrap_hook(evidence_hook))
 
