@@ -1822,12 +1822,17 @@ passes them, and any spelling of a stash restore but `git stash apply|pop
 the hooks here do: with `core.fsmonitor` and hooks turned off, no object
 fetched, no input, and for at most 5 seconds, in POSIX `sh` (`rb_git`); a
 git that did not answer names no git directory, so the restore is blocked
-with `F503 ROLLBACK_FAILED:`.
+with `F503 ROLLBACK_FAILED:`, with a reason that says git did not answer.
 
 A skill's file can also embed shell commands that Claude Code runs while
 it loads the skill. No `PreToolUse` hook sees them, and a skill the person
 runs from the prompt (`/name`) is no tool call at all, so set Claude Code's
-`disableSkillShellExecution` in your user or managed settings.
+`disableSkillShellExecution` in your user or managed settings. The
+plugin's verify, search and audit skills embed context commands (`pwd`,
+`git status`, `git log`, `find`): with the setting on they do not run and
+the skill loads without that context; with it off they run with no hook
+and no time bound, and `git status` runs the program a repository's
+`core.fsmonitor` names.
 
 The `persist` skill's command hook, the `audit` skill's `Bash` hook and
 `pretooluse_require_checkpoint.sh` (for `TodoWrite`, `TaskCreate` and
@@ -1952,6 +1957,10 @@ gives the reasons. Tracked items are in
 - **Settings given when Claude Code starts, and the sources it applied,**
   are not visible to a hook. Tracked: a host feature request. Accepted
   until then.
+- **Claude Code started in the home directory** reads
+  `~/.claude/settings.json` as the project's settings too. Accepted: there
+  the layer's settings belong in managed settings or the environment
+  Claude Code starts in.
 - **Hooks start through `/bin/sh -c` with the project's `env`.** Tracked: a
   host feature request. Until then the hooks refuse every call while the
   project's settings set a variable that is not Claude Code's own; review
@@ -1963,10 +1972,10 @@ gives the reasons. Tracked items are in
 - **The Bash tool's shell snapshot and the login shell** reach no hook.
   Accepted: the hooks' reading of a command is advisory, and the sandbox is
   the boundary.
-- **No destination policy.** Accepted: Bash reaches only the sandbox's
-  network allowlist, and the remote-write tools write only to the recorded
-  origin. A destination policy for the remote-write and MCP tools is
-  tracked.
+- **No destination policy.** Tracked: a destination policy for the
+  remote-write and MCP tools. Until it lands, Bash reaches only the
+  sandbox's network allowlist, and the remote-write tools write only to the
+  recorded origin.
 - **A file the agent writes that another program later runs** outside the
   sandbox (a git hook, an editor's task, a CI configuration). Accepted.
 - **A sandbox that cannot start.** Closed: the setup command writes
