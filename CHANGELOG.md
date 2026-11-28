@@ -136,16 +136,17 @@ here and marked so.
   default, and the Bash classifier relaxes a call (a read-only command,
   `git stash create`, a recorded restore, a local change without `send`)
   only while that sandbox is verified for it (STANDARD 1.2.0 §5.18.3,
-  RFC-0011), and only for the CLI the Agent SDK bundles in a version whose
-  settings the adapter checks (Claude Code 2.1.321, bundled with
-  `claude-agent-sdk` 0.2.180): with `cli_path`, an SDK that bundles no
-  CLI, or one that bundles another Claude Code version, every Bash call is
-  its worst case. It relaxes a call only in the permission modes
-  `default`, `acceptEdits` and `bypassPermissions`
-  (`CHECKED_PERMISSION_MODES`): a call in `plan`, `auto`, `dontAsk` or a
-  mode the adapter does not know is its worst case, and so is every call
-  under options, or a settings file's `permissions.defaultMode`, outside
-  that set. The pre-tool-use check decides once for each call whether the
+  RFC-0011), and only for the CLI the Agent SDK bundles in a version under
+  which the boundary tests ran (Claude Code 2.1.332, bundled with
+  `claude-agent-sdk` 0.2.189, which `constraints.txt` pins): with
+  `cli_path`, an SDK that bundles no CLI, or one that bundles another
+  Claude Code version, every Bash call is its worst case. It relaxes a
+  call only in `bypassPermissions` mode (`CHECKED_PERMISSION_MODES`), the
+  one mode in which the precedence of settings files was tested: a call in
+  any other mode, or with no mode stated (it runs in `default`), is its
+  worst case, and so is every call under options, or a settings file's
+  `permissions.defaultMode`, in another mode. In `bypassPermissions` a call
+  that requires approval is refused with F502 unless `approval="off"`. The pre-tool-use check decides once for each call whether the
   sandbox is verified, and a Bash call it gave the worst case takes no
   checkpoint when it reports back, even where the sandbox is verified by
   then. An allowlist entry the setup command would not list (a

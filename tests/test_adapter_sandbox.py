@@ -779,7 +779,7 @@ async def test_the_hook_asks_for_ls_only_without_the_boundary(
                 "tool_name": "Bash",
                 "tool_input": {"command": "ls"},
                 "tool_use_id": "t1",
-                "permission_mode": "default",
+                "permission_mode": "bypassPermissions",
                 "cwd": str(project),
             },
             "t1",
@@ -819,7 +819,9 @@ async def _hook_on(
     )
 
 
-@pytest.mark.parametrize("mode", ["plan", "auto", "dontAsk", "someFutureMode"])
+@pytest.mark.parametrize(
+    "mode", ["default", "acceptEdits", "plan", "auto", "dontAsk", "someFutureMode"]
+)
 async def test_a_mode_not_checked_is_the_worst_case(
     tmp_path: Path, project: Path, mode: str
 ) -> None:
@@ -877,6 +879,13 @@ def test_a_default_mode_not_checked_in_a_settings_file_is_not_verified(
     _write(
         project / ".claude" / "settings.json",
         {"permissions": {"defaultMode": "acceptEdits"}},
+    )
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project, setting_sources=["project"]))
+    assert not _relaxed(adapter)
+    _write(
+        project / ".claude" / "settings.json",
+        {"permissions": {"defaultMode": "bypassPermissions"}},
     )
     adapter = _adapter(tmp_path)
     adapter.wrap_options(_options(project, setting_sources=["project"]))

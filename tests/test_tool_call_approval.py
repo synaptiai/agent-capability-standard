@@ -558,15 +558,18 @@ class TestHookApprovalRule:
             ("Write", {"file_path": "a.txt"}, "Write (capability 'mutate')"),
             ("Edit", {"file_path": "a.txt"}, "Edit (capability 'mutate')"),
             ("Bash", {"command": "rm -rf build"}, "Bash (capability 'mutate')"),
+            # The hook input names no permission mode, so the call runs in
+            # `default`, where the adapter does not relax Bash: every Bash
+            # call is its worst case, whose first capability is mutate.
             (
                 "Bash",
                 {"command": "curl -X POST https://x.example"},
-                "Bash (capability 'send')",
+                "Bash (capability 'mutate')",
             ),
             (
                 "Bash",
                 {"command": "python -c 'print(1)'"},
-                "Bash (capability 'execute')",
+                "Bash (capability 'mutate')",
             ),
         ],
     )
@@ -693,8 +696,15 @@ class TestHookApprovalRule:
     ) -> None:
         hook = asking_adapter._make_pretooluse_safety_hook()
 
+        # bypassPermissions: the one mode in which the adapter relaxes Bash.
         result = await hook(
-            {"tool_name": tool_name, "tool_input": tool_input}, "c1", None
+            {
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "permission_mode": "bypassPermissions",
+            },
+            "c1",
+            None,
         )
 
         assert result == {}
@@ -865,7 +875,13 @@ class TestPermissionCallbackApproval:
     ) -> None:
         callback = asking_adapter._make_permission_callback()
         await pre_tool_use(asking_adapter, "Read", {"file_path": "a"}, "r1")
-        await pre_tool_use(asking_adapter, "Bash", {"command": "ls"}, "b1")
+        await pre_tool_use(
+            asking_adapter,
+            "Bash",
+            {"command": "ls"},
+            "b1",
+            permission_mode="bypassPermissions",
+        )
 
         assert _allowed(await callback("Read", {"file_path": "a"}, _ctx("r1")))
         assert _allowed(await callback("Bash", {"command": "ls"}, _ctx("b1")))

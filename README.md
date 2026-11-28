@@ -464,7 +464,7 @@ pip install grounded-agency
 pip install grounded-agency[sdk]
 ```
 
-The adapter relaxes Bash calls only with the `claude-agent-sdk` release that `constraints.txt` pins (0.2.180); under another release every Bash call needs a checkpoint and approval (`pip install claude-agent-sdk==0.2.180`).
+The adapter relaxes Bash calls only with the `claude-agent-sdk` release that `constraints.txt` pins (0.2.189, which bundles Claude Code 2.1.332), and only in the `bypassPermissions` permission mode; under another release or in another mode every Bash call needs a checkpoint and approval (`pip install claude-agent-sdk==0.2.189`).
 
 The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.88).
 

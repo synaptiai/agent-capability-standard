@@ -241,8 +241,8 @@ The Bash classifier below relaxes a call only while the boundary is verified for
 | The other settings sources the CLI reads set no sandbox value, allow rule, added directory or `CLAUDE_CODE_SANDBOX…` variable in their `env` that may weaken the boundary: the managed settings files, and the user's, the project's and the local file that `setting_sources` loads. They are read when the options are wrapped, and a file among them that changes afterwards leaves the boundary unverified until it holds what it held then. A source the adapter does not read (a managed preferences profile on macOS, server-managed settings, the Windows policy registry) and a `CLAUDE_CODE_SANDBOX…` environment variable leave it unverified too | Yes: that no file changed since the wrap |
 | No record, credential file, settings file, hook script, MCP server list, git configuration file, or file a stdio server or the CLI runs has a second hard link (the package, interpreter and plugin trees are not walked; the plugin hooks' records are walked whole on each Bash call, the marker history under `.claude/checkpoints/` and `acs/` of each git directory included, as the pre-tool-use hook counts them, and past 50000 entries the boundary is unverified), and no credential-like variable has been set in this process since the wrap that the sandbox does not unset | Yes |
 | While a destination policy is in force (`allowed_destinations`, a profile's), the allowlist is empty | No: when the options are wrapped |
-| The CLI is the one the Agent SDK bundles, in a version whose settings the adapter checks (`grounded_agency.utils.sandbox.CHECKED_CLI_VERSIONS`: Claude Code 2.1.321, which `claude-agent-sdk` 0.2.180 bundles); a CLI that `cli_path` names, an SDK that bundles none (it then runs the `claude` on `PATH`) and a bundled CLI of another version leave it unverified, since the version decides which sources the CLI reads and which values it honours | No: when the options are wrapped |
-| The call runs in a permission mode the adapter has checked (`grounded_agency.utils.sandbox.CHECKED_PERMISSION_MODES`: `default`, `acceptEdits` and `bypassPermissions`, the modes in which the boundary tests ran the routes Claude Code decides itself; the precedence of settings files was tested in `bypassPermissions` only), read from the hook input, else from the options' `permission_mode`; options in another mode, or a settings file whose `permissions.defaultMode` is another, leave it unverified, and `plan`, `auto`, `dontAsk` and any mode the adapter does not know give the call the worst case | Yes |
+| The CLI is the one the Agent SDK bundles, in a version under which the boundary tests ran (`grounded_agency.utils.sandbox.CHECKED_CLI_VERSIONS`: Claude Code 2.1.332, which `claude-agent-sdk` 0.2.189 bundles); a CLI that `cli_path` names, an SDK that bundles none (it then runs the `claude` on `PATH`) and a bundled CLI of another version leave it unverified, since the version decides which sources the CLI reads and which values it honours | No: when the options are wrapped |
+| The call runs in `bypassPermissions` mode (`grounded_agency.utils.sandbox.CHECKED_PERMISSION_MODES`), the one mode in which the precedence of settings files was tested; the routes Claude Code decides itself were also tested in `default` and `acceptEdits`, but not which files can override them there. The mode is read from the hook input, else from the options' `permission_mode`, and a call that names neither runs in `default`. Options in another mode, or a settings file whose `permissions.defaultMode` is another, leave it unverified, and a call in any other mode gets the worst case | Yes |
 | The call does not set `dangerouslyDisableSandbox` | Yes |
 
 Otherwise every Bash call is Bash's worst case, which a destination policy refuses. The adapter logs the reason. A call is classified again when it reports back (for the checkpoint it took and the capabilities that ran) only as the PreToolUse hook classified it: a `git stash create` that hook gave the worst case takes no checkpoint, even if the boundary holds by then. It is not a refusal (R407): the call can still run with a checkpoint and approval. Before any options are wrapped, the adapter's mapper gives every Bash call the worst case too.
@@ -521,6 +521,8 @@ flowchart TB
 ```
 
 The adapter relies on a prompt only in the Claude Code permission modes that put it to a person: `default`, `acceptEdits` and `plan` (`grounded_agency.adapter.PROMPTING_PERMISSION_MODES`, not configurable). The mode is read from the hook input, else from the wrapped options' `permission_mode`. In `bypassPermissions` the documentation does not say that a hook's `"ask"` reaches the callback, in `auto` a classifier can answer the prompt, and `dontAsk` denies the call anyway, so in those modes, and in any mode the adapter does not know, a call that requires approval is refused with F502: it could otherwise run on a decision no person made. To run such a session, set `approval="off"`, which is outside class SL.
+
+The Bash classifier relaxes a call only in `bypassPermissions` ([The Sandbox](#the-sandbox)), so the modes that prompt and the mode that relaxes Bash do not overlap. In `default`, `acceptEdits` and `plan`, every Bash call is its worst case: it needs a checkpoint and is put to a person. In `bypassPermissions`, a read-only Bash call needs neither, and a call that requires approval is refused with F502 unless `approval="off"`.
 
 The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. It then never sees a call allowed, so it cannot check a checkpoint again at the allow, nor when the decision came: PreToolUse refuses a call that needs a checkpoint (R407), one whose binding sets `approval.expires` (F502) and one of a served tool (R407); the prompt tool decides the rest. With neither, the call is refused: no one can decide it.
 
@@ -1128,7 +1130,7 @@ If `claude_agent_sdk` isn't installed, the adapter falls back to dict-based type
 `grounded_query()` and `GroundedClient` require the SDK.
 
 ```bash
-pip install claude-agent-sdk==0.2.180
+pip install claude-agent-sdk==0.2.189
 ```
 
 That is the release `constraints.txt` pins, whose bundled CLI the adapter checks the sandbox for (see the next entry).
@@ -1137,15 +1139,15 @@ That is the release `constraints.txt` pins, whose bundled CLI the adapter checks
 
 The adapter relaxes a Bash call (`ls`, `git stash create`) only while it has verified the sandbox for it ([The Sandbox](#the-sandbox)); otherwise every Bash call is Bash's worst case. The adapter logs why, in a warning that starts "Bash runs without a verified operating-system boundary". Two common causes:
 
-- **Another SDK release.** The adapter checks the settings of the CLI that `claude-agent-sdk` 0.2.180 bundles (Claude Code 2.1.321). A newer SDK bundles a newer CLI, and the log names its version. Install the pinned release:
+- **Another SDK release.** The adapter verifies the sandbox only for the CLI that `claude-agent-sdk` 0.2.189 bundles (Claude Code 2.1.332). A newer SDK bundles a newer CLI, and the log names its version. Install the pinned release:
 
   ```bash
-  pip install claude-agent-sdk==0.2.180
+  pip install claude-agent-sdk==0.2.189
   # or, from the repository root:
   pip install -e ".[sdk]" -c constraints.txt
   ```
 
-- **A permission mode the adapter has not checked.** In `plan`, `auto`, `dontAsk` or another mode outside `default`, `acceptEdits` and `bypassPermissions`, every Bash call is the worst case.
+- **A permission mode other than `bypassPermissions`.** In `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` or any other mode, and in a session that sets no mode (it runs in `default`), every Bash call is the worst case. In `bypassPermissions` no person is asked, so a call that requires approval is refused with F502 unless the adapter runs with `approval="off"`, which is outside class SL ([Approval](#approval)).
 
 ### CLIConnectionError: Does Not Honor on_failure
 

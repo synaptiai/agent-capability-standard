@@ -250,7 +250,15 @@ class TestAnInputTheHookDidNotCheck:
         adapter = _adapter(tmp_path, approval="off")
         adapter.create_checkpoint(["*"], "t")
         assert (
-            _decision(await pre_tool_use(adapter, "Bash", {"command": "ls"}, "c1"))
+            _decision(
+                await pre_tool_use(
+                    adapter,
+                    "Bash",
+                    {"command": "ls"},
+                    "c1",
+                    permission_mode="bypassPermissions",
+                )
+            )
             is None
         )
 

@@ -139,14 +139,21 @@ class TestAdapterRestore:
     within its scope."""
 
     @staticmethod
-    async def _pre(adapter: GroundedAgentAdapter, command: str, call: str) -> Any:
+    async def _pre(
+        adapter: GroundedAgentAdapter,
+        command: str,
+        call: str,
+        mode: str = "bypassPermissions",
+    ) -> Any:
+        """The PreToolUse hook on ``command``, in permission mode ``mode``
+        (by default the one mode in which the adapter relaxes Bash)."""
         hook = adapter._make_pretooluse_safety_hook()
         return await hook(
             {
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
                 "tool_use_id": call,
-                "permission_mode": "default",
+                "permission_mode": mode,
             },
             call,
             None,
@@ -163,7 +170,9 @@ class TestAdapterRestore:
         assert await self._pre(asking_adapter, f"git stash apply {SHA}", "r1") == {}
         assert asking_adapter.checkpoint_tracker.has_valid_checkpoint()
         # Applying another commit: a gated mutation, put to the person.
-        other = await self._pre(asking_adapter, f"git stash apply {OTHER}", "r2")
+        other = await self._pre(
+            asking_adapter, f"git stash apply {OTHER}", "r2", "default"
+        )
         decision = other["hookSpecificOutput"]
         assert decision["permissionDecision"] == "ask"
         assert decision["permissionDecisionReason"].startswith("F502 ")

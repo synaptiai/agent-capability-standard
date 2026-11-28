@@ -462,16 +462,18 @@ What each reference layer does:
   checkpoint, a local file change) only while it has verified, in the
   options it built and in the other settings files the CLI loads, that the
   sandbox has each property, only for the CLI its Agent SDK bundles in
-  a version whose settings it checks (Claude Code 2.1.321), and only in a
-  permission mode it has checked (`default`, `acceptEdits`,
-  `bypassPermissions`, the modes of open question 5's tests); every other
-  Bash call gets the worst case. It checks the keys against the settings
-  schema of 2.1.321. The sources the CLI reads and the values it honours
-  from each were observed under 2.1.332 (open questions 1 and 5), and no
-  run of the tests of source precedence under 2.1.321 is recorded. One run
-  of the adapter's live test (the bundled CLI, default mode, no settings
-  sources), reported on 2026-11-26 without the CLI's version, saw the
-  sandbox refuse a host not on the allowlist. A Bash call the pre-tool-use check gave
+  a version under which the boundary tests ran (Claude Code 2.1.332,
+  which `claude-agent-sdk` 0.2.189 bundles), and only in
+  `bypassPermissions` mode, the one mode in which the precedence of
+  settings files was tested (open questions 1 and 5); every other Bash
+  call gets the worst case. The sources the CLI reads and the values it
+  honours from each are measured under 2.1.332: on 2026-11-25 (open
+  questions 1 and 5), and on 2026-11-28 with the CLI that SDK bundles,
+  each run reporting that version, where the boundary tests' Claude Code
+  cases gave the same results and the adapter's live test (its options,
+  `bypassPermissions` mode, no settings sources) saw the sandbox refuse a
+  write to the home directory, a read of a denied file, a host not on the
+  allowlist and a write to the audit log. A Bash call the pre-tool-use check gave
   the worst case is the worst case when it reports back too: it takes no
   checkpoint. Its statement declares that sandbox for Bash, and `"none"`
   for Monitor, PowerShell, Skill, Agent and Task, which it gives one worst
@@ -622,6 +624,9 @@ its shell-like tools the worst case and takes checkpoints by another route.
    the default, `acceptEdits` and `bypassPermissions` modes (the escape
    argument, excluded commands, the network allowlist), and with them in
    the user's settings in `bypassPermissions` mode only (the precedence of
-   settings files). Claude Code itself has not been run on Linux, and
-   `plan` mode has not been tested. The Python adapter relaxes Bash only in
-   the three tested modes. Open: #186.
+   settings files). Both ran again on 2026-11-28 under the CLI that
+   `claude-agent-sdk` 0.2.189 bundles, which reports 2.1.332, with the
+   same results. Claude Code itself has not been run on Linux, and `plan`
+   mode has not been tested. The Python adapter relaxes Bash only in
+   `bypassPermissions`, the mode in which the precedence of settings files
+   was tested. Open: #186.

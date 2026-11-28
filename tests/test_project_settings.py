@@ -574,6 +574,8 @@ class TestAdapter:
     def _hook(self, adapter: Any, **options: Any) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
 
+        # The one permission mode in which the adapter relaxes Bash.
+        options.setdefault("permission_mode", "bypassPermissions")
         wrapped = adapter.wrap_options(ClaudeAgentOptions(**options))
         for entry in wrapped.hooks["PreToolUse"]:
             for hook in entry["hooks"] if isinstance(entry, dict) else entry.hooks:

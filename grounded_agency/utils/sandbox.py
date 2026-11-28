@@ -722,32 +722,33 @@ def pattern_faults(paths: BoundaryPaths) -> list[str]:
     ]
 
 
-# The Claude Code versions whose settings this module checks a sandbox
-# against: which sources the CLI reads, which values it honours from each,
-# and the keys that may weaken the sandbox. A layer that does not know them
-# for the host's version has not verified the boundary (STANDARD 1.2.0
-# section 5.18.3). 2.1.321 is the CLI that claude-agent-sdk 0.2.180
-# bundles: the keys are checked against its settings schema. The sources
-# the CLI reads and the values it honours from each were observed under
-# 2.1.332 (RFC-0011, open questions 1 and 5), and no run of the tests of
-# source precedence under 2.1.321 is recorded. One run of
-# tests/test_sandbox_live.py (the bundled CLI, default mode, no settings
-# sources), reported on 2026-11-26 without the CLI's version, saw the
-# sandbox refuse a host not on the allowlist.
-# constraints.txt pins that SDK for CI.
-CHECKED_CLI_VERSIONS: frozenset[str] = frozenset({"2.1.321"})
+# The Claude Code versions under which this layer's boundary tests ran: a
+# layer that does not know which sources the CLI reads and which values it
+# honours from each, for the host's version, has not verified the boundary
+# (STANDARD 1.2.0 section 5.18.3). 2.1.332 is the CLI that
+# claude-agent-sdk 0.2.189 bundles (constraints.txt pins that SDK for CI,
+# and CI's CLAUDE_CODE_VERSION installs the same CLI). The evidence is
+# measured under that version: the spike of #141 (2026-11-25, the comments
+# "Spike #177 results (macOS)" and "Spike #177 results: user scope
+# (macOS)"), and on 2026-11-28 the CLI the SDK bundles, each run reporting
+# claude_code_version 2.1.332: the Claude Code cases of
+# tests/test_sandbox_boundary.py (22 passed with the settings given at
+# start; with the settings at user scope, 5 passed and the 4 overrides from
+# a file of higher precedence got through, as expected), the precedence
+# probes of the #141 spike (the same results as on 2026-11-25), and
+# tests/test_sandbox_live.py (passed).
+CHECKED_CLI_VERSIONS: frozenset[str] = frozenset({"2.1.332"})
 
 # The Claude Code permission modes in which this layer knows which settings
 # sources the CLI reads and which values it honours from each (STANDARD
 # 1.2.0 section 5.18.3 makes the mode part of what a layer must know). The
-# boundary tests ran the routes the CLI decides itself (the escape
-# argument, excluded commands, the network allowlist) in these three modes,
-# under Claude Code 2.1.332 (RFC-0011, open question 5). `plan`, `auto`,
-# `dontAsk` and any mode this layer does not know were not tested: in them
-# a Bash call gets its worst case.
-CHECKED_PERMISSION_MODES: frozenset[str] = frozenset(
-    {"default", "acceptEdits", "bypassPermissions"}
-)
+# precedence of settings files was tested in bypassPermissions only (the
+# #141 spike, and the user-scope cases of tests/test_sandbox_boundary.py on
+# 2026-11-28, under Claude Code 2.1.332). The routes the CLI decides itself
+# were also tested in default and acceptEdits, with the settings given at
+# start, but which files can override them there was not, so a Bash call
+# in any mode but bypassPermissions gets its worst case.
+CHECKED_PERMISSION_MODES: frozenset[str] = frozenset({"bypassPermissions"})
 
 
 def cli_faults(options: Any) -> list[str]:

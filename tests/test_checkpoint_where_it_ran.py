@@ -250,7 +250,10 @@ class TestTheAdaptersRecorder:
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(checkpoint_dir=str(tmp_path / ".cp"), approval="off")
         )
-        options = adapter.wrap_options(ClaudeAgentOptions())
+        # The one permission mode in which the adapter relaxes Bash.
+        options = adapter.wrap_options(
+            ClaudeAgentOptions(permission_mode="bypassPermissions")
+        )
         (pre,) = options.hooks["PreToolUse"][-1].hooks
         posts = [h for entry in options.hooks["PostToolUse"] for h in entry.hooks]
         return project, evil, adapter, pre, posts

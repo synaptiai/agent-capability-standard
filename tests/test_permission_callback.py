@@ -94,7 +94,9 @@ async def test_changed_arguments_that_need_a_checkpoint_are_f501(
     adapter: GroundedAgentAdapter,
 ) -> None:
     adapter.create_checkpoint(["*"], "t")
-    await pre_tool_use(adapter, "Bash", {"command": "ls"}, "b1")
+    await pre_tool_use(
+        adapter, "Bash", {"command": "ls"}, "b1", permission_mode="bypassPermissions"
+    )
     callback = adapter._make_permission_callback(_host({"command": "rm -rf x"}))
     result = await callback("Bash", {"command": "ls"}, _ctx("b1"))
     assert result.message.startswith("F501 CHECKPOINT_REQUIRED:")

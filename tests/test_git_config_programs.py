@@ -713,7 +713,12 @@ class TestFiltersInAnyScope:
                 ["*"], "git stash create", metadata={"commit": COMMIT}
             )
             out = await pre_tool_use(
-                adapter, "Bash", {"command": command}, "t1", cwd=str(project)
+                adapter,
+                "Bash",
+                {"command": command},
+                "t1",
+                cwd=str(project),
+                permission_mode="bypassPermissions",
             )
             specific = out.get("hookSpecificOutput") or {}
             return (

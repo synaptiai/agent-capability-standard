@@ -150,11 +150,16 @@ class TestPreToolUseCheckpointHook:
     @pytest.mark.usefixtures("bash_under_sandbox")
     async def test_allows_readonly_bash(self, strict_adapter: GroundedAgentAdapter):
         """Test that read-only Bash commands are allowed under a verified
-        sandbox (with none, every Bash call is the worst case)."""
+        sandbox, in bypassPermissions mode (with no sandbox, or in another
+        mode, every Bash call is the worst case)."""
         hook = strict_adapter._make_pretooluse_safety_hook()
 
         result = await hook(
-            {"tool_name": "Bash", "tool_input": {"command": "ls -la"}},
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "ls -la"},
+                "permission_mode": "bypassPermissions",
+            },
             "tool_eee",
             None,
         )

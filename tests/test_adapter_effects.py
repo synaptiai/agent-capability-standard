@@ -338,7 +338,13 @@ async def test_a_local_command_is_not_checked_against_the_policy(
     adapter.create_checkpoint(["*"], "t")
     hook = adapter._make_pretooluse_safety_hook()
     result = await hook(
-        {"tool_name": "Bash", "tool_input": {"command": command}}, "c1", None
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "permission_mode": "bypassPermissions",
+        },
+        "c1",
+        None,
     )
     assert reason(result) is None
 
