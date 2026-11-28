@@ -120,21 +120,20 @@ def _verify(project: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _marker(project: Path, checkpoint_id: str = COMMIT) -> Path:
+def _marker(
+    project: Path, checkpoint_id: str = COMMIT, commit: str | None = COMMIT
+) -> Path:
     now = int(time.time())
     path = project / ".claude" / "checkpoint.ok"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "checkpoint_id": checkpoint_id,
-                "commit": COMMIT,
-                "created_at": now,
-                "expires_at": now + 600,
-                "source": "git stash create",
-            }
-        )
-    )
+    marker: dict[str, Any] = {
+        "checkpoint_id": checkpoint_id,
+        "created_at": now,
+        "expires_at": now + 600,
+    }
+    if commit is not None:
+        marker |= {"commit": commit, "source": "git stash create"}
+    path.write_text(json.dumps(marker))
     return path
 
 
@@ -256,6 +255,21 @@ def test_a_gated_call_names_the_checkpoint_it_used(project: Path) -> None:
     assert record["details"]["checkpoint_id"] == checkpoint_id
     assert record["details"]["commit"] == COMMIT
     assert _verify(project).returncode == 0
+
+
+def test_a_marker_with_no_commit_names_its_checkpoint(project: Path) -> None:
+    """The SDK's CheckpointTracker writes a marker with no commit: the line
+    names its checkpoint id and the capability, and no commit."""
+    checkpoint_id = "20261128_120000_" + "0f" * 16
+    _marker(project, checkpoint_id, commit=None)
+    write = _call("Write", {"file_path": "a.txt", "content": "x"}, "toolu_10")
+    assert _run(PRE, project, write).returncode == 0
+    assert _post(project, write).returncode == 0
+    (record,) = _lines(project)
+    assert problems(record) == [], record
+    assert record["capability"] == "mutate"
+    assert record["details"]["checkpoint_id"] == checkpoint_id
+    assert "commit" not in record["details"]
 
 
 def test_another_calls_marker_is_not_taken_for_this_one(project: Path) -> None:
