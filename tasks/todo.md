@@ -333,7 +333,11 @@ findings file and the PVC review, checked against the tree.
    - Audit-log integrity needs a witness kept out of the agent's reach
      (`verify_audit_log.py --witness`), which a deployment must set up.
 7. **The PVC review's actions:** 33 P1 and 25 P2.
-8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer implements them.
+8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer merges or splits
+   entities. SECURITY.md §1.4 states the merge constraints as a requirement
+   on hosts (PVC action ASSUR-601-D). RFC-0012, a Draft for Standard 1.3.0,
+   proposes §7.3 as checks with vectors and §7.2 as informative; the status
+   line of Standard 1.2.0 still says §7.2 and §7.3 are not implemented.
 9. **Smaller items.**
    - The margins of the figure-gap runs.
    - The three workflows the digital-twin example copies.

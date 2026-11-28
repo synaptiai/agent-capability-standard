@@ -2267,6 +2267,11 @@ here and marked so.
   is checked against its examples, and names every white space and control
   character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
   so it means the same in every regular expression dialect.
+- Entity merge and split checks (§7.3 for Standard 1.3.0, as the Draft
+  RFC-0012 proposes it): `grounded_agency.entities.check_merge`,
+  `check_split` and `class_index`, held to the proposed vectors
+  `tests/conformance/entities/merge.json`. No reference layer merges or
+  splits entities, so nothing calls them yet.
 - Cited versions (§11.6): `grounded_agency.versions.check_cited` and
   `CitedVersionError`; the OASF adapter refuses a mapping that cites
   another ontology major or an unsupported Standard.
@@ -2521,6 +2526,9 @@ here and marked so.
   removed.
 
 ### Changed
+- `spec/SECURITY.md` §1.4 and §2.2.2: the identity merge constraints of
+  Standard §7.3 are a requirement on hosts that merge or split entities;
+  the reference layers perform no merge and do not enforce them.
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
   command, `git stash create`, a restore of a recorded checkpoint) only
   under Claude Code's strict sandbox, which it verifies for the call from
