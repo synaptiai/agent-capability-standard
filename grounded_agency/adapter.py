@@ -1459,6 +1459,18 @@ class GroundedAgentAdapter:
                 return True
             return False
 
+    def _strict(self) -> bool:
+        """Whether a call that fails a check is refused.
+
+        The configuration is mutable, so ``strict_mode`` is read when a
+        call is decided. ``strict_mode=False`` without
+        ``acknowledge_unenforced_checks=True``, set after the configuration
+        was made, keeps the checks enforced."""
+        return (
+            bool(self.config.strict_mode)
+            or self.config.acknowledge_unenforced_checks is not True
+        )
+
     # ------------------------------------------------------------------
     # Records (STANDARD 1.2.0 section 5.18.8)
     # ------------------------------------------------------------------
@@ -1474,7 +1486,7 @@ class GroundedAgentAdapter:
         from . import __version__, _core
 
         settings: dict[str, Any] = {
-            "strict_mode": self.config.strict_mode,
+            "strict_mode": self._strict(),
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,
             "checkpoint_reservation_seconds": self.config.checkpoint_reservation_seconds,
@@ -1755,7 +1767,7 @@ class GroundedAgentAdapter:
                     f"call does not hold",
                 )
         if refusal is not None:
-            if self.config.strict_mode:
+            if self._strict():
                 return refusal
             logger.warning("Permission warning (non-strict): %s", refusal)
         if self.config.approval != "off" and mapping.requires_approval:
@@ -2941,7 +2953,7 @@ class GroundedAgentAdapter:
         """
         tracker = self.checkpoint_tracker
         mapper = self.mapper
-        strict = self.config.strict_mode
+        strict = self._strict()
         limiter = self.rate_limiter
         # Anything but an explicit "off" asks.
         asks = self.config.approval != "off"
@@ -3559,7 +3571,7 @@ class GroundedAgentAdapter:
         """
         tracker = self.checkpoint_tracker
         mapper = self.mapper
-        strict = self.config.strict_mode
+        strict = self._strict()
         # Anything but an explicit "off" asks.
         asks = self.config.approval != "off"
 

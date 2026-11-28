@@ -560,6 +560,30 @@ class TestGroundedAgentAdapter:
         result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
         assert result == {}
 
+    @pytest.mark.parametrize(
+        ("heading", "bypass"),
+        [
+            ("### F501 CHECKPOINT_REQUIRED", "strict_mode=False"),
+            ("### F502 APPROVAL_REQUIRED", 'approval="off"'),
+        ],
+    )
+    def test_the_guide_offers_no_bypass_as_a_fix(
+        self, heading: str, bypass: str
+    ) -> None:
+        """The SDK guide's troubleshooting for a refusal gives no code that
+        turns the rule off: such a mode is outside class SL."""
+        guide = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "integrations"
+            / "claude_agent_sdk.md"
+        ).read_text(encoding="utf-8")
+        assert heading in guide
+        section = guide.split(heading, 1)[1].split("\n### ", 1)[0]
+        code = "".join(section.split("```")[1::2])
+        assert code.strip()
+        assert bypass not in code
+
     def test_wrap_options(self, adapter: GroundedAgentAdapter):
         """Test wrapping SDK options."""
         base = ClaudeAgentOptions(allowed_tools=["Read", "Write"])
@@ -866,6 +890,39 @@ class TestCheckpointReservation:
         await consumer(self._post("Edit", is_error=True), "t2", None)
         reserved, _ = lenient.checkpoint_tracker.validate_and_reserve("t3")
         assert reserved is False
+
+    @pytest.mark.asyncio
+    async def test_strict_mode_turned_off_on_a_built_adapter_is_not_in_force(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """strict_mode=False set on a built adapter without the
+        acknowledgement leaves the checks enforced: the PreToolUse hook and
+        the permission callback refuse a Write with no checkpoint (F501),
+        and the records' configuration digest names the strict mode in
+        force."""
+        digest = adapter.recorded_by["config_sha256"]
+        adapter.config.strict_mode = False
+        assert adapter._strict() is True
+        assert adapter.recorded_by["config_sha256"] == digest
+        wrapped = adapter.wrap_options(ClaudeAgentOptions())
+        pre = wrapped.hooks["PreToolUse"][-1].hooks[0]
+        denied = await pre({"tool_name": "Write", "tool_input": {}}, "t1", None)
+        assert denied["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+            "F501 CHECKPOINT_REQUIRED:"
+        )
+        # A call the hook did not see, with no id to hold a checkpoint by.
+        refused = await wrapped.can_use_tool("Write", {}, None)
+        assert _denied(refused)
+        assert refused.message.startswith("F501 CHECKPOINT_REQUIRED:")
+
+        # Acknowledged, the same change is in force.
+        adapter.config.acknowledge_unenforced_checks = True
+        assert adapter._strict() is False
+        assert adapter.recorded_by["config_sha256"] != digest
+        lenient = adapter._make_pretooluse_safety_hook()
+        assert await lenient({"tool_name": "Write", "tool_input": {}}, "t2", None) == {}
+        callback = adapter._make_permission_callback()
+        assert not _denied(await callback("Write", {}, None))
 
     @pytest.mark.asyncio
     async def test_context_without_tool_use_id_is_r407(
