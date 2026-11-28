@@ -480,6 +480,7 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
                 ontology_path=ontology_path,
                 checkpoint_dir=str(tmp_path / ".cp"),
                 strict_mode=strict,
+                acknowledge_unenforced_checks=not strict,
                 profiles=[profile],
             )
         )

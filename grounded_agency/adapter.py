@@ -349,7 +349,8 @@ class GroundedAgentConfig:
         ontology_path: Path to capability_ontology.yaml (auto-detected if not specified)
         strict_mode: If True, refuse a call that fails a check. If False,
             log a warning and let the checkpoint, prerequisite and internal
-            checks pass (outside class SL; approval still applies).
+            checks pass (outside class SL; approval still applies). False
+            needs ``acknowledge_unenforced_checks=True``.
         audit_log_path: Path for audit log file
         checkpoint_dir: Directory for checkpoint storage. Adapters that
             share it share its state file (merged under a file lock), not
@@ -495,6 +496,12 @@ class GroundedAgentConfig:
         sandbox_deny_env: More environment variables the sandbox unsets
             for its commands, beside the token variables and every variable
             whose name looks like a credential's.
+        acknowledge_unenforced_checks: Must be True for
+            ``strict_mode=False``, which is refused (``ValueError``) without
+            it: the caller states that calls may run without the checkpoint,
+            prerequisite and internal checks they fail. The adapter logs a
+            warning when it starts in that mode. Ignored with
+            ``strict_mode=True``.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -525,9 +532,11 @@ class GroundedAgentConfig:
     sandbox_allowed_domains: Sequence[str] = ()
     sandbox_deny_paths: Sequence[str] = ()
     sandbox_deny_env: Sequence[str] = ()
+    acknowledge_unenforced_checks: bool = False
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
+        _check_unenforced_acknowledged(self)
         if isinstance(self.sandbox_allowed_domains, str) or not all(
             isinstance(d, str) and d for d in self.sandbox_allowed_domains
         ):
@@ -589,6 +598,17 @@ class GroundedAgentConfig:
                 except ValueError as e:
                     raise ValueError(f"allowed_destinations: {e}") from None
             self.allowed_destinations = tuple(self.allowed_destinations)
+
+
+def _check_unenforced_acknowledged(config: GroundedAgentConfig) -> None:
+    """Refuse ``strict_mode=False`` the caller has not acknowledged."""
+    if not config.strict_mode and config.acknowledge_unenforced_checks is not True:
+        raise ValueError(
+            "strict_mode=False lets a call run without the checkpoint, "
+            "prerequisite and internal checks it fails, which is outside class "
+            "SL (STANDARD 1.2.0 section 10.4); pass "
+            "acknowledge_unenforced_checks=True to run in that mode"
+        )
 
 
 # An array index as RFC 6901 writes one: ASCII digits, no leading zero
@@ -852,6 +872,15 @@ class GroundedAgentAdapter:
 
     def __post_init__(self) -> None:
         """Initialize components after dataclass creation."""
+        # The configuration is mutable: check the acknowledgement again for
+        # one changed since it was made.
+        _check_unenforced_acknowledged(self.config)
+        if not self.config.strict_mode:
+            logger.warning(
+                "strict_mode=False (acknowledged): calls run without the "
+                "checkpoint, prerequisite and internal checks they fail, "
+                "outside class SL"
+            )
         # SEC-012: Verify ontology integrity before loading
         if not verify_ontology_integrity(
             self.config.ontology_path, self.config.ontology_hash

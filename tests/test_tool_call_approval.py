@@ -780,7 +780,12 @@ class TestHookApprovalRule:
     ) -> None:
         """strict_mode governs the checkpoint rule only."""
         lenient = GroundedAgentAdapter(
-            _config(ontology_path, tmp_path, strict_mode=False)
+            _config(
+                ontology_path,
+                tmp_path,
+                strict_mode=False,
+                acknowledge_unenforced_checks=True,
+            )
         )
         hook = lenient._make_pretooluse_safety_hook()
 
@@ -814,7 +819,12 @@ class TestHookApprovalRule:
         self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         lenient = GroundedAgentAdapter(
-            _config(ontology_path, tmp_path, strict_mode=False)
+            _config(
+                ontology_path,
+                tmp_path,
+                strict_mode=False,
+                acknowledge_unenforced_checks=True,
+            )
         )
         lenient.create_checkpoint(["*"], "Test")
 

@@ -229,7 +229,8 @@ Key Points:
    (each call reserves the checkpoint under its tool_use_id)
 3. Read-only operations (Read, Grep) are always allowed; a read-only Bash
    command (ls) only under the verified sandbox, in bypassPermissions mode
-4. In strict_mode=False, mutations warn but proceed
+4. In strict_mode=False, mutations warn but proceed (outside class SL; the
+   configuration needs acknowledge_unenforced_checks=True)
 5. A call whose capability requires approval is put to the host's
    can_use_tool callback; with none it is denied (F502), unless the
    adapter is configured with approval="off"

@@ -488,7 +488,7 @@ A hook's reason and a permission result's message are text, and they are the onl
 | Rate limit | `deny` | `F504 CONSTRAINT_VIOLATED:` | Yes |
 | A failure of the layer itself, a gated call with no `tool_use_id`, an MCP tool reached without a decision | `deny` or the tool's error | `R407 SAFETY_CHECK_FAILED:` | Partial: a failed rate check and an MCP tool with `require_layer` still refuse |
 
-`strict_mode=False` is outside class SL.
+`strict_mode=False` is outside class SL. The configuration refuses it with `ValueError` unless `acknowledge_unenforced_checks=True` is passed too, and the adapter logs a warning when it starts in that mode.
 
 ## Approval
 
@@ -879,8 +879,10 @@ class GroundedAgentConfig:
     ontology_path: str = "schemas/capability_ontology.yaml"
 
     # If True, block mutations without checkpoint
-    # If False, log warning but allow
+    # If False, log warning but allow (outside class SL); False needs
+    # acknowledge_unenforced_checks=True, else ValueError
     strict_mode: bool = True
+    acknowledge_unenforced_checks: bool = False
 
     # Audit log location
     audit_log_path: str = ".claude/audit.log"
@@ -1085,11 +1087,8 @@ python tools/validate_workflows.py
 The adapter is blocking a call because its mapping requires a checkpoint and no valid one exists, or another in-flight call holds it. The reason names the tool and its capability: `F501 CHECKPOINT_REQUIRED: Write (capability 'mutate') requires checkpoint. ...`.
 
 ```python
-# Solution 1: Create checkpoint before mutation
+# Create a checkpoint before the mutation
 adapter.create_checkpoint(["*"], "Before changes")
-
-# Solution 2: Use non-strict mode (not recommended)
-adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=False))
 ```
 
 If the reason says the tool `has no capability mapping`, the tool is unbound and was given the strictest flags. Register it with its real capability (see [Unbound Tools](#unbound-tools)).

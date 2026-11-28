@@ -492,6 +492,74 @@ class TestGroundedAgentAdapter:
         assert adapter.checkpoint_tracker is not None
         assert adapter.evidence_store is not None
 
+    @pytest.mark.parametrize("acknowledged", [False, None, 1, "yes"])
+    def test_strict_mode_off_needs_the_acknowledgement(
+        self, ontology_path: str, tmp_path: Path, acknowledged: object
+    ) -> None:
+        """strict_mode=False is refused unless the caller passes
+        acknowledge_unenforced_checks=True itself: a truthy stand-in is not
+        an acknowledgement."""
+        with pytest.raises(ValueError, match="acknowledge_unenforced_checks=True"):
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                strict_mode=False,
+                acknowledge_unenforced_checks=acknowledged,  # type: ignore[arg-type]
+            )
+
+    def test_strict_mode_on_needs_no_acknowledgement(self, ontology_path: str) -> None:
+        assert GroundedAgentConfig(ontology_path=ontology_path).strict_mode is True
+        assert GroundedAgentConfig(
+            ontology_path=ontology_path, strict_mode=True
+        ).strict_mode
+
+    def test_a_copy_that_turns_strict_mode_off_is_refused(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        config = GroundedAgentConfig(
+            ontology_path=ontology_path, checkpoint_dir=str(tmp_path / ".cp")
+        )
+        with pytest.raises(ValueError, match="outside class SL"):
+            replace(config, strict_mode=False)
+        assert not replace(
+            config, strict_mode=False, acknowledge_unenforced_checks=True
+        ).strict_mode
+
+    def test_a_configuration_changed_after_it_was_made_is_refused(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        """The adapter checks the acknowledgement again when it is built."""
+        config = GroundedAgentConfig(
+            ontology_path=ontology_path, checkpoint_dir=str(tmp_path / ".cp")
+        )
+        config.strict_mode = False
+        with pytest.raises(ValueError, match="acknowledge_unenforced_checks=True"):
+            GroundedAgentAdapter(config)
+
+    @pytest.mark.asyncio
+    async def test_acknowledged_strict_mode_off_warns_and_lets_the_call_run(
+        self,
+        ontology_path: str,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """With the acknowledgement the adapter starts, says so in the log,
+        and logs a missing checkpoint instead of refusing the call."""
+        with caplog.at_level("WARNING", logger="grounded_agency.adapter"):
+            lenient = GroundedAgentAdapter(
+                GroundedAgentConfig(
+                    ontology_path=ontology_path,
+                    checkpoint_dir=str(tmp_path / ".cp"),
+                    strict_mode=False,
+                    acknowledge_unenforced_checks=True,
+                    approval="off",
+                )
+            )
+        assert "strict_mode=False (acknowledged)" in caplog.text
+        hook = lenient._make_pretooluse_safety_hook()
+        result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
+        assert result == {}
+
     def test_wrap_options(self, adapter: GroundedAgentAdapter):
         """Test wrapping SDK options."""
         base = ClaudeAgentOptions(allowed_tools=["Read", "Write"])
@@ -783,6 +851,7 @@ class TestCheckpointReservation:
             GroundedAgentConfig(
                 ontology_path=ontology_path,
                 strict_mode=False,
+                acknowledge_unenforced_checks=True,
                 checkpoint_dir=str(tmp_path / ".checkpoints"),
                 approval="off",
             )

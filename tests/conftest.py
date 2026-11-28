@@ -206,6 +206,7 @@ def lenient_adapter(ontology_path: str, tmp_path: Path) -> GroundedAgentAdapter:
         GroundedAgentConfig(
             ontology_path=ontology_path,
             strict_mode=False,
+            acknowledge_unenforced_checks=True,
             checkpoint_dir=str(tmp_path / ".checkpoints"),
             approval="off",
         )
