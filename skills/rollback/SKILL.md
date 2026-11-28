@@ -86,7 +86,9 @@ hooks:
             # (glob_marks: git st[[:alpha:]]sh). A name built only when a command runs, or one
             # git's configuration gives, is not, and the plugin's pre-tool-use hook
             # gates such a command as a mutate. git runs with core.fsmonitor and
-            # hooks turned off.
+            # hooks turned off, no object fetched, and for at most 5 seconds
+            # (rb_git): a git that did not answer names no git directory, so the
+            # restore is refused.
             # Claude Code passes the tool call as JSON on stdin; exit 2 blocks the
             # call and the reason on stderr is shown to Claude. A call that cannot
             # be read is blocked (R407).
@@ -301,10 +303,46 @@ hooks:
             if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then P="$CLAUDE_PROJECT_DIR"
             elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then P="$CLAUDE_PLUGIN_ROOT"
             else P="$(pwd)"; fi
-            G="git -c core.fsmonitor=false -c core.hooksPath=/dev/null"
-            GD="$($G -C "$P" rev-parse --absolute-git-dir 2>/dev/null || true)"
+            # git as the plugin's hooks run it (their hgit and bounded): with
+            # core.fsmonitor and hooks turned off, no object fetched, no input,
+            # and for at most 5 seconds. git reads the files a repository's
+            # configuration includes, and a FIFO or a terminal there
+            # (include.path = /dev/ptmx) holds the read until someone writes;
+            # a git that did not answer (status 124) names no git directory, so
+            # the restore is refused (F503). POSIX sh: no local variables, so
+            # every name it sets starts with rb_. The watchdog writes to
+            # /dev/null, so a command substitution around rb_git waits for
+            # git alone.
+            rb_git() {
+              (
+                GIT_NO_LAZY_FETCH=1
+                export GIT_NO_LAZY_FETCH
+                exec git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+              ) < /dev/null &
+              rb_pid=$!
+              (
+                trap 'kill "${rb_sleeper:-}" 2>/dev/null; exit 0' TERM
+                sleep 5 &
+                rb_sleeper=$!
+                wait "$rb_sleeper" || true
+                kill -KILL "$rb_pid" 2>/dev/null && exit 124
+                exit 0
+              ) > /dev/null 2>&1 &
+              rb_watch=$!
+              rb_status=0
+              wait "$rb_pid" || rb_status=$?
+              kill -TERM "$rb_watch" 2>/dev/null || true
+              rb_stopped=0
+              wait "$rb_watch" || rb_stopped=$?
+              [ "$rb_stopped" != 124 ] || return 124
+              return "$rb_status"
+            }
+            GD="$(rb_git -C "$P" rev-parse --absolute-git-dir 2>/dev/null)" || GD=""
             case "$GD" in */.git|*/.git/worktrees/*|*/.git/modules/*) ;; *) GD="" ;; esac
-            if [ -n "$GD" ] && [ -n "$CWD" ] && [ "$($G -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null || true)" != "$GD" ]; then GD=""; fi
+            if [ -n "$GD" ] && [ -n "$CWD" ]; then
+              rb_cwd_gd="$(rb_git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null)" || rb_cwd_gd=""
+              [ "$rb_cwd_gd" = "$GD" ] || GD=""
+            fi
             KEY=""
             if [ -n "$GD" ] && [ -f "$GD/acs/checkpoints/key" ] && [ ! -L "$GD/acs/checkpoints/key" ]; then
               KEY="$(head -c 128 "$GD/acs/checkpoints/key" 2>/dev/null || true)"
