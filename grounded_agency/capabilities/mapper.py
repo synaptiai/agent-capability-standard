@@ -1838,8 +1838,9 @@ class ToolCapabilityMapper:
         names no mode."""
         if not _stays_sandboxed(tool_input):
             return False
-        if permission_mode is not None and (
-            permission_mode not in CHECKED_PERMISSION_MODES
+        if permission_mode is not None and not (
+            isinstance(permission_mode, str)
+            and permission_mode in CHECKED_PERMISSION_MODES
         ):
             return False
         check = self.os_boundary

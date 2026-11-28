@@ -378,6 +378,8 @@ WEAKENINGS: list[tuple[str, Any]] = [
     ("network.allowedDomains", ["0x7f000001"]),
     ("network.allowedDomains", ["foo.local."]),
     ("network.allowedDomains", ["*.*"]),
+    ("network.allowedDomains", ["pypi.org:443"]),
+    ("network.allowedDomains", ["metadata.tencentyun.com"]),
     ("network.allowedDomains", [""]),
     ("network.allowedDomains", "pypi.org"),
     ("filesystem.disabled", True),
@@ -864,6 +866,11 @@ def test_a_default_mode_not_checked_in_a_settings_file_is_not_verified(
     _write(
         project / ".claude" / "settings.json", {"permissions": {"defaultMode": "plan"}}
     )
+    adapter = _adapter(tmp_path)
+    adapter.wrap_options(_options(project, setting_sources=["project"]))
+    assert not _relaxed(adapter)
+    # A value that is not a mode name at all is not a checked mode.
+    _write(project / ".claude" / "settings.json", {"permissions": {"defaultMode": []}})
     adapter = _adapter(tmp_path)
     adapter.wrap_options(_options(project, setting_sources=["project"]))
     assert not _relaxed(adapter)

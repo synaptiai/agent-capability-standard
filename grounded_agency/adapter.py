@@ -2544,7 +2544,9 @@ class GroundedAgentAdapter:
         # checks the mode each call runs in as well (the session's mode can
         # change).
         mode = getattr(wrapped, "permission_mode", None)
-        if mode is not None and mode not in CHECKED_PERMISSION_MODES:
+        if mode is not None and not (
+            isinstance(mode, str) and mode in CHECKED_PERMISSION_MODES
+        ):
             faults.append(
                 f"the options' permission_mode {mode!r} is a mode this layer "
                 f"has not checked"

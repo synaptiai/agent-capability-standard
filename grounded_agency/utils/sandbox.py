@@ -135,6 +135,15 @@ _HOME_CREDENTIALS: tuple[str, ...] = (
 # rule's own syntax: a path holding one is not read literally.
 _PATTERN = re.compile(r"[*?\[\]{}()\\]")
 
+# Allowlist entries refused besides those the setup command's host grammar
+# refuses: any metadata.* name (a cloud metadata service), and any entry
+# with a colon (a port, or an IPv6 literal), checked after a trailing dot is
+# dropped and in lower case.
+_LOCAL_HOST = re.compile(
+    r"^(\*|localhost|.*\.localhost|.*\.local|metadata(\..*)?|"
+    r"\[.*\]|[0-9.]+|.*:.*)$"
+)
+
 
 @dataclass(frozen=True)
 class BoundaryPaths:
@@ -693,7 +702,7 @@ def mode_faults(document: Any, where: str) -> list[str]:
     outside :data:`CHECKED_PERMISSION_MODES`: a session may start in it,
     and a hook input that names no mode would not show it."""
     present, value = _get(document, "permissions", "defaultMode")
-    if present and value not in CHECKED_PERMISSION_MODES:
+    if present and not (isinstance(value, str) and value in CHECKED_PERMISSION_MODES):
         return [
             f"{where}permissions.defaultMode is "
             f"{json.dumps(value, default=str)}, a mode this layer has not checked"
@@ -791,7 +800,8 @@ def boundary_faults(
     allowlist, which names only hosts the setup command would list
     (:func:`~grounded_agency.sandbox_settings.check_host`: no loopback,
     link-local, metadata or local-use name, no IP literal in any spelling,
-    no one-label name, no wildcard but a leading ``*.``), keeps every credential file of ``paths`` unreadable, every variable of
+    no one-label name, no wildcard but a leading ``*.``) and no
+    ``metadata.`` name, port or IPv6 literal, keeps every credential file of ``paths`` unreadable, every variable of
     ``paths`` unset and every ``denyWrite`` path of ``paths`` in its
     ``filesystem.denyWrite``, and the ``permissions.deny`` rules hold every
     rule :func:`deny_rules` gives for ``paths``. With ``destination_policies`` (a destination
@@ -821,6 +831,10 @@ def boundary_faults(
                 # is not a leading "*." fail it: they may reach this machine, the
                 # instance's credentials, or every host.
                 why = _refused_entry(domain)
+                if why is None and _LOCAL_HOST.fullmatch(
+                    domain.strip().rstrip(".").lower()
+                ):
+                    why = "it names a metadata host, a port or an IPv6 literal"
                 if why is not None:
                     faults.append(
                         f"sandbox.network.allowedDomains names "
