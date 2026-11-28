@@ -42,6 +42,11 @@ export interface LintDiagnostic {
 
 type Tools = Record<string, { annotations?: Record<string, unknown> }>;
 
+/** Set `record[key]` as an own member: a tool may be named `__proto__`. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /**
  * The binding records the offered tools carry, what each offered name
  * carries (the record of the name the tool states, its `tool`, or null for
@@ -69,12 +74,12 @@ function recordsOf(tools: Tools): {
       name;
     const record = annotationRecord(stated, annotation);
     if (!record) {
-      offered[name] = null;
+      setOwn(offered, name, null);
       continue;
     }
-    offered[name] = stated;
+    setOwn(offered, name, stated);
     const computed = computedFlags(tool);
-    if (computed !== undefined) raised[stated] = Object.hasOwn(raised, stated) ? joinFlags(raised[stated]!, computed) : computed;
+    if (computed !== undefined) setOwn(raised, stated, Object.hasOwn(raised, stated) ? joinFlags(raised[stated]!, computed) : computed);
     if (!seen.has(stated)) {
       seen.add(stated);
       records.push(record);
@@ -84,7 +89,9 @@ function recordsOf(tools: Tools): {
 }
 
 function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
-  const annotation = tools[name]?.annotations?.[ANNOTATION_KEY] as { capability?: unknown } | undefined;
+  const annotation = (Object.hasOwn(tools, name) ? tools[name]?.annotations?.[ANNOTATION_KEY] : undefined) as
+    | { capability?: unknown }
+    | undefined;
   return typeof annotation?.capability === 'string' ? (annotation.capability as CapabilityId) : undefined;
 }
 
@@ -178,7 +185,7 @@ export function lintAgentBindings(
       .map(([action, tool]) => ({ action, tool }));
     if (hostActions.length === 0) continue;
     const named: Record<string, string | null> = { ...offered };
-    for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) named[tool] = null;
+    for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) setOwn(named, tool, null);
     const { diagnostics } = checkBindings(records, { offered: named, hostActions, raised });
     for (const d of diagnostics) {
       if (d.code !== 'F506') continue;

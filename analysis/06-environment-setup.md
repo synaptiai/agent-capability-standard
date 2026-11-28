@@ -101,20 +101,20 @@ After installation, the plugin hooks defined in `hooks/hooks.json` are automatic
 
 ### Method B: pip install (SDK Package Only)
 
-This method installs the `grounded_agency` Python package for programmatic integration with the Claude Agent SDK. It does not install the Claude Code plugin, skills, or hooks.
+This method installs the `grounded_agency` Python package for programmatic integration with the Claude Agent SDK. It does not install the Claude Code plugin, skills, or hooks. The package is not on PyPI yet, so install it from a clone of the repository; the install compiles the Rust core and needs Python 3.14+ and Rust 1.88+.
 
 ```bash
 # Core package -- PyYAML plus the compiled core, no SDK dependency
-pip install grounded-agency
+pip install -e .
 
 # With Claude Agent SDK integration (adds claude-agent-sdk>=0.1.52,<0.3)
-pip install grounded-agency[sdk]
+pip install -e ".[sdk]"
 
 # With development tools (adds pytest, mypy, ruff)
-pip install grounded-agency[dev]
+pip install -e ".[dev]" -c constraints.txt
 
 # Everything: SDK + dev tools
-pip install grounded-agency[all]
+pip install -e ".[all]"
 ```
 
 **Dependency breakdown by extra:**
@@ -873,9 +873,7 @@ ImportError: No module named 'claude_agent_sdk'
 
 **Fix:**
 ```bash
-pip install grounded-agency[sdk]
-# Or from source:
-pip install -e ".[sdk]"
+pip install -e ".[sdk]"   # from the repository root
 ```
 
 Note: The adapter is designed to work without the SDK installed. It falls back to dict-based hook configuration and permission results. The `ImportError` only occurs if you explicitly import SDK types:

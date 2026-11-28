@@ -435,13 +435,13 @@ Additionally, several OASF-to-GA mappings use `composition` mapping type, meanin
 **Impact:**
 - Tools built for the OASF ecosystem cannot fully interoperate with the 6 unmapped GA capabilities.
 - Agents claiming OASF compliance cannot express safety-critical capabilities like `checkpoint`, `rollback`, and `ground` through standard OASF skill codes.
-- The OASF Safety Extensions Proposal (`docs/proposals/OASF_SAFETY_EXTENSIONS.md`) exists but has not been adopted by the OASF standard body.
+- The OASF Safety Extensions Proposal (`docs/proposals/OASF_SAFETY_EXTENSIONS.md`) is a reference document in this repository and has not been submitted to the OASF project.
 
 **Remediation:**
-1. Continue advocacy for the OASF Safety Extensions Proposal to get `checkpoint`, `rollback`, and `ground` adopted as first-class OASF skill categories.
+1. Keep the OASF Safety Extensions Proposal as an unsubmitted reference document, which the maintainer decided on 2026-11-27. Submitting it to the OASF project, so that `checkpoint`, `rollback`, and `ground` could become OASF skills, is a separate maintainer decision. Submission would first need the proposal aligned with Standard 1.2.0 and retargeted at a current OASF release.
 2. Create an OASF compatibility adapter that wraps unmapped GA capabilities as OASF "custom skill" extensions (using OASF's extensibility mechanism).
 3. Document the 6 unmapped capabilities as "GA-native" capabilities that extend beyond OASF's scope, with clear guidance for OASF-aligned consumers.
-4. Track OASF version updates (currently v0.8.0) and update mappings as the OASF standard evolves.
+4. Track OASF version updates and update the mappings as the OASF standard evolves. The mapping targets OASF v0.8.0, and OASF has since released v1.0.0 and v1.1.0.
 
 **Effort:** Large (1-2 weeks)
 

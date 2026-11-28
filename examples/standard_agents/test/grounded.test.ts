@@ -1152,6 +1152,18 @@ describe('the agent definition', () => {
     expect(lintPromptTools('p', { lookup }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'lookup']]);
   });
 
+  it('reports a tool named for a member of a plain object, whose annotation does not load (security round 6)', () => {
+    // The lint threw: the package's checkBindings found the name on the
+    // prototype of its bindings, where the record had not loaded.
+    const misspelt = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional: 1 } } };
+    for (const name of ['toString', 'constructor', '__proto__']) {
+      const tools = Object.fromEntries([[name, misspelt]]);
+      expect(lintPromptTools('p', tools).map((d) => [d.code, d.location.tool])).toEqual([['W617', name]]);
+      const agent = { name: 'a', sideA: { prompt: 'p', stopTool: name }, sideB: { human: true } } as const;
+      expect(lintAgentBindings(agent, tools).map((d) => [d.code, d.location.tool])).toEqual([['F506', name]]);
+    }
+  });
+
   it('reports a tool whose stated name is not the name it is offered under', () => {
     // Copied from another tool, with `name` left unchanged: an approver
     // would be shown `archive_record` for a call that purges.

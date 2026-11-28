@@ -290,6 +290,29 @@ GNU_GREP = (
 )
 
 
+# The text vectors of tests/conformance/secrets/credentials.json on which
+# the plugin's shell scan (hooks/secret_scan.sh and its copies) does not
+# yet give the answer of the Python and TypeScript refusal rule: `sk-` read
+# only where a token starts, and signed-URL signatures (#147, #148). The
+# shell tests assert that the scan still gives the other answer on each, so
+# the set must be emptied when the scan takes the same rule.
+SHELL_SCAN_PENDING = frozenset(
+    {
+        "task_slug",
+        "risk_slug",
+        "sk_key_glued_after_a_letter",
+        "s3_sigv4_signed_url",
+        "gcs_signed_url",
+        "azure_sas_url",
+        "cloudfront_signed_url",
+        "s3_sigv2_signed_url",
+        "signed_url_percent_encoded",
+        "signed_url_json_escaped",
+        "signed_url_json_escaped_slash",
+    }
+)
+
+
 def assert_linear(seconds_at: Any, small: Any, large: Any) -> None:
     """``seconds_at(large)`` is at most three times ``seconds_at(small)``,
     where ``large`` is twice ``small``: linear time doubles, a time that

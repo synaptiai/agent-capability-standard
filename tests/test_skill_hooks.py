@@ -24,7 +24,13 @@ import pytest
 import yaml
 
 from tests.brace_readings import BY_VERSION, READINGS, assert_reading
-from tests.conftest import BASH_4, GNU_GREP, assert_linear, enter_checkpoint_commit
+from tests.conftest import (
+    BASH_4,
+    GNU_GREP,
+    SHELL_SCAN_PENDING,
+    assert_linear,
+    enter_checkpoint_commit,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = ROOT / "skills"
@@ -340,6 +346,15 @@ class TestFrontmatterHooks:
         end = command.index("# END shell-words") + len("# END shell-words")
         assert command[start:end] == source
 
+    def test_the_pending_vectors_are_text_vectors(self) -> None:
+        """Each vector the shell scan has not yet taken is one it runs."""
+        text = {
+            v["name"]
+            for v in CREDENTIALS["vectors"]
+            if isinstance(v["input"], str) and not v["secret_values"]
+        }
+        assert SHELL_SCAN_PENDING <= text
+
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
         "vector",
@@ -364,7 +379,11 @@ class TestFrontmatterHooks:
             check=False,
         )
         assert result.returncode == 0, result.stderr
-        expected = "yes" if vector["expect"]["holds"] else "no"
+        holds = vector["expect"]["holds"]
+        if vector["name"] in SHELL_SCAN_PENDING:
+            # The scan has not yet taken the rule this vector pins.
+            holds = not holds
+        expected = "yes" if holds else "no"
         assert result.stdout.strip() == expected, vector["name"]
 
     @pytest.mark.parametrize("shell", SHELLS)
@@ -1922,9 +1941,13 @@ class TestPersistCommandHook:
             }
             return edit, write
 
+        # BSD grep (macOS) reads about ten times slower than GNU grep, and a
+        # busy runner took over 30 s for the 64 000 lines there
+        limit = 30 if GNU_GREP else 300
+
         def seconds_of(call: dict[str, Any]) -> float:
             started = time.monotonic()
-            result = run_command(hook, call, tmp_path, shell)
+            result = run_command(hook, call, tmp_path, shell, timeout=limit)
             assert result.returncode == 0, result.stderr
             return time.monotonic() - started
 

@@ -270,6 +270,32 @@ export interface Unlinked {
   /** The execution and model step the call was made in: only a hook of the same step may link it. */
   flow_id: string | null;
   step: number | null;
+  /**
+   * The `seq` of the composite call whose state made this call (§5.18.4):
+   * an entry of a nested call, or of a call while a composite's invocation
+   * of the tool was pending. Its hook, if the runtime fires one for an
+   * invocation, comes while the composite runs, so it may be linked only
+   * while the composite's own entry still waits (`withoutOrphans`).
+   */
+  under?: number;
+}
+
+/**
+ * The waiting entries that can still be linked: an entry made under a
+ * composite (`under`) only while the composite's entry waits too, at any
+ * depth. Once the composite's own hook has linked it, or it can no longer
+ * be linked, a nested call's entry still waiting belongs to no hook: the
+ * runtime fired none for the invocation, and a later call of the same tool
+ * that the model made must not take it.
+ */
+export function withoutOrphans(waiting: readonly Unlinked[]): Unlinked[] {
+  let kept = [...waiting];
+  for (;;) {
+    const seqs = new Set(kept.map((u) => u.seq));
+    const next = kept.filter((u) => u.under === undefined || seqs.has(u.under));
+    if (next.length === kept.length) return next;
+    kept = next;
+  }
 }
 
 /** Whether a waiting entry belongs to the given execution and model step. */
@@ -340,6 +366,7 @@ export async function appendTrace(
   store: Store,
   entry: Omit<TraceEntry, 'seq'>,
   secrets: readonly string[] = [],
+  under?: number,
 ): Promise<TraceEntry> {
   const seq = ((await store.getValue<number>(KEYS.traceCount)) ?? 0) + 1;
   const stored: TraceEntry = { seq, ...redacted(entry, secrets) };
@@ -347,10 +374,17 @@ export async function appendTrace(
   await store.setValue(KEYS.trace(seq), stored);
   if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
     // The redacted name: the list is a record of the layer's too (§6.7).
-    const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
-    // An entry of an earlier step can no longer be linked (see audit.ts).
-    const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(
-      (u) => !stale(u, waiting.flow_id, waiting.step),
+    const waiting: Unlinked = {
+      seq,
+      action: stored.action,
+      flow_id: stored.flow_id ?? null,
+      step: stored.step ?? null,
+      ...(under !== undefined ? { under } : {}),
+    };
+    // An entry of an earlier step can no longer be linked (see audit.ts),
+    // nor can a nested call's whose composite no longer waits.
+    const unlinked = withoutOrphans(
+      ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter((u) => !stale(u, waiting.flow_id, waiting.step)),
     );
     await store.setValue(KEYS.unlinked, [...unlinked, waiting]);
   }

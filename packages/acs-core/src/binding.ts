@@ -210,6 +210,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * The member `key` of `record`, only when it is the record's own: a tool
+ * may be named `constructor`, `toString` or `__proto__`, which a plain
+ * object would otherwise answer from its prototype.
+ */
+function ownMember<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/** Set `record[key]` as an own member, `__proto__` included. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /** Read one record in full, without the ontology (step 1). */
 export function parseRecord(record: unknown): { binding: Parsed | null; errors: BindingDiagnostic[] } {
   const errors: BindingDiagnostic[] = [];
@@ -667,7 +681,7 @@ export function checkBindings(
     if (done) return done;
     const binding = candidates.get(tool);
     if (!binding) {
-      const k = known[tool]!;
+      const k = ownMember(known, tool)!;
       return { risk: k.risk, mutation: k.mutation, requires_checkpoint: k.requires_checkpoint, requires_approval: k.requires_approval };
     }
     let flags = own.get(tool)!;
@@ -682,7 +696,7 @@ export function checkBindings(
   const resolveApproval = (tool: string): BindingApproval | undefined => {
     if (approvals.has(tool)) return approvals.get(tool);
     const binding = candidates.get(tool);
-    if (!binding) return known[tool]?.approval;
+    if (!binding) return ownMember(known, tool)?.approval;
     let approval = binding.approval;
     for (const name of binding.invokes) approval = joinApproval(approval, resolveApproval(name));
     approvals.set(tool, approval);
@@ -696,8 +710,8 @@ export function checkBindings(
     const capabilities = capabilitiesOf(binding) as CapabilityId[];
     const approval = resolveApproval(tool);
     // A control-only tool performs no capability: no profile raises it.
-    const extra = !binding.control && Object.hasOwn(raised, tool) ? raised[tool] : undefined;
-    effective[tool] = {
+    const extra = binding.control ? undefined : ownMember(raised, tool);
+    setOwn(effective, tool, {
       ...(extra !== undefined ? joinFlags(resolve(tool), extra) : resolve(tool)),
       capabilities,
       prerequisites: prerequisitesOf(capabilities),
@@ -707,7 +721,7 @@ export function checkBindings(
       ...(binding.classifier !== undefined ? { classifier: binding.classifier } : {}),
       ...(approval !== undefined ? { approval } : {}),
       ...(binding.destination !== undefined ? { destination: binding.destination } : {}),
-    };
+    });
   }
 
   if (options.offered !== undefined || options.hostActions !== undefined) {
@@ -725,7 +739,7 @@ function checkOffered(
   const out: BindingDiagnostic[] = [];
   const bound = (name: string): BoundTool | undefined => {
     const carried = Object.hasOwn(offered, name) ? offered[name] : name;
-    return carried === name ? effective[name] : undefined;
+    return carried === name ? ownMember(effective, name) : undefined;
   };
   const performable = new Set<string>();
   let anyCapability = false;

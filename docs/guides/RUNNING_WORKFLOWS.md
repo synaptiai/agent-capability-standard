@@ -467,10 +467,11 @@ redactor recognises to the host's `IdempotencyLog`, `CheckpointTracker` and
 redactor gets one of its own), so the log's file, the tracker's records (a
 checkpoint's reason and scope, which a `checkpoint` step's input gives)
 and a refused `persist` know the registered secrets too. A signed URL's
-signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
-a host that cites signed URLs adds a pattern for them
-(`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without
-their query. The core's grounding refusal (F505)
+signature (the `X-Amz-Signature`, `X-Goog-Signature`, `sig` or
+`Signature` query parameter) is among the default patterns, so the log's
+file keeps none; a host that cites URLs signed another way adds a pattern
+for them (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them
+without their query. The core's grounding refusal (F505)
 names an anchor by its index and kind, never by its `ref`, and its approval
 refusals name neither a decision's value nor its id.
 

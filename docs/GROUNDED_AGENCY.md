@@ -1108,36 +1108,7 @@ This appendix bridges academic concepts to practical application. If you're eval
 
 ### D.3 Adoption Path
 
-**Phase 1: Validation only (Week 1)**
-- Add validator to CI/CD pipeline
-- Validate existing workflows without changing runtime
-- Identify hidden type mismatches and missing prerequisites
-
-**Phase 2: Safety layer (Weeks 2–4)**
-- Add checkpoints before high-risk mutations
-- Implement rollback for critical workflows
-- Add audit logging for compliance
-
-**Phase 3: Grounding (Month 2)**
-- Add evidence anchors to high-value claims
-- Implement provenance tracking
-- Enable decision lineage queries
-
-**Phase 4: Full conformance (Quarter 2)**
-- Achieve L3 conformance (full type safety)
-- Implement trust model for multi-source workflows
-- Progress to L4 with patch suggestions
-
-```mermaid
----
-title: The adoption path
----
-flowchart TB
-  accDescr: Adoption goes in four phases, from validation only, through a safety layer and grounding, to full conformance.
-  p1["Phase 1, week 1: validation only, in CI with no runtime change"] --> p2["Phase 2, weeks 2–4: safety layer, checkpoints, rollback, audit logging"]
-  p2 --> p3["Phase 3, month 2: grounding, evidence anchors, provenance"]
-  p3 --> p4["Phase 4, quarter 2: full conformance, L3 then L4, trust model"]
-```
+The staged adoption path for Standard 1.2 is in the [adoption guide](guides/ADOPTION.md). It has five stages: the validator in CI, the plugin's hooks, a safety layer of class SL, an executor of class EX, and domain profiles with the trust model. Each stage names its component and ends with a check you can run. The levels L1 to L4 rank validators, not teams ([STANDARD v1.2.0 §10.1](../spec/STANDARD-v1.2.0.md#101-conformance-levels)).
 
 ### D.4 Common Objections
 

@@ -269,8 +269,10 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * (`bindingProfiles`): they raise the
    * flags of each of the tool's capabilities at the call's effective risk
    * (with `invokes`), and of each capability the tools it invokes perform,
-   * transitively, at theirs (its approval covers their nested calls); a
-   * call they require a person for counts only
+   * transitively, at theirs (its approval covers their nested calls), and
+   * they raise the flags and person requirement of each such nested call
+   * when it runs, a plain tool's included, whether or not it takes the
+   * invocation's token; a call they require a person for counts only
    * approvals the deployment attests as a person's
    * (`approver_identity.kind: human`), and its trace entries carry
    * `person_required`. A composite that invokes such a tool needs a
@@ -470,7 +472,9 @@ const POLICY = new WeakMap<object, ApprovalPolicy>();
  */
 function invokedBinding(name: string, tool: object & { annotations?: Record<string, unknown> }): BoundTool | undefined {
   const record = annotationRecord(name, tool.annotations?.[ANNOTATION_KEY]);
-  return record ? checkBindings([record]).effective[name] : undefined;
+  if (!record) return undefined;
+  const { effective } = checkBindings([record]);
+  return Object.hasOwn(effective, name) ? effective[name] : undefined;
 }
 
 /** A binding's `approval` as a policy. */
@@ -589,6 +593,13 @@ interface NestingToken {
   /** The highest minimum confidence of those composites' profiles (§5.21.3), or null. */
   minimumConfidence: number | null;
   /**
+   * The domain profiles those composites apply, the layer's included
+   * (§5.21.3): they govern the nested calls a composite's approval covers,
+   * so they raise a nested call's flags and person requirement for what it
+   * performs, as they raised the composite's.
+   */
+  profiles: readonly BindingProfiles[];
+  /**
    * The approval request whose decisions approved the composite's call (its
    * own, or the one that covered it), holding only the decisions that call
    * counted (under a person requirement, a person's): a nested call is
@@ -626,11 +637,49 @@ function findToken(thread: string, flow: string | null, tool: string, argsDigest
   );
 }
 
+/**
+ * The composite call whose state this call of `tool` may have been made
+ * through: the composite of a pending invocation of the tool in this
+ * execution, if any (`under` of the call's waiting entry, records.ts).
+ */
+function pendingUnder(thread: string, flow: string | null, tool: string, definition: object): number | undefined {
+  return (TOKENS.get(thread) ?? []).find((t) => t.flow === flow && (t.tool === tool || t.listed === definition))?.seq;
+}
+
 /** The rules enclosing composites put on a call (§4.4.2, §5.20, §5.21.3). */
 interface EnclosingRules {
   destinations: readonly (readonly string[])[];
   grounding: readonly GroundingPolicy[];
   minimumConfidence: number | null;
+  profiles: readonly BindingProfiles[];
+}
+
+/**
+ * The flags and person requirement `profiles` raise for a call that
+ * performs `capabilities` at effective risk `risk` with `declared` flags
+ * (§5.21.3), joined: what the profiles of the composites enclosing a nested
+ * call put on it, as they put them on the composites' own calls.
+ */
+function raisedBy(
+  profiles: readonly BindingProfiles[],
+  capabilities: readonly CapabilityId[],
+  declared: DeclaredFlags,
+): { flags: SafetyFlags; person: boolean } {
+  let flags: SafetyFlags = { risk: 'low', mutation: false, requires_checkpoint: false, requires_approval: false };
+  let person = false;
+  for (const p of profiles) {
+    for (const c of capabilities) {
+      const raised = p.flags(c, declared);
+      flags = joinFlags(flags, {
+        risk: raised.risk,
+        mutation: raised.mutation,
+        requires_checkpoint: raised.requires_checkpoint,
+        requires_approval: raised.requires_approval,
+      });
+      person ||= raised.person;
+    }
+  }
+  return { flags, person };
 }
 
 /**
@@ -655,6 +704,7 @@ function pendingRules(thread: string, tool: string, definition: object): Enclosi
     destinations: tokens.flatMap((t) => t.destinations),
     grounding: tokens.flatMap((t) => t.grounding),
     minimumConfidence: tokens.reduce<number | null>((m, t) => highest(m, t.minimumConfidence), null),
+    profiles: [...new Set(tokens.flatMap((t) => t.profiles))],
   };
 }
 
@@ -712,6 +762,12 @@ function nestingState(
      * composite and of those enclosing it (§5.21.3), or null.
      */
     minimumConfidence: number | null;
+    /**
+     * The domain profiles the composite applies, the layer's included, and
+     * those of the composites enclosing it (§5.21.3): they raise the flags
+     * and person requirement of each nested call for what it performs.
+     */
+    profiles: readonly BindingProfiles[];
     recorded_by: RecordedBy;
     secrets: readonly string[];
     now: () => number;
@@ -767,6 +823,9 @@ function nestingState(
           error: result.error ?? code,
         },
         composite.secrets,
+        // Made through the composite's state, never by the model: its entry
+        // waits for no hook once the composite's own has come (records.ts).
+        composite.seq,
       ),
     ).catch(() => undefined);
   };
@@ -916,10 +975,20 @@ function nestingState(
     } catch (cause) {
       unreadable = cause;
     }
+    // Whether the profiles that govern the call require a person for it
+    // (§5.21.3), so its entries carry `person_required`. Where they cannot
+    // be read, the checks below fail the call.
+    let personRequired = false;
+    try {
+      personRequired = raisedBy(composite.profiles, bound.capabilities, { risk: bound.risk }).person;
+    } catch {
+      personRequired = false;
+    }
     const base = {
       action: tool,
       capability,
       ...(bound.control ? { control: true as const } : {}),
+      ...(personRequired ? { person_required: true as const } : {}),
       ...(bound.domain !== undefined ? { domain: bound.domain } : {}),
       ...position,
       ...(args_digest !== undefined ? { args_digest } : {}),
@@ -929,7 +998,12 @@ function nestingState(
     const refuseNested = async (code: RefusalCode, message: string, suggestion: string): Promise<ToolResult> => {
       const result = refuse(code, tool, capability, message, suggestion);
       await write(() =>
-        appendTrace(state, { ...base, at: composite.now(), status: 'refused', code, error: result.error ?? code }, composite.secrets),
+        appendTrace(
+          state,
+          { ...base, at: composite.now(), status: 'refused', code, error: result.error ?? code },
+          composite.secrets,
+          composite.seq,
+        ),
       ).catch(() => undefined);
       return result;
     };
@@ -971,7 +1045,18 @@ function nestingState(
           }
         }
       }
-      if (bound.requires_approval) {
+      // The profiles that govern the call raise what it needs (§5.21.3):
+      // an approval or a person they require is covered only by decisions
+      // the composite's call counted that still meet it now.
+      const raised = raisedBy(composite.profiles, bound.capabilities, { risk: bound.risk });
+      if (raised.person && !composite.person) {
+        return refuseNested(
+          'F502',
+          `An applied domain profile requires a person's approval for ${tool} (STANDARD 1.2.0 §5.21.3), and the decisions that approved ${composite.name} were not all a person's, and ${tool} is not defined with groundedTool, so no decision of its own can be asked.`,
+          `Give ${composite.name} a person's approval, or define ${tool} with groundedTool.`,
+        );
+      }
+      if (bound.requires_approval || raised.flags.requires_approval) {
         const policy = policyOf(bound.approval);
         if (composite.authority === null || !decisionsCover(composite.authority, policy, composite.now())) {
           return refuseNested(
@@ -980,6 +1065,13 @@ function nestingState(
             `Give ${composite.name} the approval ${tool} needs, or define ${tool} with groundedTool.`,
           );
         }
+      }
+      if ((bound.requires_checkpoint || raised.flags.requires_checkpoint) && !composite.checkpoint) {
+        return refuseNested(
+          'F501',
+          `${tool} needs a checkpoint, ${composite.name}'s call used none, and ${tool} is not defined with groundedTool, so it cannot use one of its own.`,
+          `Call a 'checkpoint' tool, then call ${composite.name} again.`,
+        );
       }
       const executed = await readExecuted(state);
       for (const needed of bound.prerequisites) {
@@ -1014,7 +1106,9 @@ function nestingState(
     }
     let started: TraceEntry;
     try {
-      started = await write(() => appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets));
+      started = await write(() =>
+        appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets, composite.seq),
+      );
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       return refuse('R407', tool, capability, `The nested call could not be recorded: ${message}.`, 'The call did not run.');
@@ -1133,6 +1227,7 @@ function nestingState(
       destinations: composite.destinations,
       grounding: composite.grounding,
       minimumConfidence: composite.minimumConfidence,
+      profiles: composite.profiles,
       authority: composite.authority,
       flow: composite.flow,
       tool,
@@ -1221,6 +1316,13 @@ type Claim =
       enclosingGrounding: readonly GroundingPolicy[];
       /** The highest minimum confidence of the profiles of the composites enclosing this call, or null. */
       enclosingMinimum: number | null;
+      /** The domain profiles of the composites enclosing this call (§5.21.3). */
+      enclosingProfiles: readonly BindingProfiles[];
+      /**
+       * The decisions in `authority` are a person's only: this call counted
+       * only a person's, or the composite that covered it did (§5.21.3).
+       */
+      personAuthority: boolean;
       /** The approval request whose decisions approved the call: its own, or its composite's. */
       authority: ApprovalRecord | null;
       /** The call used a checkpoint: its own, or the one of the composite that covered it. */
@@ -1445,6 +1547,36 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       config_sha256,
     })));
 
+  /**
+   * The flags and person requirement the profiles of the composites
+   * enclosing a call raise (§5.21.3): for each capability it performs, at
+   * its effective risk, and for what its nested calls perform, at their own,
+   * as the tool's own profiles raise them (`applied` above). A composite
+   * that takes no token is so held to them for its nested calls too.
+   */
+  const raisedFor = (profiles: readonly BindingProfiles[]): { flags: SafetyFlags; person: boolean } => {
+    let joined = raisedBy(profiles, capabilities, { ...options.flags, risk });
+    for (const performed of nested) {
+      const more = raisedBy(profiles, [performed.capability], { risk: performed.risk });
+      joined = { flags: joinFlags(joined.flags, more.flags), person: joined.person || more.person };
+    }
+    return joined;
+  };
+
+  /**
+   * Whether a call made now needs a person (§5.21.3): its own profiles', or
+   * those of the composites whose invocation of the tool is pending. For an
+   * entry written when the checks could not complete; if the profiles
+   * cannot be read either, the tool's own requirement.
+   */
+  const personNow = (profiles: readonly BindingProfiles[]): boolean => {
+    try {
+      return person || raisedFor(profiles).person;
+    } catch {
+      return person;
+    }
+  };
+
   /** What every entry of this tool's call names: the tool, its capability and where the call was made. */
   const identityOf = (state: ThreadState) => {
     const flow = flowOf(state);
@@ -1472,13 +1604,27 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     // What is known of the call so far, for the record if a write fails.
     const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id' | 'covered_by'> = {};
     let layerRecord: RecordedBy | undefined;
+    // The rules of every composite whose invocation of this tool is pending
+    // (`pendingRules`): their profiles raise this call's flags and person
+    // requirement for what it performs and what its own nested calls
+    // perform (`raisedFor`), as they raised the composites' own (§5.21.3),
+    // whether or not the call takes a token.
+    const rules = pendingRules(state.threadId, name, definition);
+    // The composite whose state this call may have been made through: its
+    // entries wait for a hook only while that composite's does (records.ts).
+    let under = pendingUnder(state.threadId, flow, name, definition);
+    // Whether the call needs a person, once the profiles are read.
+    let needPerson: boolean | undefined;
     try {
       const recorded_by = await recordedBy();
       layerRecord = recorded_by;
+      const raised = raisedFor(rules.profiles);
+      const need = joinFlags(flags, raised.flags);
+      needPerson = person || raised.person;
       // §5.18.7: no decision can bind to arguments that are not I-JSON
       // (§5.14), so a call that needs approval with such arguments is
       // refused with F502, not left to fail as the layer's own error.
-      const argsProblem = flags.requires_approval ? iJsonProblem(argsJson) : null;
+      const argsProblem = need.requires_approval ? iJsonProblem(argsJson) : null;
       try {
         used.args_digest = await digestOf(argsJson);
       } catch (cause) {
@@ -1486,6 +1632,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
       const base = {
         ...identity,
+        ...(needPerson ? { person_required: true as const } : {}),
         ...(used.args_digest !== undefined ? { args_digest: used.args_digest } : {}),
         recorded_by,
       };
@@ -1501,6 +1648,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
             error: result.error ?? code,
           },
           secrets,
+          under,
         );
         return { outcome: result };
       };
@@ -1544,7 +1692,6 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // it, and their grounding policies, reach this call whether or not it
       // takes that token (§5.20, §5.21.3; `pendingRules`).
       const token = used.args_digest === undefined ? undefined : findToken(state.threadId, flow, name, used.args_digest);
-      const rules = pendingRules(state.threadId, name, definition);
       const enclosing = rules.destinations;
       const enclosingGrounding = rules.grounding;
       const enclosingMinimum = rules.minimumConfidence;
@@ -1596,12 +1743,15 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // Otherwise it is checked as a call of its own. Each invocation covers
       // at most one call: the token is taken here, synchronously after it was
       // found.
-      if (token !== undefined) token.used = true;
+      if (token !== undefined) {
+        token.used = true;
+        under = token.seq;
+      }
       const covered =
         token !== undefined &&
-        (token.person || !person) &&
-        (!flags.requires_approval || (token.authority !== null && decisionsCover(token.authority, policy, now()))) &&
-        (!flags.requires_checkpoint || token.checkpoint);
+        (token.person || !needPerson) &&
+        (!need.requires_approval || (token.authority !== null && decisionsCover(token.authority, policy, now()))) &&
+        (!need.requires_checkpoint || token.checkpoint);
       if (covered) used.covered_by = token.seq;
 
       // 1. Approval, bound to the digest of exactly what is about to run.
@@ -1609,7 +1759,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // When the request was found approved: the approvals that counted then
       // are the ones the call's record lists.
       let approvedAt = 0;
-      if (flags.requires_approval && !covered) {
+      if (need.requires_approval && !covered) {
         if (argsProblem !== null) {
           return await refuse(
             refusal(
@@ -1640,7 +1790,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         let standing = approvalState(request, approvedAt);
         // A person must decide (§5.21.3): only approvals the deployment
         // attests as a person's count.
-        if (standing === 'approved' && person) {
+        if (standing === 'approved' && needPerson) {
           const people = countedDecisions(request, approvedAt).filter((d) => d.approver_identity?.kind === 'human');
           if (new Set(people.map((d) => d.approver)).size < request.min_approvers) standing = 'pending';
         }
@@ -1650,7 +1800,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
               'F502',
               name,
               capability,
-              person
+              needPerson
                 ? `This call needs a person's approval (an applied domain profile requires one, STANDARD 1.2.0 §5.21.3: only approvals the deployment attests as a person's count), and the request is ${standing}.`
                 : `This call needs approval and the request is ${standing}.`,
               'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
@@ -1684,7 +1834,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
 
       // 3. A valid checkpoint for this call alone, taken in this execution and
       // not long ago.
-      const needsCheckpoint = flags.requires_checkpoint && !covered;
+      const needsCheckpoint = need.requires_checkpoint && !covered;
       const checkpoints = needsCheckpoint ? await readCheckpoints(state) : [];
       const unused = [...checkpoints].reverse().filter((c) => c.valid);
       const at = now();
@@ -1727,7 +1877,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         // approver, so identities never disagree for one principal.
         // Under a person requirement, a person's approvals only (§5.21.3).
         const counted = countedDecisions(request, approvedAt).filter(
-          (d) => !person || d.approver_identity?.kind === 'human',
+          (d) => !needPerson || d.approver_identity?.kind === 'human',
         );
         counts = { ...request, decisions: counted };
         approvers = [...new Set(counted.map((d) => principalOf(d.approver)))];
@@ -1770,7 +1920,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // 4. Record that the call is starting. The entry is written before the
       // tool's own code runs, so that a call cut off while it runs still
       // leaves a record of what it used.
-      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' }, secrets);
+      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' }, secrets, under);
       return {
         started,
         flow,
@@ -1778,6 +1928,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         enclosing,
         enclosingGrounding,
         enclosingMinimum,
+        enclosingProfiles: rules.profiles,
+        personAuthority: counts !== null ? needPerson : covered && token !== undefined && token.person,
         authority: counts ?? (covered && token !== undefined ? token.authority : null),
         checkpointed: used.checkpoint_id !== undefined || (covered && token !== undefined && token.checkpoint),
         call: {
@@ -1794,10 +1946,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // no approval or checkpoint is spent without a trace entry; if the
       // store refuses that too, there is nothing more to do.
       const message = cause instanceof Error ? cause.message : String(cause);
+      const personRequired = needPerson ?? personNow(rules.profiles);
       await appendTrace(
         state,
         {
           ...identity,
+          ...(personRequired ? { person_required: true as const } : {}),
           ...used,
           ...(layerRecord !== undefined ? { recorded_by: layerRecord } : {}),
           at: now(),
@@ -1806,6 +1960,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
           error: message,
         },
         secrets,
+        under,
       ).catch(() => undefined);
       return {
         outcome: refusal(
@@ -1841,10 +1996,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       await serially(state.threadId, async () => {
         const recorded_by = await recordedBy().catch(() => undefined);
         const args_digest = await digestOf(args as Json).catch(() => undefined);
+        const personRequired = personNow(pendingRules(state.threadId, name, definition).profiles);
         await appendTrace(
           state,
           {
             ...identityOf(state),
+            ...(personRequired ? { person_required: true as const } : {}),
             ...(args_digest !== undefined ? { args_digest } : {}),
             ...(recorded_by !== undefined ? { recorded_by } : {}),
             at: now(),
@@ -1853,13 +2010,26 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
             error: result.error ?? 'R407',
           },
           layerSecrets(),
+          pendingUnder(state.threadId, flowOf(state), name, definition),
         );
       }).catch(() => undefined);
       return result;
     }
     const claim = await serially(state.threadId, () => check(state, args as Json, secrets));
     if (claim.outcome) return claim.outcome;
-    const { started, call, flow, recorded_by, enclosing, enclosingGrounding, enclosingMinimum, authority, checkpointed } = claim;
+    const {
+      started,
+      call,
+      flow,
+      recorded_by,
+      enclosing,
+      enclosingGrounding,
+      enclosingMinimum,
+      enclosingProfiles,
+      personAuthority,
+      authority,
+      checkpointed,
+    } = claim;
     // The output rules for this call: the tool's own, then those of the
     // composites enclosing it (§5.20, §5.21.3), in the order a nested plain
     // call's are checked (contract, grounding, minimum confidence).
@@ -1877,7 +2047,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       const composite = nestingState(state, {
         name,
         seq: call.seq,
-        person,
+        person: personAuthority,
         checkpoint: checkpointed,
         scope,
         // The composite's nested sends are checked against its profiles'
@@ -1890,6 +2060,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         // Its output rules, with those enclosing it, reach the calls it covers.
         grounding: [...enclosingGrounding, ...allPolicies],
         minimumConfidence: highest(enclosingMinimum, minimumConfidence),
+        // Its profiles, with those enclosing it, govern the calls it covers.
+        profiles: [...new Set([...enclosingProfiles, ...applied])],
         recorded_by,
         secrets,
         now,
@@ -2139,8 +2311,15 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
     }
     if (!options.execute) return { status: 'success', result: 'ok' };
     // What it returns that is not a success reaches the runtime and the
-    // model as a grounded tool's error does, so it is redacted (§6.7).
-    const result = await options.execute(state, args);
+    // model as a grounded tool's error does, so it is redacted (§6.7); so
+    // does what it throws, which is returned as an error result, as a
+    // grounded tool returns its own code's error.
+    let result: ToolResult;
+    try {
+      result = await options.execute(state, args);
+    } catch (cause) {
+      result = { status: 'error', error: cause instanceof Error ? cause.message : String(cause) };
+    }
     return result.status === 'success' ? result : redactedRefusal(result, []);
   };
 

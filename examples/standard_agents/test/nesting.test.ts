@@ -1432,8 +1432,9 @@ describe('a nested tool name that holds a secret (security round 4, batch 5)', (
   }
   const leaks = (text: string) => text.includes(REGISTERED) || text.includes(TOKEN);
 
-  for (const name of [REGISTERED, TOKEN, `x_${REGISTERED}`]) {
-    it(`redacts an invoked name the composite does not list (${name.slice(0, 7)}...) in its refusal, its entry and its record`, async () => {
+  // `mcp__srv__${TOKEN}`: an unregistered token glued after `_`.
+  for (const name of [REGISTERED, TOKEN, `x_${REGISTERED}`, `mcp__srv__${TOKEN}`]) {
+    it(`redacts an invoked name the composite does not list (${name.slice(0, 13)}...) in its refusal, its entry and its record`, async () => {
       configureLayer({ secrets: [REGISTERED] });
       const { t, nested } = dispatchSetup();
       expect((await run(t, 'dispatch', { tool: name })).status).toBe('success');
