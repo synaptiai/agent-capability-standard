@@ -421,7 +421,7 @@ def test_the_rollback_hook_refuses_a_restore_in_time_when_git_stalls(
     tmp_path: Path, shell: str, kind: str
 ) -> None:
     """The project's git directory cannot be asked: the restore is refused
-    (F503, as when git fails), within LIMIT_S (before: no verdict until the
+    (F503, naming the stall), within LIMIT_S (before: no verdict until the
     hook's 30-second timeout)."""
     if kind == "ptmx" and not os.path.exists("/dev/ptmx"):
         pytest.skip("needs /dev/ptmx")
@@ -434,6 +434,10 @@ def test_the_rollback_hook_refuses_a_restore_in_time_when_git_stalls(
     )
     assert status == 2, (status, err, took)
     assert err.startswith("F503 ROLLBACK_FAILED: "), err
+    # The refusal names the stall, not a missing checkpoint: the
+    # checkpoint was recorded.
+    assert "git did not answer within 5 seconds" in err, err
+    assert "restores no checkpoint" not in err, err
     assert took < LIMIT_S, took
 
 
@@ -456,6 +460,10 @@ def test_the_rollback_hook_bounds_its_read_of_the_calls_directory(
     )
     assert status == 2, (status, err, took)
     assert err.startswith("F503 ROLLBACK_FAILED: "), err
+    # The refusal names the stall, not a missing checkpoint: the
+    # checkpoint was recorded.
+    assert "git did not answer within 5 seconds" in err, err
+    assert "restores no checkpoint" not in err, err
     assert took < LIMIT_S, took
 
 
