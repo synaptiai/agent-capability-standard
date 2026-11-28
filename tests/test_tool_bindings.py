@@ -721,7 +721,7 @@ class TestRecordedBy:
             {"expiry_minutes": 20},
             {"checkpoint_reservation_seconds": 60},
             {"approval": "off"},
-            {"strict_mode": False},
+            {"strict_mode": False, "acknowledge_unenforced_checks": True},
         ],
     )
     def test_the_digest_follows_every_setting_that_decides_calls(

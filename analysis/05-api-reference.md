@@ -99,10 +99,11 @@ Configuration dataclass for the `GroundedAgentAdapter`. All fields have defaults
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `ontology_path` | `str` | Auto-detected | Path to `capability_ontology.yaml`. Auto-detected via `get_default_ontology_path()` which searches package-relative, project-relative, and cwd-relative locations. |
-| `strict_mode` | `bool` | `True` | If `True`, block mutations without a valid checkpoint. If `False`, log a warning but allow execution. |
+| `strict_mode` | `bool` | `True` | If `True`, block mutations without a valid checkpoint. If `False`, log a warning but allow execution; `False` needs `acknowledge_unenforced_checks=True`. |
 | `audit_log_path` | `str` | `".claude/audit.log"` | Path for the audit log file written by hooks. |
 | `checkpoint_dir` | `str` | `".checkpoints"` | Directory for checkpoint metadata storage. |
 | `expiry_minutes` | `int` | `30` | Default checkpoint expiry in minutes. After this period, a checkpoint is no longer valid. |
+| `acknowledge_unenforced_checks` | `bool` | `False` | Must be `True` for `strict_mode=False`, which raises `ValueError` without it. That mode is outside class SL. |
 | `checkpoint_reservation_seconds` | `float \| None` | `None` | How long a tool call holds the checkpoint it reserved if it never reports back (never consumes or releases it). `None` uses the tracker default, `CheckpointTracker.DEFAULT_RESERVATION_SECONDS` (600). Passed to `CheckpointTracker(reservation_seconds=...)`. |
 
 Further optional fields (`rate_limit`, `ontology_hash`, `output_format`, `max_budget_usd`, `model`, `max_turns`, `enable_discovery`) are documented in the class docstring.
@@ -115,9 +116,10 @@ from grounded_agency import GroundedAgentConfig
 # Default configuration (strict mode, 30-minute checkpoints)
 config = GroundedAgentConfig()
 
-# Permissive configuration for development
+# Non-strict configuration (outside class SL; needs the acknowledgement)
 dev_config = GroundedAgentConfig(
     strict_mode=False,
+    acknowledge_unenforced_checks=True,
     expiry_minutes=120,
     checkpoint_dir="/tmp/checkpoints",
 )

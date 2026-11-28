@@ -79,7 +79,8 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   checkpoint and approval), and `GroundedAgentConfig.approval` defaults to
   `"ask"`. Register an MCP tool with its real capability, and set
   `approval="off"` for the earlier approval behaviour
-  ([Python SDK tools](#upgrade-sdk-tools)).
+  ([Python SDK tools](#upgrade-sdk-tools)). `strict_mode=False` needs
+  `acknowledge_unenforced_checks=True` ([strict mode](#upgrade-strict-mode)).
 - Runs of 1.1 workflows can end differently. An approved step that fails has
   a `failed` record, with its code, from the moment it fails, also when its
   failure mode's rollback or checkpoint then fails (F503, F501) or finds no
@@ -113,6 +114,14 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   MCP tool registered without a `risk` takes its capability's risk (was
   `"medium"`), so a `retrieve` or `search` tool counts against the low-risk
   rate limit.
+- <a id="upgrade-strict-mode"></a>Python SDK, `GroundedAgentConfig` (Changed): `strict_mode=False` raises
+  `ValueError` unless `acknowledge_unenforced_checks=True` is passed with
+  it, also through `dataclasses.replace` and when the adapter is built from
+  a configuration changed after it was made. Set on a built adapter
+  without the acknowledgement, it is not in force: the checks stay
+  enforced. The mode lets a call run without the checkpoint, prerequisite
+  and internal checks it fails, which is outside class SL; the adapter logs
+  a warning when it starts in it.
 - Python SDK, the Bash classifier (security round 5): a command the
   read-only list would let pass, `git stash create` and a recorded restore
   take the worst case where the program the shell finds for the first word
@@ -2833,6 +2842,11 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   validity (Standard 1.2.0 §5.18.6).
 - `wrap_options()` no longer adds `Skill` to `allowed_tools`, so `Skill`
   calls reach the permission callback (the SDK warned that it was shadowed).
+- `GroundedAgentConfig(strict_mode=False)`, outside class SL, raises
+  `ValueError` unless `acknowledge_unenforced_checks=True` is passed with
+  it, and the adapter logs a warning when it starts in that mode; set on a
+  built adapter without the acknowledgement, it is not in force. The SDK
+  guide no longer suggests it for F501, nor `approval="off"` for F502.
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
 - Direct dependencies are at their latest releases. Python: the dev ranges are
