@@ -322,15 +322,55 @@ The reference implementations enforce this by code:
 
 #### 2.2.1 Prompt Injection
 
-**Scenario**: Malicious input tricks the agent into executing unintended actions.
+**Scenario**: Content the agent reads (a retrieved page, a search result, a
+received message, a recalled memory entry, a tool result, a file in the
+repository) holds text written as instructions, and the model acts on it.
 
-**Mitigations**:
-- Typed contracts validate input structure
-- Gates can block suspicious patterns
-- Audit trails enable forensic analysis
-- Checkpoint enables rollback of compromised actions
+**Mitigations** (decided by code, not by a model):
+- On a tool-calling host, only a person decides a call's approval: a
+  permission prompt answered by anything but a person (the host itself, an automatic
+  mode, a classifier) decides nothing, so injected text cannot approve its
+  own call ([STANDARD 1.2.0 §5.18.7](STANDARD-v1.2.0.md#5187-approval-for-calls)).
+  The approval shows the arguments the call will run with, and decides
+  that call alone.
+- A destination policy fails a `send` to a destination it does not allow
+  with F504, before anyone is asked
+  ([STANDARD 1.2.0 §4.4.2](STANDARD-v1.2.0.md#442-transmissions); §2.2.9).
+- The always-ask mark: on `receive`, `delegate` and `synchronize`, an item
+  whose sender has a trust class listed in `always_ask_trust_classes`, or
+  no identity or trust class, marks every step that reads it, and a marked
+  step that requires approval is asked of a person even where a standing
+  mandate would otherwise decide
+  ([STANDARD 1.2.0 §5.17](STANDARD-v1.2.0.md#517-sender-identity)).
+- `mutate` and `send` need a checkpoint and an approval, so an injected
+  change can be rolled back and an injected send is put to an approver
+  first: a person, unless the step names a standing mandate, and even then
+  a person for a step marked always-ask or one an applied profile requires
+  a person for
+  ([STANDARD 1.2.0 §5.14](STANDARD-v1.2.0.md#514-approval)).
+- Repository content does not configure the plugin's hooks: they block
+  every call while the project's settings files set an environment
+  variable that is not one of Claude Code's own (§5.1).
+- Typed contracts check the structure of inputs, and the audit trail
+  records each call for later analysis.
 
-**Residual Risk**: Prompt injection is primarily a runtime concern. The standard provides structure but not content filtering.
+Workflow authors apply these through the tainted input gate pattern
+([WORKFLOW_PATTERNS.md §4.4](../docs/WORKFLOW_PATTERNS.md#44-tainted-input-gate-pattern)):
+the destination comes from the person's inputs, never from the content; a
+payload derived from the content is checked by a `constrain` step before the
+act; and the act still needs a checkpoint and an approval. A `constrain` step is a check a
+model makes, and can itself be misled by the content it reads (§5.4).
+
+**Residual Risk**: Within what these checks allow, injected text can still
+steer the model: a send to an allowed destination, or a change a person
+approves without noticing what it does. Standard 1.2.0 has no rule that
+content a step reads never changes a layer's configuration or counts as a
+person's decision; the always-ask mark does not cover `retrieve`, `search`,
+`observe` or `recall`; and the grounding check
+([STANDARD 1.2.0 §5.20](STANDARD-v1.2.0.md#520-grounding)) runs on a
+step's output after the host has acted, so it cannot stop an injected send.
+These are planned for Standard 1.3.0
+([#169](https://github.com/synaptiai/agent-capability-standard/issues/169)).
 
 #### 2.2.2 Incorrect Identity Merges
 
@@ -752,17 +792,62 @@ Unless anonymity is requested.
 - [ ] Trust model is configured appropriately
 - [ ] Approval workflows are defined for high-risk actions
 
+Encryption at rest of the audit log and the other records is the
+operator's storage choice. Audit and evidence records hold no secret the
+layer recognises
+([STANDARD 1.2.0 §6.7](STANDARD-v1.2.0.md#67-secrets-in-records)), and
+the plugin's log keeps a SHA-256 digest of each tool input in place of the
+input (§5.2). Checkpoints copy the files in their scope, so where those
+files hold confidential data, the operator keeps the checkpoint store on
+storage they protect. Who may read the audit files is tracked in
+[#173](https://github.com/synaptiai/agent-capability-standard/issues/173).
+
 ---
 
 ## 9. Future Security Considerations
 
 ### 9.1 Planned Enhancements
 
-- Cryptographic signing of checkpoints
-- Role-based capability authorization
-- Encrypted audit log storage
-- Automated anomaly detection
-- Multi-party approval workflows
+Shipped in part:
+
+- **Keyed checkpoint records.** The plugin enters each checkpoint's commit
+  with the HMAC-SHA-256 of the commit under a per-project key, and a
+  rollback accepts only such an entry (§5.1). The SDK's snapshot store
+  keeps a SHA-256 digest of each checkpoint's files in its manifest;
+  neither the manifest nor the checkpoint tracker's state is keyed, and
+  the tracker's state holds no digest. An executor's saved run is refused when its MAC under the key the
+  host gives does not verify (HMAC-SHA-256 in the reference executor,
+  [STANDARD 1.2.0 §5.19.4](STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)).
+  Not provided: a signature that a party without the key can verify.
+- **Multi-party approval.** An approval step's `approver.min_approvers`
+  ([STANDARD 1.1.0 §5.14](STANDARD-v1.1.0.md#514-approval)) and a tool
+  binding's `approval.min_approvers` and `role`
+  ([STANDARD 1.2.0 §5.18.7](STANDARD-v1.2.0.md#5187-approval-for-calls)).
+  The reference executor and the Standard Agents binding count distinct
+  approvers, and the binding lets only a caller with the named role
+  decide. The SDK adapter decides through the host's permission prompt,
+  one person per call, and refuses with F502 a binding that needs more
+  than one approver or names a `role`. The plugin's hooks read no approval
+  policy and ask Claude Code's permission prompt for each gated call.
+
+Planned:
+
+- **Signatures a party without the key can verify**, for checkpoint
+  entries and the audit log's head, so that a verifier does not need the
+  key the agent's environment may hold.
+- **Allowed capabilities per deployment**
+  ([#168](https://github.com/synaptiai/agent-capability-standard/issues/168)).
+  Today an approval's `role` restricts who decides, and an agent manifest
+  lists the capabilities an agent may exercise and bounds a delegation's
+  safety flags
+  ([STANDARD 1.2.0 §5.15.1](STANDARD-v1.2.0.md#5151-agent-manifests)); no
+  layer refuses a call because its capability is outside a deployment's
+  allowed set.
+- **Anomaly detection over the audit records**: a monitor of the log's
+  invariants
+  ([#172](https://github.com/synaptiai/agent-capability-standard/issues/172))
+  and the anomaly rules and review procedure
+  ([#165](https://github.com/synaptiai/agent-capability-standard/issues/165)).
 
 ### 9.2 Open Research Questions
 
