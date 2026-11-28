@@ -119,13 +119,15 @@ findings:
     or `after_tool_call_failure`, `before_store_tool_result`, persistence and `tool_call_done`, the result
     each receives, and that `function.arguments` is complete in every hook except `tool_call_started`.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue asks for the table or the order. Issue 01 notes in open questions 1 and 2
-    that the coverage question is also open for the existing tool hooks, and its rule that a returned
-    result passes through the post-execution hooks lists them, although 0.2.0 gives them no order. Issue
-    06 item 5 covers only the wording of the order among children. The reference binding joins its audit
-    records in a `tool_call_done` hook, so what that hook covers bounds the audit trail; authors of redaction,
-    telemetry and billing hooks face the same question.
+  disposition: proposal
+  proposal: 01-before-tool-call-hook.md
+  coverage: full
+  disposition_note: 'Issue 01, under ''The same questions for the existing tool hooks'', asks in point 1
+    for a table of call origin (model-issued, `invokeTool`, `queueTool`, sub-prompt, handoff, lifecycle
+    tool, provider-executed) by tool hook, and in point 3 for the order of the hooks after execution, the
+    result each receives and complete arguments in every hook but `tool_call_started`. Its rule that a
+    returned result passes through those hooks follows that order. The reference binding joins its audit
+    records in a `tool_call_done` hook, so what that hook covers bounds the audit trail.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -167,13 +169,14 @@ findings:
     state whether a runtime persists such a call and its result, and which tool hooks, if any, fire for
     it.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue asks for it. Issue 01 only places provider tools outside its hook, as out
-    of reach of any runtime hook, and the integration document records that a provider-executed tool does
-    not pass through a grounded wrapper. An agent whose model lists `providerTools` has tool activity
-    that no hook, tool code or stored message is stated to record; a grounded agent avoids the gap by
-    leaving such tools off its models, and loses the capability. The difference between the published
-    types and the text concerns every runtime implementer and every client that shows search sources.
+  disposition: proposal
+  proposal: 01-before-tool-call-hook.md
+  coverage: full
+  disposition_note: 'Issue 01, point 2 of ''The same questions for the existing tool hooks'', asks for a
+    definition of a provider-executed tool whose `execute` is not invoked, for the members the published
+    types already have in Providers §5, §6 and §10, and for such calls'' row in the table of point 1,
+    which states whether they are persisted and which hooks fire. A grounded agent avoids the gap
+    meanwhile by leaving provider tools off its models.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -217,13 +220,15 @@ findings:
     in the published type comments into §4.1 and §4.3. Attribute a reported hook failure as `hook:<id>`,
     the `ErrorOrigin` form of Providers §7.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue asks for failure rules for the existing hooks. Issue 01 defines the outcome
-    of a throw or timeout for its new hook only, and cites the published comment on `before_create_message`.
-    A check that a grounded agent places in a tool hook or a request-context hook fails open or closed
-    at the runtime's choice; the integration document calls the binding's audit hook best effort, citing
-    the non-fatal rule and the timeout. Authors of redaction, moderation and compliance hooks have the
-    same exposure, and the published types state more than the text.
+  disposition: proposal
+  proposal: 01-before-tool-call-hook.md
+  coverage: full
+  disposition_note: 'Issue 01, point 4 of ''The same questions for the existing tool hooks'', asks for a
+    table of each hook''s outcome on a throw or a timeout, for the failure sentences that exist only in
+    the type comments to move into Hooks §4.1 and §4.3, and for a reported failure attributed as
+    `hook:<id>`. Its own hook already fails closed. Until the table exists, a check placed in a tool hook
+    or a request-context hook fails open or closed at the runtime''s choice, and the integration document
+    calls the binding''s audit hook best effort.'
   concerns:
   - safety-enforcement
   - evidence-audit-observability
@@ -665,12 +670,14 @@ findings:
     one line in the conformance summary. Separately, answer the overwrite, parent-directory, glob and
     external-storage questions.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it; the integration document lists it among the points not written
-    up as proposals. The reference binding keeps a checkpoint''s restore point in a thread file, so a
-    rollback rests on persistence the text describes and does not require. It stands without ACS: attachments,
-    the client file route and every package that stores artefacts rely on the same unstated rules, and
-    the first part only codifies what the pages already say.'
+  disposition: proposal
+  proposal: 12-persistence-and-delivery.md
+  coverage: full
+  disposition_note: 'Issue 12 asks for a ''Thread File System'' section in Runtime worded like the
+    key-value rules (persistence across executions, restarts and redeploys; visibility of a completed
+    write; isolation) with a line in the conformance summary, and separately for the overwrite,
+    parent-directory, glob and external-storage answers and the two missing method-table rows. The
+    reference binding keeps a checkpoint''s restore point in a thread file.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -737,13 +744,14 @@ findings:
     the failure payload to the parent. Otherwise state that failure from code is unavailable. Correct
     the sentence in Handlers §5 either way.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it; the integration document lists it among the points not written
-    up. Handlers §5 refers to a capability the API does not have, so the request stands without reference
-    to ACS: every handler-backed child that can fail (a relay that loses its upstream, a validator, an
-    import pipeline) reports failure as a success whose text says otherwise, and the run status and a
-    blocking parent record success. A grounded workflow hosted in a handler ends a failed run that way,
-    as the integration document''s handler-host table says. It leads one issue with SA-24 and SA-27.'
+  disposition: proposal
+  proposal: 10-child-session-outcomes.md
+  coverage: full
+  disposition_note: 'Issue 10 asks for a failure option on `stopSession()` that settles the run `failed`
+    with reason `session_fail` and delivers the failure message, and for the Handlers §5 sentence to be
+    corrected either way, within its table of what a parent receives for each way a child session ends.
+    Until then a grounded workflow hosted in a handler ends a failed run as a successful stop whose
+    `result` carries the code, as the integration document''s handler-host table says.'
   concerns:
   - safety-enforcement
   - workflow-execution
@@ -846,13 +854,15 @@ findings:
     or at-most-once), what follows a throw, and that an effect may schedule effects. Address the idempotency
     advice to effect authors. Move the return values of `removeScheduledEffect` into Threads §4.3.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it. It stands without ACS: the Examples page asks for a reminder
-    that arrives ''even if the conversation has ended'', and the normative text requires neither survival
-    nor timing. For a grounded agent it limits the handler-hosted workflow arrangement: an ACS wait must
-    end at its timeout, and a scheduled effect is the only time-based trigger SA defines. The integration
-    document works around it by calling `run.tick(now)` on every inbound message, which does nothing on
-    a thread that receives none.'
+  disposition: proposal
+  proposal: 12-persistence-and-delivery.md
+  coverage: full
+  disposition_note: 'Issue 12 asks Effects §3 to state that a scheduled effect is persisted with the
+    key-value store''s durability and never runs early, its delivery guarantee, what follows a throw and
+    whether an effect may schedule effects, to address the idempotency advice to effect authors, and to
+    move the return values of `removeScheduledEffect` into Threads §4.3. A handler-hosted workflow''s
+    timeouts depend on it; the integration document calls `run.tick(now)` on every inbound message
+    meanwhile.'
   concerns:
   - checkpoint-rollback-state
   - workflow-execution
@@ -928,12 +938,15 @@ findings:
     type, send-route body or `before_create_message` return value sets it. State how it relates to `metadata.subagent_id`.
     Separately, define `metadata.status_kind` values that tell stop from failure.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue asks for it. Issue 02 would let code tell a client-sent message from every
-    other and so closes imitation through the send route; it treats the child case as answered by `subagent_id`,
-    for which the text gives no rule on when the runtime sets it or who else may. ACS §5.17 has the host
-    report a sender identity with each received item, and a child report known only by a message label
-    gets none. Handler-backed parents, relays and clients that group child results need the same guarantee.
+  disposition: proposal
+  proposal: 02-message-sender.md
+  coverage: full
+  disposition_note: 'Issue 02, under ''The same guarantee for a child''s messages to its parent'', asks
+    that the runtime set `subagent_id` on every message it generates from a child (completion, failure,
+    `notifyParent` content), that no input type, send-route body or message-hook return can set it, that
+    the text relate it to `metadata.subagent_id`, and that `metadata.status_kind` values tell a stop from
+    a failure. With `user_id`, code can then tell a client''s message, a child''s report and every other
+    message apart.'
   concerns:
   - workflow-execution
   - multi-agent
@@ -968,15 +981,14 @@ findings:
     with `result` as its payload, and what the parent receives when a child session ends by a turn cap
     or an error. Align the comment on `StopSessionOptions.result`.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it. The 0.2.0 text and the published types point in different
-    directions on a rule that every handler-backed or code-terminated child depends on, since `stopSession()`
-    is such a child''s only way to end a session; that stands for any SA author. A grounded host that
-    delegates to such a child has to pass `notifyParent` itself and poll the child''s `status()`, and
-    receives two messages on a runtime that also queues the implicit one. The handler-host table of the
-    integration document ends a run with `state.stopSession({ result })` alone; by the comment in the
-    published types that text is returned to a blocking caller and sends no parent message. It belongs
-    in one issue with SA-18 and SA-27: what a parent receives for each way a child session can end.'
+  disposition: proposal
+  proposal: 10-child-session-outcomes.md
+  coverage: full
+  disposition_note: 'Issue 10''s table states, for `state.stopSession({ result })` under `implicit`
+    communication, the completion message with `result` as its payload, and leaves the turn-cap row to the
+    maintainers; it asks whether a call that also passes `notifyParent` queues both messages, and for
+    Runtime §8.3 to restate the table. The comment on `StopSessionOptions.result` is quoted as the source
+    of the disagreement.'
   concerns:
   - approval-human
   - workflow-execution
@@ -1094,12 +1106,14 @@ findings:
     with a stable code), and that `awaiting_human` is ordinary waiting. Extend the §3.3 warning to prompt-backed
     callers. Optionally add a per-relationship bound on the wait.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: No issue text covers it; the integration document's mapping table notes only that
-    SA has no timeout on the wait. The outcomes are unstated for every SA author who composes a blocking
-    child, the approval gate of Agents §7 included. A grounded workflow needs a bounded wait and today
-    gets one only by avoiding `blocking` relationships. It belongs in one issue with SA-18 and SA-24.
-    Issue 04 gives an error code a defined place in a tool result; it does not define these outcomes.
+  disposition: proposal
+  proposal: 10-child-session-outcomes.md
+  coverage: full
+  disposition_note: 'Issue 10 asks that a blocking `subagent_create` whose child fails or is terminated
+    return an error result with a stable code naming the case, leaves the turn-cap row to the maintainers,
+    and asks what a recovery run does with the call of a caller whose execution was lost; that waiting
+    on an `awaiting_human` child be stated as ordinary waiting; that the Subagents §3.3 warning cover
+    prompt-backed callers; and optionally for a per-relationship bound on the wait.'
   concerns:
   - approval-human
   - multi-agent
@@ -1139,15 +1153,14 @@ findings:
     types differ. For each member that exists only in the types, either define it in the text or mark
     it in the package, for example with a documentation tag, as outside the specification.
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue asks for the statement. Issue 04 part 1 would define `ToolResult`, with
-    `error_code` and `error_data`, in Tools §2, which settles two of the listed members; the provider-executed
-    members are the subject of SA-04. The question is product-neutral and checkable by search: a package
-    compiles against the types and a runtime is built from the text, so the two can disagree about what
-    a conforming runtime provides. For a grounded agent every types-only member has to be treated as non-portable,
-    and a field that a runtime drops cannot be feature-detected (published-api-extension-points#drift-01);
-    the reference binding repeats its refusal code in the `error` text for that reason. The sentence on
-    which source governs is also asked for under SA-66 and would go in the same issue.'
+  disposition: proposal
+  proposal: 11-text-and-published-types.md
+  coverage: full
+  disposition_note: 'Issue 11 asks for the statement that `@standardagents/spec` is versioned apart from
+    the text, that `SPEC_VERSION` names the text version it implements, and that the text governs where
+    they differ, with each types-only member either defined in the text or marked in the package; it lists
+    the members found by search. It names the opposite rule as the alternative. Issue 04 part 1 would
+    define `ToolResult` in the text, which settles two of the listed members.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1190,12 +1203,14 @@ findings:
     `status`, and whether tool results of the current execution are included when `includePastTools` is
     `false`. If `historyLimit` belongs to 0.2.x, document it there, with its effect on `execution.messageHistory`.'
   backwards_compatible: true
-  disposition: candidate
-  disposition_note: 'No issue text covers it. A grounded tool tells the model what is missing through
-    its tool result (a refusal naming F501 or F502), so whether that result is in the next request decides
-    whether the agent can proceed; the reference binding''s prompt (`config_steward`) sets neither flag.
-    It stands without ACS: a term used in several MUSTs has no definition, and the Examples page describes
-    a default the normative text does not state.'
+  disposition: proposal
+  proposal: 12-persistence-and-delivery.md
+  coverage: full
+  disposition_note: 'Issue 12 asks Runtime §4 to define eligibility as a function of `includeChat`,
+    `includePastTools`, `depth` and `parent_id`, the rendering side and message `status`, in particular
+    for the tool results of the current execution, and to document `historyLimit` there if it belongs to
+    0.2.x. A grounded tool''s refusal reaches the model only through its tool result; the reference
+    binding''s prompt (`config_steward`) sets neither flag.'
   concerns:
   - models-context-memory-security
   related:
@@ -2346,10 +2361,12 @@ findings:
     or state that the set is runtime-defined and a package documents what it needs.'
   backwards_compatible: true
   disposition: not_proposed
-  disposition_note: 'An open question, not a defect, with a sound workaround: a package bundles what it
-    cannot assume. The reference binding''s digest uses `crypto.subtle`, and the integration document
-    says a runtime without Web Crypto would need a bundled SHA-256. Whether a WebAssembly build of the
-    ACS core could load is the same question; that build needs a JavaScript interface first.'
+  disposition_note: 'An open question, not a defect, with a sound workaround for tool code: a package
+    bundles what it cannot assume. The reference binding''s digest uses `crypto.subtle`, and the
+    integration document says a runtime without Web Crypto would need a bundled SHA-256. For WebAssembly
+    the answer now decides more: `@synaptiai/acs-core/wasm` runs the ACS core in process, so whether
+    definition code may load WebAssembly decides whether an ACS workflow can run inside a Standard Agents
+    thread (integration document, ''Running ACS workflows''). No drafted issue asks it.'
   concerns:
   - published-api-extension-points
   - workflow-execution
@@ -2446,12 +2463,14 @@ findings:
     use one range form in both examples. In a later version, add an optional specification-version member
     to `PackedMeta` and `package.json.standardagent`.
   backwards_compatible: true
-  disposition: not_proposed
-  disposition_note: 'The workaround is sound: a binding pins the text version, the commit and the types
-    version, as the integration document says under ''Rely on a version pair'', and a bounded `peerDependencies`
-    range on the types package fixes the pair for a package. The sentence on which source governs is the
-    one SA-28 asks for and belongs with that finding. The `^0.44.0` range, which excludes the current
-    package, is a checkable erratum that could be added to issue 06.'
+  disposition: proposal
+  proposal: 11-text-and-published-types.md
+  coverage: partial
+  disposition_note: 'Issue 11 asks for the versioning statement, the rule on which source governs, and in
+    a later version a member of `PackedMeta` and `package.json.standardagent` naming the targeted
+    specification version. The range erratum is item 11 of issue 06: `^0.44.0` on the Examples page
+    excludes the current packages, 0.45.13. The workaround stays sound meanwhile: a binding pins the text
+    version, the commit and the types version.'
   concerns:
   - published-api-extension-points
   - packaging-conformance-governance
@@ -3055,6 +3074,9 @@ questions:
     a guard tool or a handler-only caller can rely on omission; if not, every tool refuses in its own
     `execute`.
   finding: SA-02
+  outcome: 'Asked by 07-unoffered-tool-call.md: its proposed rule covers a call whose name was not
+    offered, a call under `toolChoice: ''none''` and a model''s lifecycle call that targets a hidden
+    relationship.'
 - id: SA-Q02
   question: Are effect handlers, thread endpoint handlers and `invokeTool` calls that code starts together
     serialized with a running execution of the same thread, or may they interleave with it and with each
@@ -3068,6 +3090,9 @@ questions:
   depends: Whether a read-modify-write on the thread store (a counter, a single-use approval, a checkpoint
     list) is safe as written, or needs one writer or a lock outside the thread.
   finding: SA-22
+  outcome: 'Asked by 09-execution-concurrency-and-flow-id.md: part 1 asks what is serialized with a
+    running execution (effects, endpoints, code-started `invokeTool` calls), and its table asks whether
+    `state.execution` is present in an effect.'
 - id: SA-Q03
   question: May code that holds another thread's `ThreadState` (from `getParentThread()`, `getChildThread()`
     or the `childState` argument of `after_subagent_created`) read and write that thread's key-value store
@@ -3081,6 +3106,9 @@ questions:
   depends: Whether a child hands structured records to its parent through the parent's store, or only
     through messages and attachments; and whether a parent can end a child's session from code.
   finding: SA-15
+  outcome: 'Asked by 06-editorial-inconsistencies.md, item 6: whether a `ThreadState` for another thread
+    may read and write its key-value store and files, and whether `stopSession()`, `execution.stop()` and
+    `terminate()` on it end that thread''s session.'
 - id: SA-Q04
   question: Where the 0.2.0 text and `@standardagents/spec` (which declares `SPEC_VERSION = "0.2.0"`)
     differ, which governs? Are members found only in the types, such as `historyLimit`, `runAgent`, `QueueMessageInput.metadata`
@@ -3093,6 +3121,8 @@ questions:
   depends: Whether a portable package may use a types-only member and a runtime built from the text must
     provide it. With `historyLimit`, whether `execution.messageHistory` may be a window of the history.
   finding: SA-28
+  outcome: 'Asked by 11-text-and-published-types.md: which source governs, and the status of each member
+    found only in the types, `historyLimit` with its effect on `execution.messageHistory` among them.'
 - id: SA-Q05
   question: 'Do lowercase ''must'', ''should'' and ''may'' carry requirement force? Examples: ''Stop evaluation
     order should be:'' (Runtime §6), ''`subagent_create` must receive a non-empty `name` argument'' (Runtime
@@ -3116,6 +3146,9 @@ questions:
   depends: 'What a redaction, audit or metering hook covers: whether a record kept in `tool_call_done`
     is complete, or code-issued and lifecycle calls need a record of their own.'
   finding: SA-03
+  outcome: 'Asked by 01-before-tool-call-hook.md, point 1 of ''The same questions for the existing tool
+    hooks'': the table of call origin by hook, and whether a caller of `invokeTool` receives the result as
+    the hooks rewrote it.'
 - id: SA-Q07
   question: In what order do `after_tool_call_success` or `after_tool_call_failure`, `before_store_tool_result`,
     persistence of the result and `tool_call_done` run; which result does `tool_call_done` receive; and
@@ -3127,6 +3160,9 @@ questions:
   depends: Whether a tool can read earlier results of its own step on `execution.messageHistory`, and
     whether an observing hook sees the stored result or the tool's own.
   finding: SA-03
+  outcome: 'Asked by 01-before-tool-call-hook.md, point 3 of ''The same questions for the existing tool
+    hooks'': the order of the hooks after execution and persistence, the result `tool_call_done` receives,
+    and whether a result is persisted before the next call of the response.'
 - id: SA-Q08
   question: 'Does a `stopTool`, `sessionStop`, `sessionFail` or `sessionStatus` binding take effect when
     the bound tool returns `status: ''error''`?'
@@ -3151,6 +3187,8 @@ questions:
   depends: Whether a checkpoint, an approval or a budget scoped to one execution can be keyed on `flowId`,
     or needs a run identifier of its own in the thread store.
   finding: SA-17
+  outcome: 'Asked by 09-execution-concurrency-and-flow-id.md: part 3 gives `flowId` the boundary of one
+    execution, and its open question 1 asks about a handoff and a blocking child.'
 - id: SA-Q10
   question: 'Which call creates a child from code: `invokeTool(''subagent_create'', ...)`, `invokeTool(''<relationship
     name>'', ...)` or another API? What are its arguments, what does it return, does `state.children`
@@ -3164,6 +3202,9 @@ questions:
   depends: How a handler, or a tool that gates a delegation, spawns a `hidden` relationship portably.
     Only `immediate` children reached through `state.children` are specified today.
   finding: SA-25
+  outcome: 'Asked by 08-child-creation-from-code.md: its five points cover the name, the result, the
+    reference, the arguments and the user, and it asks whether a lifecycle tool''s name is a legal `uses`
+    entry.'
 - id: SA-Q11
   question: Does a session ended through `state.stopSession({ result })` under `implicit` parent communication
     queue the completion message of Subagents §6.2 with `result` as its payload? What does the parent
@@ -3176,6 +3217,9 @@ questions:
   depends: Whether a code-terminated child also passes `notifyParent`, at the risk of two messages, and
     whether a parent has to poll the child's status to learn that it ended.
   finding: SA-24
+  outcome: 'Asked by 10-child-session-outcomes.md: its table gives what the parent receives for
+    `state.stopSession({ result })`, a turn cap and an error, and it asks whether `notifyParent` with the
+    implicit message queues both.'
 - id: SA-Q12
   question: What does a blocking `subagent_create` return when the child is terminated, its run settles
     `failed` or stops on a cap, or the caller's execution is lost while it waits; and is any bound placed
@@ -3188,6 +3232,9 @@ questions:
   depends: Whether a caller can build a deadline from an effect and `terminate()`, and tell a failed child
     from a finished one without parsing text. If not, blocking relationships are avoided.
   finding: SA-27
+  outcome: 'Asked by 10-child-session-outcomes.md: an error result with a stable code for a failed or
+    terminated child, the turn-cap row, what a recovery run does with a lost caller''s call, and an optional
+    bound on the wait.'
 - id: SA-Q13
   question: Does any message on a human-backed side's perspective fulfil its parked turn, including a
     parent's `subagent_message` and `queueMessage` from code, or only a message from a client?
@@ -3200,6 +3247,8 @@ questions:
   depends: Whether an approval taken as a message can be trusted. If any message ends the wait, the requesting
     model can end it, and a decision has to go through an authenticated endpoint.
   finding: SA-12
+  outcome: 'Asked by 02-message-sender.md, under ''A related clarification'': which messages fulfil a
+    human-backed side''s parked turn.'
 - id: SA-Q14
   question: 'Which user does a child thread belong to: what does `ThreadState.userId` report on it, who
     may reach it through thread-addressed routes and endpoints, and does it appear in its owner''s thread
@@ -3212,6 +3261,8 @@ questions:
   depends: Whether the person meant to act on a child thread, such as an approver, can call its endpoints,
     and which user-account environment values `env()` resolves there.
   finding: SA-13
+  outcome: 'Asked by 08-child-creation-from-code.md, point 5: which user a child thread has, what `userId`
+    reports on it and who may reach it.'
 - id: SA-Q15
   question: Is a caller's `id` (`auth.caller.id`, `state.user()`) stable across requests on a runtime
     that does not implement the Draft Users page, and are `ThreadUser` and its `roles` part of the frozen
@@ -3234,6 +3285,8 @@ questions:
   depends: Whether any hook can stop a model request or a tool call today, which decides whether a moderation
     or policy hook fails open or closed on a given runtime.
   finding: SA-31
+  outcome: 'Asked by 01-before-tool-call-hook.md: its Problem section on a throwing
+    `before_create_message`, and its open question 3 on `hook_blocked`.'
 - id: SA-Q17
   question: In what order do several hooks of one type in one `hooks` array run, and does each transforming
     hook receive the previous hook's result, also across the child-before, base and child-after sources?
@@ -3274,6 +3327,8 @@ questions:
   depends: Whether a timeout, reminder or watchdog can be built on an effect, and whether its handler
     has to be idempotent; otherwise an external scheduler is needed.
   finding: SA-21
+  outcome: 'Asked by 12-persistence-and-delivery.md: survival across restarts and redeploys, no early run,
+    the delivery guarantee and what follows a throw.'
 - id: SA-Q21
   question: 'With `includePastTools: false`, are tool results of earlier steps of the current execution
     excluded from the next model request, or only those of earlier turns? Which persisted messages are
@@ -3285,6 +3340,8 @@ questions:
   depends: 'Whether a model sees a tool''s refusal or result on its next step by default, or every prompt
     whose tools return instructions has to set `includePastTools: true`.'
   finding: SA-29
+  outcome: 'Asked by 12-persistence-and-delivery.md: the definition of eligibility, in particular for the
+    tool results of the current execution under `includePastTools: false`.'
 - id: SA-Q22
   question: Are a provider-executed tool call and its result persisted as messages, and do any tool hooks
     fire for it? Does the 'local tools' wording of Tools §9 exclude such calls from the sequential rule?
@@ -3296,6 +3353,8 @@ questions:
   depends: Whether provider-side tool activity appears in the thread record and in a hook-kept audit,
     or a model that lists `providerTools` has activity nothing records.
   finding: SA-04
+  outcome: 'Asked by 01-before-tool-call-hook.md, point 2 of ''The same questions for the existing tool
+    hooks'': whether provider-executed calls are persisted, which hooks fire, and what a local tool is.'
 - id: SA-Q23
   question: May a thread creator's `env` carry names no definition declares, such as the flag of an `optional`
     relationship; when is that flag read; and does `env(name)` resolve user-account and instance values
@@ -3321,6 +3380,9 @@ questions:
   depends: Whether a deterministic child can rely on `state.arguments` and a parent can bind a digest
     to what it sent, or the child has to validate and echo its inputs itself.
   finding: SA-26
+  outcome: 'Asked by 08-child-creation-from-code.md, point 4: what a child without a side A prompt
+    accepts, whether validation may strip or coerce values, and what happens to new arguments on
+    create-or-continue.'
 - id: SA-Q25
   question: Are thread endpoints mounted at `{runtime_prefix}/{threadId}/{endpoint_path}` or beneath `{runtime_prefix}/threads/{threadId}/`,
     and is `POST {runtime_prefix}/threads` the specified route to create a thread, contrary to Examples
@@ -3334,6 +3396,8 @@ questions:
   depends: The URL a client or an approver's interface calls for a package endpoint, and whether thread
     creation can be scripted against any runtime.
   finding: SA-80
+  outcome: 'Asked by 06-editorial-inconsistencies.md, items 7 and 8: where thread endpoints are mounted,
+    and the route that creates a thread.'
 - id: SA-Q26
   question: Does adding an exposed agent to a prompt as a handoff activate its `parentHooks`, and do a
     child's `parentHooks` run when the owning side is handler-backed or the thread is at rest?
@@ -3345,6 +3409,8 @@ questions:
   depends: Whether a child that requires an audit or gate hook of its parent gets it in every composition,
     or only under prompt-backed sides with subagent relationships.
   finding: SA-80
+  outcome: 'Asked by 06-editorial-inconsistencies.md, item 10: whether a handoff activates `parentHooks`,
+    and whether they run under a handler-backed owning side and while the parent is at rest.'
 - id: SA-Q27
   question: What starts and ends a session, is a session identified, and can one session span several
     executions? The text uses the term for `maxSessionTurns`, `sessionStop` and `stopSession()` and does
@@ -3374,6 +3440,8 @@ questions:
   depends: Whether a restore point or an evidence file may be kept in the thread file system, and whether
     code has to call `mkdirFile` and `unlinkFile` before each write.
   finding: SA-16
+  outcome: 'Asked by 12-persistence-and-delivery.md: persistence across executions and restarts, overwrite
+    and parent directories for `writeFile`, and `readFile` for external storage.'
 - id: SA-Q30
   question: 'Is a message''s `metadata` ever included in a provider request, and how does `updateMessage`
     combine `metadata` with the stored value: merge or replace?'

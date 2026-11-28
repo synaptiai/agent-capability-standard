@@ -82,6 +82,24 @@ and the helpers of `grounded_agency.workflows.triggers` (`next_fire`,
 `OverlapGate`, `EventGate`); see
 [Running Workflows](RUNNING_WORKFLOWS.md#triggers).
 
+A host may also start a run that no trigger started, such as a run a model
+starts in a conversation, a test, or an operator's request. The Standard then
+leaves the run's attendance to the host. A workable rule: the run is attended
+when a person can answer an approval request through some channel within the
+request's `expires` (the session, a person's side of the conversation, or an
+authenticated endpoint the person can call), and unattended when no person
+can. In an unattended run a `human` approver is not asked and
+`when_unattended` applies at once
+([§5.14](../../spec/STANDARD-v1.2.0.md#514-approval), Attendance). In an
+attended run the host asks and waits; with `expires` set, a request nobody
+answers in time lapses with F502, and without it the run waits until someone
+answers. Neither attendance lets a step run without approval. The reference
+hosts start such a run attended unless told otherwise (`WorkflowRunner.start`
+without `trigger`, and `CoreContext.start` in `@synaptiai/acs-core/wasm`), and
+resume a deferred run attended by default (`WorkflowRunner.resume`,
+`CoreRun.resume`): pass `attendance="unattended"` (Python) or
+`attendance: 'unattended'` (TypeScript) when no one can answer.
+
 ### Schedules
 
 ```yaml

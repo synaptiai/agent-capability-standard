@@ -308,13 +308,17 @@ shell grammar are not written.
 paragraphs above, the progress records, the open questions in the
 findings file and the PVC review, checked against the tree.
 1. **Upstream issues.**
-   - Check that the passages they quote from SA 0.2.0 are unchanged since
-     `78fa54c`: upstream edits 0.2.0 in place.
-   - Run `tasks/standard-agents-upstream/file-issues.sh --file` (it files
-     06 first, then 01).
-   - Add the links to the folder's README and to the integration guide.
-   - Eleven candidate findings are not drafted, and SA-Q01 to SA-Q30 have
-     no answer.
+   - Done: the quoted passages were checked against upstream `f462a67` on
+     2026-11-27 (#139); the eleven candidate findings are in texts 01, 02
+     and the new 10 to 12, and 20 of SA-Q01 to SA-Q30 name the text that
+     asks them (#140).
+   - Open: the maintainer decides whether SA-Q05, Q08, Q15, Q17, Q18, Q19,
+     Q23, Q27, Q28 and Q30 are asked on their own, and from which account
+     the issues are filed.
+   - On the day of filing: re-check upstream `content/`, pin the links to
+     `main`'s head (folder README, Filing), run
+     `tasks/standard-agents-upstream/file-issues.sh --file` (06 first, then
+     01), and add the links to the folder's README and the integration guide.
 2. **Release 3.0.0.**
    - Versions: `plugin.json`, `pyproject.toml` and `__version__` (0.1.0;
      the foundation design planned 0.2.0), and both `CITATION.cff` files
@@ -328,7 +332,11 @@ findings file and the PVC review, checked against the tree.
      step that fails, a version-1 restore), which are already in Upgrading.
    - Close issue #77, which the Candidate delivers; #83 stays open for Go
      and Java.
-3. **ACS-Q10** (attendance of a thread no trigger started) is open.
+3. **ACS-Q10** (attendance of a thread no trigger started): answered as
+   guidance in the two guides and the findings file (#152). Open: whether
+   the rule (attended when a person can answer within the request's
+   `expires`) becomes a requirement, a candidate for a 1.3 RFC alongside
+   the RFC questions of #151.
 4. **npm:** a tag `acs-core-v0.1.0` on main, with `NPM_PUBLISH_ENABLED` and
    `NPM_TOKEN` set; otherwise the job is a dry run. The site's deploy has
    the same kind of gate (`SITE_DEPLOY_ENABLED` and the Cloudflare
@@ -350,7 +358,7 @@ findings file and the PVC review, checked against the tree.
    - The margins of the figure-gap runs.
    - The three workflows the digital-twin example copies.
    - The RFCs' open questions; RFC-0002 is still a Draft.
-   - The 319-row mapping is dated against 1.1.0.
+   - The 319-row mapping: done. The rows stay a 1.1.0 record, and each concern file lists the rows Standard 1.2.0 changes (#154).
    - Default redaction leaves an S3 presigned URL's `X-Amz-Signature`.
 
 ## Round 2: fix our side, pull request, merge

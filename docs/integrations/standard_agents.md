@@ -9,14 +9,18 @@ have to change for the combination to be complete.
 
 | Standard | Compared here |
 |---|---|
-| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0, for the mapping. The binding implements [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md), ontology 2.2.0 |
-| Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types |
+| Agent Capability Standard (ACS) | [Standard 1.1.0](../../spec/STANDARD-v1.1.0.md), ontology 2.1.0, for the mapping, checked against [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md), ontology 2.2.0, on 27 November 2026. The binding implements Standard 1.2.0, ontology 2.2.0 |
+| Standard Agent Specification (SA) | 0.2.0, [`standardagents/spec`](https://github.com/standardagents/spec) at commit `faccc8b` (12 November 2026), and the published `@standardagents/spec` 0.45.10 types; checked again at commit `f462a67` and 0.45.13 on 27 November 2026, with no change to the text |
 
-Standard 1.2.0 added the rules for tool calls that the mapping found missing
+The mapping's rows were made against Standard 1.1.0 and are kept as that
+record; their citations are 1.1.0's. Each concern file of the mapping lists
+the rows a section of Standard 1.2.0 changes, with the section and what it
+changes, under `changes_in_1_2_0`; a row not listed holds under 1.2.0 as it
+reads. Standard 1.2.0 added, among others, the rules for tool calls that the
+mapping found missing
 ([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)). Where the
-binding follows one of them, the section cited is 1.2.0's; the mapping's own
-citations are 1.1.0's. Statements about Standard Agents cite the page and
-section they come from.
+binding follows one of them, the section cited is 1.2.0's. Statements about
+Standard Agents cite the page and section they come from.
 Where the specification text and the published types differ, the difference
 is noted. [How this analysis was done](#how-this-analysis-was-done) says what
 was checked and what was not.
@@ -114,17 +118,21 @@ The tables summarise the
 No row is a conflict: nowhere does following one standard as written break a
 requirement of the other.
 
+An ACS link marked 1.2.0 names the section of Standard 1.2.0 that changes
+the row, as the concern file's `changes_in_1_2_0` list records it. A row
+with only Standard 1.1.0 links holds under 1.2.0 as it reads.
+
 ### Capabilities and tools
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
-| A capability: one of 36 verbs with an input contract, an output contract and safety flags ([§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition)) | A function tool: a description, an argument schema and an `execute` function ([Tools §2](https://standardagentspec.org/0.2.0/specification/tools#2-function-tool-definition)) | Fits | A tool performs one capability and says which in `annotations['ai.synapti/acs']` |
+| A capability: one of 36 verbs with an input contract, an output contract and safety flags ([§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition); 1.2.0: [§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)) | A function tool: a description, an argument schema and an `execute` function ([Tools §2](https://standardagentspec.org/0.2.0/specification/tools#2-function-tool-definition)) | Fits | A tool performs one capability and says which in `annotations['ai.synapti/acs']` |
 | Domain parameter (`detect` with `domain: anomaly`) | Nothing comparable | ACS only | A `domain` field in the annotation |
-| Input contract as JSON Schema, checked when a workflow is validated ([§5.5](../../spec/STANDARD-v1.1.0.md#55-consumer-contract-checking)) | `args` as a Zod schema, validated on every call ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Partial | The tool's `args` are the tool's contract; they specialise the capability's inputs and need not equal them |
+| Input contract as JSON Schema, checked when a workflow is validated ([§5.5](../../spec/STANDARD-v1.1.0.md#55-consumer-contract-checking); 1.2.0: [§4.1.2](../../spec/STANDARD-v1.2.0.md#412-schema-dialect)) | `args` as a Zod schema, validated on every call ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Partial | The tool's `args` are the tool's contract; they specialise the capability's inputs and need not equal them |
 | Output contract with required fields, `evidence_anchors` among them | A result is a status and one string; there is no output schema | ACS only | The output object is JSON in `result`; the binding checks the required fields |
 | Cognitive capabilities (`classify`, `critique`, `plan`, ...) | A prompt tool: a prompt named in another prompt's `tools` ([Tools §1](https://standardagentspec.org/0.2.0/specification/tools#1-tool-categories)) | Partial | Prompts cannot carry annotations, so the classification goes on the function tools the prompt can call |
 | `classify`, `detect`, `measure`: typed judgements with a confidence | `state.decide()`: typed questions answered with probabilities ([Decisions](https://standardagentspec.org/0.2.0/specification/threads/decisions)) | Partial | A grounded tool calls `decide()` and maps the answer to the capability's output |
-| One capability per step ([§3.4](../../spec/STANDARD-v1.1.0.md#34-composable-atoms)) | A tool is arbitrary code and may call other tools through `uses` | Partial | Classify by the strictest capability a tool performs, or split the tool |
+| One capability per step ([§3.4](../../spec/STANDARD-v1.1.0.md#34-composable-atoms); 1.2.0: [§5.18.4](../../spec/STANDARD-v1.2.0.md#5184-composite-tools)) | A tool is arbitrary code and may call other tools through `uses` | Partial | Classify by the strictest capability a tool performs, or split the tool |
 | Every action passes through the safety layer | Provider tools "execute server-side" at the model provider ([Providers §10](https://standardagentspec.org/0.2.0/specification/providers#10-provider-tools)) | SA only | Per the published types such a call is "not" to "be re-executed locally"; the 0.2.0 text does not say whether its `execute` runs. It does not pass through a grounded wrapper. Offer one only where its capability needs neither checkpoint nor approval |
 | Capability skills: one `SKILL.md` per capability | `state.skills`, an Agent Skills library ([Threads §7.4](https://standardagentspec.org/0.2.0/specification/threads#74-agent-skills)) | Partial | A user or an administrator could install the ACS skills in their own library as guidance. A package cannot ship them: the library belongs to the thread's owner. Whether a runtime's frontmatter check accepts their extra keys is not stated |
 
@@ -133,12 +141,12 @@ requirement of the other.
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
 | `risk`, `mutation`, `requires_checkpoint`, `requires_approval` on every capability | Nothing comparable. Tool `annotations` are hints with no defined keys | ACS only | The effective flags travel in `annotations['ai.synapti/acs']` |
-| "Validators, executors and safety layers MUST act on effective flags" ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) | A runtime must "never let them affect execution" ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Fits | The annotation may publish the flags; enforcement may not be keyed on it by a runtime. The binding enforces in the tool's own code |
+| "Validators, executors and safety layers MUST act on effective flags" ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags); 1.2.0: [§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification), [§5.21.3](../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls)) | A runtime must "never let them affect execution" ([Tools §9](https://standardagentspec.org/0.2.0/specification/tools#9-conformance-notes)) | Fits | The annotation may publish the flags; enforcement may not be keyed on it by a runtime. The binding enforces in the tool's own code |
 | A check that refuses a step before it runs | No hook can refuse a tool call. `tool_call_started` is observational; the others run afterwards ([Hooks §5](https://standardagentspec.org/0.2.0/specification/hooks#5-tool-execution-hooks)) | ACS only | Enforcement in the tool's own `execute`. [Proposed to SA](#changes-proposed-to-the-standard-agent-specification) |
 | A gate whose expression errors fires, except an `end` gate ([§5.8.2](../../spec/STANDARD-v1.1.0.md#582-evaluation)) | A hook's "failures are non-fatal to the decorated turn" | Partial | Nothing safety-relevant is placed in a hook |
 | `requires` edges, checked before a workflow runs (V102) | The model chooses the calls; the runtime runs them in order | Fits | Checked per call by the tool, and per prompt by `lintPromptTools` |
 | `conflicts_with`: not in the same `parallel_group` (F504) | "Tool calls **MUST** execute sequentially in the returned order" ([Runtime §5.1](https://standardagentspec.org/0.2.0/infrastructure/runtime#51-ordering)) | Partial | Cannot arise between the tool calls of one thread. Effects and endpoints run apart from them |
-| Safety diagnostics with fixed codes ([§9.6](../../spec/STANDARD-v1.1.0.md#96-safety-errors)) | A tool error is a persisted result, never a halt ([Runtime §5.2](https://standardagentspec.org/0.2.0/infrastructure/runtime#52-error-handling)) | Fits | A refusal is an error result carrying the ACS code |
+| Safety diagnostics with fixed codes ([§9.6](../../spec/STANDARD-v1.1.0.md#96-safety-errors); 1.2.0: [§9](../../spec/STANDARD-v1.2.0.md#9-diagnostic-model), [§9.8](../../spec/STANDARD-v1.2.0.md#98-diagnostic-format)) | A tool error is a persisted result, never a halt ([Runtime §5.2](https://standardagentspec.org/0.2.0/infrastructure/runtime#52-error-handling)) | Fits | A refusal is an error result carrying the ACS code |
 | Bounds on repetition: `retry.max`, `max_loops` | `maxSteps`, `maxSessionTurns`, runtime hard caps | Fits | Both apply. A model that repeats a refused call is stopped only by a cap the agent sets (`maxSteps` and `maxSessionTurns` have no default) or by a runtime's own |
 
 ### Checkpoints, state and memory
@@ -158,13 +166,13 @@ requirement of the other.
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
 | `requires_approval` on `execute`, `mutate`, `send` | No tool, prompt or agent property says an action needs approval | ACS only | The flag is in the annotation and enforced in the tool |
-| Structured approval: who, what they see, digest, expiry ([§5.14](../../spec/STANDARD-v1.1.0.md#514-approval)) | The approval gate: a child with a human-backed side that parks in `awaiting_human` ([Agents §7](https://standardagentspec.org/0.2.0/specification/agents#7-human-in-the-loop-composition)) | Partial | SA defines the waiting; ACS defines what a decision is. The binding uses an authenticated endpoint rather than the gate |
+| Structured approval: who, what they see, digest, expiry ([§5.14](../../spec/STANDARD-v1.1.0.md#514-approval); 1.2.0: [§5.14](../../spec/STANDARD-v1.2.0.md#514-approval), [§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | The approval gate: a child with a human-backed side that parks in `awaiting_human` ([Agents §7](https://standardagentspec.org/0.2.0/specification/agents#7-human-in-the-loop-composition)) | Partial | SA defines the waiting; ACS defines what a decision is. The binding uses an authenticated endpoint rather than the gate |
 | The decision binds to a digest of the shown values | Nothing comparable | ACS only | Computed by the tool from its own arguments |
 | The approver, by role and number | `auth.caller` in a thread endpoint, with application `roles` ([Thread Endpoints §4](https://standardagentspec.org/0.2.0/specification/threads/endpoints#4-access-and-authentication)) | Fits | The endpoint records the authenticated caller |
 | A person's answer in the conversation | A message with `role: 'user'`, which a parent or package code can also create | Partial | Not usable as proof of a decision. [Proposed to SA](#changes-proposed-to-the-standard-agent-specification) |
 | `expires`; an unanswered request | A parked human turn has no deadline | ACS only | Expiry is checked by the tool when it runs and by the approval endpoint when a decision arrives |
 | `standing_mandate`: pre-approval with nobody present | Nothing comparable for actions | ACS only | Not implemented in the binding |
-| Agent identity and trust class ([§5.17](../../spec/STANDARD-v1.1.0.md#517-sender-identity), [RFC-0004](../../spec/RFC-0004-agent-identity.md)) | `ThreadUser`: id, role, optional application roles; the Users page is a Draft | Partial | A caller maps to a principal; trust classes have no SA counterpart |
+| Agent identity and trust class ([§5.17](../../spec/STANDARD-v1.1.0.md#517-sender-identity), [RFC-0004](../../spec/RFC-0004-agent-identity.md); 1.2.0: [§5.17](../../spec/STANDARD-v1.2.0.md#517-sender-identity)) | `ThreadUser`: id, role, optional application roles; the Users page is a Draft | Partial | A caller maps to a principal; trust classes have no SA counterpart |
 
 ### Evidence, provenance and audit
 
@@ -176,15 +184,15 @@ requirement of the other.
 | An audit trail: the `audit` capability, action records | No audit or trace surface. Hooks are for "logging, validation, transformation" | ACS only | The binding's trace in the thread's key-value store |
 | Append-only, tamper-evident records | Thread storage is mutable and deletable by code in the thread | ACS only | Not achievable inside the thread. Export the trace to a store outside it |
 | Provenance of a received item: `sender`, trust class | `metadata.subagent_id`, `metadata.forwarded_from`: "conventions, not requirements" ([Messages §1.1](https://standardagentspec.org/0.2.0/specification/threads/messages#11-provenance-metadata-conventions)) | Partial | Not usable as a guarantee |
-| Auditable transforms ([§3.2](../../spec/STANDARD-v1.1.0.md#32-auditable-transforms)) | Hooks may rewrite a result before it is stored, and filter history before each model call | Partial | A hook that rewrites results can remove evidence. A grounded agent should list its hooks and know what each changes |
-| The authority trust model ([§8](../../spec/STANDARD-v1.1.0.md#8-authority-trust-model)) | Nothing comparable | ACS only | Stays in ACS |
+| Auditable transforms ([§3.2](../../spec/STANDARD-v1.1.0.md#32-auditable-transforms); 1.2.0: [§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records), [§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)) | Hooks may rewrite a result before it is stored, and filter history before each model call | Partial | A hook that rewrites results can remove evidence. A grounded agent should list its hooks and know what each changes |
+| The authority trust model ([§8](../../spec/STANDARD-v1.1.0.md#8-authority-trust-model); 1.2.0: [§8.1](../../spec/STANDARD-v1.2.0.md#81-trust-score-calculation), [§8.2](../../spec/STANDARD-v1.2.0.md#82-conflict-resolution), [§8.4](../../spec/STANDARD-v1.2.0.md#84-manual-overrides)) | Nothing comparable | ACS only | Stays in ACS |
 
 ### Composition across agents
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
 | `delegate`: assign a task to another agent | A subagent relationship and the injected `subagent_create` tool ([Subagents §5](https://standardagentspec.org/0.2.0/specification/subagents#5-lifecycle-tools)) | Partial | `subagent_create` is a `delegate`. It is injected by the runtime, so it has no `execute` to wrap |
-| A waiting delegate ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events)) | `blocking: true` on a relationship | Partial | The same shape; SA has no timeout on the wait. A host can also wait on a non-blocking child: see [How a `delegate` step maps to a host](#how-a-delegate-step-maps-to-a-host) |
+| A waiting delegate ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events); 1.2.0: [§5.13](../../spec/STANDARD-v1.2.0.md#513-waiting-for-events)) | `blocking: true` on a relationship | Partial | The same shape; SA has no timeout on the wait. A host can also wait on a non-blocking child: see [How a `delegate` step maps to a host](#how-a-delegate-step-maps-to-a-host) |
 | `fresh_context`, attested in `effective` | A child is its own thread, and persists: a later call may continue it | Partial | Fresh only when a new instance was created |
 | `read_only` delegation | No read-only mode for a child | ACS only | Cannot be attested. A grounded child enforces its own rules |
 | `invoke`: a nested run that shares the caller's checkpoints | Prompt tools, in the same thread | Partial | A prompt tool is classified by what it does, not as `invoke` |
@@ -198,12 +206,12 @@ requirement of the other.
 
 | ACS | Standard Agents | Fit | Combined |
 |---|---|---|---|
-| A workflow catalog: declared steps, validated before they run ([§5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl)) | No declarative format. A model, or handler code, decides the order at run time | ACS only | See [Running ACS workflows](#running-acs-workflows-with-standard-agents) |
+| A workflow catalog: declared steps, validated before they run ([§5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl); 1.2.0: [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol), [§10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)) | No declarative format. A model, or handler code, decides the order at run time | ACS only | See [Running ACS workflows](#running-acs-workflows-with-standard-agents) |
 | The executor: a state machine that does no I/O and is driven by a host | A handler-backed side: code the runtime calls once per inbound message ([Handlers](https://standardagentspec.org/0.2.0/specification/handlers)) | Fits | A handler could be the host |
 | `InvokeCapability` | `state.invokeTool(name, args)` | Partial | Needs a map from capability inputs to tool arguments |
 | `RequestApproval` | An authenticated endpoint, or a human-backed child | Partial | As in the binding |
 | `AwaitEvent`, `Sleep` | Inbound messages and endpoints; `scheduleEffect(name, args, delay)` | Partial | A handler resumes on a message; an effect resumes after a delay |
-| Triggers: schedule, event ([§5.10](../../spec/STANDARD-v1.1.0.md#510-triggers)) | A user message, a queued message or tool, a scheduled effect. No recurring schedule | Partial | Recurrence is rebuilt from one-shot effects |
+| Triggers: schedule, event ([§5.10](../../spec/STANDARD-v1.1.0.md#510-triggers); 1.2.0: [§5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)) | A user message, a queued message or tool, a scheduled effect. No recurring schedule | Partial | Recurrence is rebuilt from one-shot effects |
 | Conditions, gates, failure modes, retries | None of these; a tool error is returned to the model | ACS only | Stay in the executor |
 | `parallel_group` | One execution per thread; concurrency only across threads | Partial | Members run in order. The reference executor issues one action at a time, so running each member as a child thread needs a host that schedules the group itself |
 
@@ -214,8 +222,8 @@ requirement of the other.
 | A Claude Code plugin and a Python package | A packed agent: an npm package with a `standardagent` field ([Packaging](https://standardagentspec.org/0.2.0/distribution/packaging)) | Fits | A grounded agent ships as an SA package; its tools carry their annotations |
 | Classification is data, readable without running code | `package.json` lists entry agents, effects, endpoints and required parent hooks; nothing about tools | Partial | A tool's annotation is readable only by loading the package |
 | Workflow catalogs and domain profiles | Nothing comparable; configuration is `env` | ACS only | Shipped as data files; nothing in SA reads them |
-| Conformance levels L1 to L4, for validators ([§10](../../spec/STANDARD-v1.1.0.md#10-conformance)) | Requirement lists per page and a runtime summary; no public test suite was found | Fits | Neither covers a grounded agent yet |
-| Diagnostics: `code`, `name`, `severity`, `message`, `location` ([§9.8](../../spec/STANDARD-v1.1.0.md#98-diagnostic-format)) | Definition issues: `code`, `severity`, `message`, `path` | Partial | Close enough to convert; SA's codes are listed only in the published types |
+| Conformance levels L1 to L4, for validators ([§10](../../spec/STANDARD-v1.1.0.md#10-conformance); 1.2.0: [§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance), [§10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)) | Requirement lists per page and a runtime summary; no public test suite was found | Fits | SA has no conformance class for a grounded agent. ACS 1.2.0 adds class SL for safety layers, which the binding claims, and class EX for executors |
+| Diagnostics: `code`, `name`, `severity`, `message`, `location` ([§9.8](../../spec/STANDARD-v1.1.0.md#98-diagnostic-format); 1.2.0: [§9.8](../../spec/STANDARD-v1.2.0.md#98-diagnostic-format)) | Definition issues: `code`, `severity`, `message`, `path` | Partial | Close enough to convert; SA's codes are listed only in the published types |
 | Semantic versioning, a version declared in each document ([§11](../../spec/STANDARD-v1.1.0.md#11-versioning-and-compatibility)) | Versioned folders: older versions are frozen, the current one (0.2.0) is still edited. The types package is 0.45.10 for specification 0.2.0 | Partial | A binding pins both: the specification version and the types version |
 | RFCs ([Governance](../../spec/GOVERNANCE.md)) | "A conversation or a pull request is enough to propose a change" | Partial | Proposals to SA go as issues |
 
@@ -1017,6 +1025,19 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 | `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
 | The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
+A run the handler starts has no trigger, so the host gives its attendance
+([§5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)). Start it
+attended when a person can answer an approval request within the request's
+`expires`: through a human-backed side of the thread, or by calling the
+binding's authenticated approval endpoint. Start it unattended when no person
+can, for example a thread with no human-backed side whose approvers have no
+access to the endpoint. In an unattended run a `human` approver is not asked
+and `when_unattended` applies at once (F502 by default). `CoreContext.start`
+and `CoreRun.resume` start and resume a run attended unless `attendance` says
+otherwise. Either way no step runs without approval: an attended request
+nobody answers before its `expires` lapses with F502
+([Orchestration extensions](../guides/ORCHESTRATION_EXTENSIONS.md#triggers-triggers1)).
+
 What stands in the way is the runtime, not the design. The reference core is
 a Rust crate; the TypeScript package's `./wasm` entry runs it in process
 through a JSON interface over WebAssembly, with a context built from bundled
@@ -1240,26 +1261,29 @@ conformance impact). The texts are in this repository under
 
 | Proposal | What it would allow |
 |---|---|
-| **A hook that runs before a tool executes and can decline the call.** `before_tool_call` returns a result to use in place of running the tool, or nothing to let it run. A hook that fails declines the call | A safety rule imposed on tools one did not write, by an agent on itself or by a child on its parent. This is the one change that turns cooperative enforcement into imposed enforcement, for an agent's own prompts and for a child's parent. It would not let a composing agent gate the calls inside a packaged child |
-| **Record the authenticated caller on a message sent through the Thread Client API.** A read-only `user_id` on the message record, set by the runtime and `null` on every other message | Telling a client's answer from a message a model or a parent queued. An approval gate built on messages cannot be trusted without it |
+| **A hook that runs before a tool executes and can decline the call.** `before_tool_call` returns a result to use in place of running the tool, or nothing to let it run. A hook that fails declines the call | A safety rule imposed on tools one did not write, by an agent on itself or by a child on its parent. This is the one change that turns cooperative enforcement into imposed enforcement, for an agent's own prompts and for a child's parent. It would not let a composing agent gate the calls inside a packaged child. The same text asks which calls fire the existing tool hooks, in what order, and what a hook that throws or times out does |
+| **Record the authenticated caller on a message sent through the Thread Client API.** A read-only `user_id` on the message record, set by the runtime and `null` on every other message, and the same rule for the `subagent_id` of a child's messages to its parent | Telling a client's answer from a message a model or a parent queued, and a child's report from typed input. An approval gate built on messages cannot be trusted without it |
 | **Let a tool know which call it is serving.** The call's id and name on `state.execution` while `execute` runs | Evidence, audit entries and idempotency keys tied to the stored tool result, without matching by order |
 | **Specify what `execute` returns, and add a metadata field.** Define `ToolResult` in the text, carry `error_code` and `error_data` through hooks and storage, and add `metadata` that is stored but not sent to the model | Refusal codes that clients can act on, and evidence that is not model-facing text |
 | **Annotations on agents and prompts, and on the call a hook receives.** The same inert field on `defineAgent` and then `definePrompt`, a tool's annotations passed to its hooks, and a stated subject for the rule, so that it reads as a requirement on runtimes | A composed agent that carries a classification, and hooks that can read a tool's |
 | **What a runtime does with a tool call the request did not offer.** Such a call, and any call under `toolChoice: 'none'`, is not executed and gets an error result; the same for a model's lifecycle call that targets a hidden relationship | A prompt's tool list and `hidden` as boundaries. A read-only prompt, a guard tool and a gated delegation rest on it |
 | **The lifecycle operations code calls to create and message a child.** The call, its arguments, how the caller gets the new reference, what a child without a side A prompt accepts, and which user a child thread has | A delegation that is checked first: the injected `subagent_create` has no `execute` to wrap, so the child has to be created from code |
 | **What may run alongside an execution, and when `flowId` changes.** A definition of a flow, what is serialized with a running execution, and a `flowId` that is unique per execution | Records that are read and rewritten without a conditional write, and a checkpoint rule keyed on `flowId` |
-| **Editorial.** Ten places where two passages disagree, such as two sections numbered 14 on the Runtime page | Nothing for grounding; found while checking references |
+| **What a parent receives for each way a child session ends.** A table of the five ways, a failure option on `stopSession()`, and an error result with a stable code for a blocking caller whose child does not close normally | A workflow hosted in a handler-backed child that can end as failed, and a delegation bounded in time |
+| **Which source governs where the text and the published types differ.** The text governs, and each member found only in the types is defined or marked | Knowing which members of the types a portable package may use |
+| **Persistence and delivery guarantees.** Rules for the thread file system like the key-value store's, the durability and delivery of scheduled effects, and a definition of eligible history | A restore point kept in a thread file, a timeout that fires, and a refusal the model sees on its next step |
+| **Editorial.** Eleven places where two passages disagree, such as two sections numbered 14 on the Runtime page, or where an example pins a version range that excludes the current package | Nothing for grounding; found while checking references |
 
-The nine come out of 83 findings about the specification, none of which
+The twelve come out of 83 findings about the specification, none of which
 stops a grounded agent from being built and 29 of which leave a rule
 enforceable only cooperatively or with a workaround. They are listed, with
 evidence and with the issue that covers each, in
-[`findings_standard_agents.yaml`](../research/analysis/standard_agents_mapping/findings_standard_agents.yaml).
-Among those not written up as proposals: which tool calls fire the tool
-hooks; no way for code to end a session as failed; scheduled effects have no
-delivery guarantee; the thread file system has no durability or isolation
-rules like the key-value store's; a parked human turn has no deadline; and a
-child returns text and files but no structured data.
+[`findings_standard_agents.yaml`](../research/analysis/standard_agents_mapping/findings_standard_agents.yaml),
+with the 30 questions the text leaves open and, for the 20 that a text asks,
+the issue that asks each.
+Among the findings not written up as proposals: a parked human turn has no
+deadline; a child returns text and files but no structured data; and which
+globals definition code can rely on, WebAssembly among them.
 
 ## Changes to the Agent Capability Standard
 
@@ -1396,6 +1420,17 @@ continued instead of restarted.
   `@standardagents/spec` 0.45.10 type declarations. ACS was read from this
   repository: Standard 1.1.0, the ontology, the RFCs, the reference executor
   and the Python SDK.
+- **Standard 1.2.0.** The rows were not redone for 1.2.0. Its Appendix D,
+  which lists every change from 1.1.0 by accepting RFC, was walked against
+  each concern. The concern files list 230 of the 319 rows as changed by a
+  1.2.0 section, each with the section and the effect. The Standard Agents
+  side was checked again at commit `f462a67`: no file under `content/`
+  changed, and the quoted passages of the types are unchanged in 0.45.13.
+  The two findings files are kept as the same record: their references cite
+  the versions and commits the rows were made against. An `answer` or
+  `outcome` added later cites Standard 1.2.0 or the texts drafted for the
+  Standard Agent Specification, and a question answered later lists the
+  1.2.0 locations of its answer after its original references.
 - **Mapping.** Ten concerns were mapped separately, each from the full text
   of both sides. Each mapping was then read by two independent reviewers.
   One, told to refute, checked every reference and quotation and searched
@@ -1441,5 +1476,5 @@ continued instead of restarted.
   so nothing here is a statement about how any runtime behaves beyond what the
   specification requires of it. No runtime's source and no conformance suite
   was examined. The specification is at 0.2.0 and its maintainers edit that
-  version in place; a passage quoted here may have changed since the commit
-  above.
+  version in place; a passage quoted here may have changed since the last
+  check, at `f462a67`.

@@ -49,7 +49,11 @@ in the text or in the published types (0.45.10). Five points are open.
    ([Threads §6.1](https://standardagentspec.org/0.2.0/specification/threads#61-thread-arguments)).
    What such a child accepts, and what the runtime validates `arguments`
    against, is unstated. The arguments also carry the property that
-   `initUserMessageProperty` names.
+   `initUserMessageProperty` names. Two smaller points are open for every
+   child: whether validation may strip or coerce values, so that the
+   persisted arguments differ from those sent, and what happens to new
+   `arguments` when a blocking call continues an existing instance
+   (create-or-continue, Subagents §3.3).
 5. **The user.** For a thread a client creates, "The runtime **MUST** set
    the owner of the new thread from the authenticated caller."
    ([Thread Client API §6](https://standardagentspec.org/0.2.0/specification/threads/client-api#6-creating-a-thread))
@@ -161,10 +165,10 @@ child reads its creation `arguments` from `state.arguments`; the child's
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding for Standard Agents](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 enforces its rules by wrapping each tool's `execute`, and `subagent_create`
 is injected by the runtime and has no `execute` to wrap. A delegation that
 is to be checked first has to be created from a wrapped tool or a handler,
 and the binding composes no child today. The
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 have the detail.

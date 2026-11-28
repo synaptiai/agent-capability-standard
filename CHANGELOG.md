@@ -2514,7 +2514,20 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   behind that document (319 rows in ten concerns, each with references and
   verbatim quotes from both sides), the findings it produced about each
   standard (83 and 64) and the questions the texts leave open. `tests/test_standard_agents_mapping.py` keeps the index, the
-  files and their references to this repository in agreement.
+  files and their references to this repository in agreement. The rows are a
+  record made against Standard 1.1.0; each concern file lists, under
+  `changes_in_1_2_0`, the rows a Standard 1.2.0 section changes, and
+  `index.yaml` records the check (`checked_against`: Standard 1.2.0,
+  ontology 2.2.0, 27 November 2026, and the Standard Agent Specification at
+  `f462a67`, types 0.45.13). Each question about the Standard Agent
+  Specification records the drafted text that asks it (`outcome`). The
+  integration document's mapping tables link the Standard 1.2.0 section
+  beside each row that 1.2.0 changes.
+- Orchestration extensions and Standard Agents guides: how a host decides
+  the attendance of a run no trigger started, as guidance (a run is attended
+  when a person can answer an approval request within its `expires`); the
+  answer to ACS-Q10 cites Standard 1.2.0 §5.10.2 and §5.14, and the
+  reference hosts keep the attended default.
 - `examples/standard_agents/`: a reference binding in TypeScript and a worked
   example. `groundedTool` classifies a Standard Agents tool by an ontology
   capability and enforces the capability's checkpoint, approval and output
@@ -2547,7 +2560,7 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   annotation schema and the approval digest vectors
   (`tests/conformance/approval/digests.json`) from the ontology and the
   reference executor; `--check` fails on drift (CI).
-- `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
+- `tasks/standard-agents-upstream/`: twelve issue texts for the Standard Agent
   Specification, and `file-issues.sh`, which files them in order with the
   GitHub CLI.
 - `schemas/interop/standard_agents_mapping.yaml`: the Standard Agents
