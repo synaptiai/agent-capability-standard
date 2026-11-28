@@ -1,8 +1,10 @@
 """scripts/release_notes.py: the checks release.yml relies on before it
 publishes a GitHub Release."""
 
+import functools
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -90,3 +92,163 @@ def test_the_repository_is_ready_for_its_version() -> None:
         "version"
     ]
     assert release_notes.notes(f"v{version}").strip()
+
+
+LONG = """## [v2.0.0] — 2026-10-29
+
+Opening paragraph, see [the guide](docs/guide.md).
+
+**Upgrading from v1.2.0.** Every change, by component.
+
+**Before you upgrade.** The changes to read first.
+
+- Python 3.14 is required ([requirements](#upgrade-requirements)).
+- A command is renamed.
+
+**Requirements.**
+
+- <a id="upgrade-requirements"></a>Python 3.14.
+{filler}
+## [v1.2.0] — 2026-02-04
+
+### Fixed
+- Another thing
+"""
+
+
+def long_changelog(filler: int = release_notes.LIMIT) -> str:
+    return LONG.replace("{filler}", "- x\n" * (filler // 4))
+
+
+def test_long_section_is_shortened(tmp_path: Path) -> None:
+    body = release_notes.notes(
+        "v2.0.0", repo(tmp_path, "2.0.0", long_changelog()), "o/r"
+    )
+    base = "https://github.com/o/r/blob/v2.0.0/"
+    assert len(body) <= release_notes.LIMIT
+    assert body == (
+        f"Opening paragraph, see [the guide]({base}docs/guide.md).\n\n"
+        "**Before you upgrade.** The changes to read first.\n\n"
+        f"- Python 3.14 is required ([requirements]({base}CHANGELOG.md"
+        "#upgrade-requirements)).\n"
+        "- A command is renamed.\n\n"
+        "These notes are shortened to fit a GitHub Release. Every change, and "
+        f"every entry under Upgrading, is in [CHANGELOG.md]({base}CHANGELOG.md"
+        "#v200--2026-10-29).\n"
+    )
+
+
+def test_a_section_at_the_limit_is_not_shortened(tmp_path: Path) -> None:
+    text = "## [v2.0.0] — 2026-10-29\n\n" + "y" * (release_notes.LIMIT - 1) + "\n"
+    body = release_notes.notes("v2.0.0", repo(tmp_path, "2.0.0", text))
+    assert len(body) == release_notes.LIMIT
+
+
+def test_links_resolve_at_the_tag(tmp_path: Path) -> None:
+    text = (
+        "## [v2.0.0] — 2026-10-29\n\n[a](docs/a.md) [b](./b.md) [c](#c) "
+        '[d](https://e.org/x) [e](mailto:x@e.org) [f](/abs) [g](h.md "t")\n'
+    )
+    body = release_notes.notes("v2.0.0", repo(tmp_path, "2.0.0", text), "o/r")
+    base = "https://github.com/o/r/blob/v2.0.0/"
+    assert body.splitlines()[0] == (
+        f"[a]({base}docs/a.md) [b]({base}b.md) [c]({base}CHANGELOG.md#c) "
+        f'[d](https://e.org/x) [e](mailto:x@e.org) [f](/abs) [g]({base}h.md "t")'
+    )
+
+
+def test_repository_from_plugin_json(tmp_path: Path) -> None:
+    root = repo(tmp_path, "2.0.0", long_changelog())
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"version": "2.0.0", "repository": "https://github.com/o/r"})
+    )
+    body = release_notes.notes("v2.0.0", root)
+    assert "(https://github.com/o/r/blob/v2.0.0/CHANGELOG.md#v200--2026-10-29)" in body
+
+
+@pytest.mark.parametrize(
+    ("changelog", "repository", "why"),
+    [
+        (
+            long_changelog().replace("**Before you upgrade.**", "**Read.**"),
+            "o/r",
+            "no paragraph starting",
+        ),
+        (long_changelog(), None, "no repository is known"),
+        (
+            long_changelog().replace(
+                "- A command is renamed.\n",
+                "- A command is renamed.\n" + "  z\n" * (release_notes.LIMIT // 4),
+            ),
+            "o/r",
+            "still over",
+        ),
+    ],
+)
+def test_refuses_long_notes(
+    tmp_path: Path, changelog: str, repository: str | None, why: str
+) -> None:
+    with pytest.raises(ValueError, match=why):
+        release_notes.notes("v2.0.0", repo(tmp_path, "2.0.0", changelog), repository)
+
+
+def test_main_exits_non_zero_rather_than_truncate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repo(tmp_path, "2.0.0", long_changelog().replace("**Before", "**After"))
+    monkeypatch.setattr(
+        release_notes, "notes", functools.partial(release_notes.notes, root=root)
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    assert release_notes.main(["v2.0.0"]) == 1
+    out = capsys.readouterr()
+    assert out.out == "" and "over GitHub's 125000" in out.err
+
+
+def next_section(changelog: str) -> tuple[str, str]:
+    """The section the next release publishes: [Unreleased] while it has
+    entries, else the first section with a body (the release just cut from
+    it, while the new [Unreleased] is still empty)."""
+    for name in re.findall(r"(?m)^## \[([^\]]+)\]", changelog):
+        found = release_notes.find(changelog, name)
+        if found and found[1]:
+            return found
+    raise AssertionError("CHANGELOG.md has no section with entries")
+
+
+def test_next_section_skips_an_empty_unreleased() -> None:
+    assert next_section(CHANGELOG)[0] == "## [v2.0.0] — 2026-10-29"
+    filled = CHANGELOG.replace("## [Unreleased]\n", "## [Unreleased]\n\n- New\n", 1)
+    assert next_section(filled) == ("## [Unreleased]", "- New")
+
+
+def test_the_next_release_fits() -> None:
+    """The next release's section, with its links made absolute as
+    release.yml publishes them, fits a GitHub Release whole or shortened."""
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    repository = release_notes.plugin_repository(plugin)
+    assert repository
+    heading, body = next_section(changelog)
+    base = f"https://github.com/{repository}/blob/vNEXT/"
+    published = release_notes.render("vNEXT", heading, body, base)
+    assert len(published) <= release_notes.LIMIT
+    assert not re.search(r"\]\((?!https?://|mailto:)", published)
+
+
+def test_each_before_you_upgrade_link_names_an_anchor() -> None:
+    """Each link of a "Before you upgrade" list in CHANGELOG.md, whichever
+    section holds it, names an anchor of CHANGELOG.md."""
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    lines = changelog.splitlines()
+    fragments: list[str] = []
+    for i, line in enumerate(lines):
+        if line.startswith(release_notes.BEFORE):
+            fragments += re.findall(r"\]\(#([^)]+)\)", line)
+            for rest in lines[i + 1 :]:
+                if rest.startswith(("**", "## [")):
+                    break
+                fragments += re.findall(r"\]\(#([^)]+)\)", rest)
+    assert fragments
+    anchors = set(re.findall(r'<a id="([^"]+)"></a>', changelog))
+    assert sorted(set(fragments) - anchors) == []

@@ -8,7 +8,8 @@ Setup:
 - Original file with known content
 - Mutation operation that fails partway through
 - Baseline has no checkpointing
-- GA creates checkpoint before mutation
+- GA takes a checkpoint with CheckpointTracker, whose snapshot store
+  copies the file, and restores it with restore_checkpoint
 
 Metrics:
 - Recovery rate: Successful state restoration
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
+from grounded_agency.state.snapshots import FileSnapshotStore
 
 from .base import BenchmarkScenario
 
@@ -74,25 +76,16 @@ class MutationRecoveryScenario(BenchmarkScenario):
         self.log(f"Mutation range: lines {self.mutation_start}-{self.mutation_end}")
         self.log(f"Failure point: line {self.failure_line}")
 
-    def _simulate_mutation_with_failure(
-        self, file_path: Path, checkpoint_content: str | None = None
-    ) -> dict[str, Any]:
+    def _simulate_mutation_with_failure(self, file_path: Path) -> dict[str, Any]:
         """
-        Simulate a mutation operation that fails partway through.
-
-        Args:
-            file_path: Path to the file to mutate
-            checkpoint_content: If provided, used for rollback on failure
+        Run a mutation of ``file_path`` (already holding the original
+        content) that fails partway through, leaving the file in a partial
+        state.
 
         Returns:
-            Result dict with recovery status and final content
+            Whether the mutation failed and how many lines it wrote
         """
         start_time = time.time()
-
-        # Write original content
-        file_path.write_text(self.original_content)
-
-        # Attempt mutation (line by line to simulate partial failure)
         lines = self.original_content.split("\n")
         failed = False
         lines_written = 0
@@ -120,34 +113,14 @@ class MutationRecoveryScenario(BenchmarkScenario):
         except Exception:
             failed = True
 
-        elapsed_ms = (time.time() - start_time) * 1000
-
-        # Check final state
-        final_content = file_path.read_text()
-        final_hash = hashlib.sha256(final_content.encode()).hexdigest()
-
-        # Attempt recovery if checkpoint available
-        recovered = False
-        recovery_time_ms = 0
-
-        if failed and checkpoint_content is not None:
-            recovery_start = time.time()
-            file_path.write_text(checkpoint_content)
-            recovery_time_ms = (time.time() - recovery_start) * 1000
-
-            final_content = file_path.read_text()
-            final_hash = hashlib.sha256(final_content.encode()).hexdigest()
-            recovered = final_hash == self.original_hash
-
         return {
             "failed": failed,
             "lines_written": lines_written,
-            "recovered": recovered,
-            "recovery_time_ms": recovery_time_ms,
-            "data_integrity": final_hash == self.original_hash,
-            "final_hash": final_hash,
-            "elapsed_ms": elapsed_ms,
+            "elapsed_ms": (time.time() - start_time) * 1000,
         }
+
+    def _on_disk_hash(self, file_path: Path) -> str:
+        return hashlib.sha256(file_path.read_bytes()).hexdigest()
 
     def run_baseline(self) -> dict[str, Any]:
         """
@@ -158,15 +131,17 @@ class MutationRecoveryScenario(BenchmarkScenario):
         """
         if self.temp_dir is None:
             raise RuntimeError("setup() must be called before run_baseline()")
-        file_path = self.temp_dir / "baseline_file.txt"
+        work = self.temp_dir / "baseline"
+        work.mkdir(exist_ok=True)
+        file_path = work / "file.txt"
+        file_path.write_text(self.original_content)
 
-        result = self._simulate_mutation_with_failure(
-            file_path, checkpoint_content=None
-        )
+        result = self._simulate_mutation_with_failure(file_path)
+        intact = self._on_disk_hash(file_path) == self.original_hash
 
         # Without checkpoint, recovery is impossible
-        recovery_rate = 0.0 if result["failed"] else 1.0
-        integrity_rate = 1.0 if result["data_integrity"] else 0.0
+        recovery_rate = 1.0 if intact else 0.0
+        integrity_rate = 1.0 if intact else 0.0
 
         self.log(f"Baseline failed: {result['failed']}")
         self.log(f"Baseline recovery rate: {recovery_rate:.0%}")
@@ -183,55 +158,80 @@ class MutationRecoveryScenario(BenchmarkScenario):
 
     def run_ga(self) -> dict[str, Any]:
         """
-        Grounded Agency: Checkpoint before mutation using CheckpointTracker.
+        Grounded Agency: checkpoint before the mutation, restore after it
+        fails, both through the shipped ``CheckpointTracker``.
 
-        Creates recovery point via the real CheckpointTracker,
-        attempts mutation, and rolls back on failure.
+        The tracker's snapshot store copies the file when the checkpoint
+        is taken; ``restore_checkpoint`` puts it back and returns a
+        ``Restore``. Recovery counts only when the ``Restore`` says the
+        file was restored and the file on disk hashes to the original.
         """
         if self.temp_dir is None:
             raise RuntimeError("setup() must be called before run_ga()")
-        file_path = self.temp_dir / "ga_file.txt"
+        work = self.temp_dir / "ga"
+        work.mkdir(exist_ok=True)
+        file_path = work / "file.txt"
+        file_path.write_text(self.original_content)
 
-        # Use real CheckpointTracker for lifecycle management
-        checkpoint_dir = self.temp_dir / ".checkpoints"
-        tracker = CheckpointTracker(checkpoint_dir=checkpoint_dir)
+        snapshots = FileSnapshotStore(root=work, store_dir=self.temp_dir / "ga_store")
+        tracker = CheckpointTracker(
+            checkpoint_dir=self.temp_dir / "ga_checkpoints", snapshots=snapshots
+        )
 
         checkpoint_id = tracker.create_checkpoint(
-            scope=[str(file_path)],
+            scope=[file_path.name],
             reason="Before mutation benchmark",
         )
         if not tracker.has_valid_checkpoint():
             raise RuntimeError("Checkpoint should be valid after creation")
+        manifest = snapshots.manifest(checkpoint_id)
+        if manifest is None or file_path.name not in manifest["files"]:
+            raise RuntimeError("The checkpoint did not capture the file")
 
         self.log(f"GA: Created checkpoint {checkpoint_id[:20]}... before mutation")
 
-        result = self._simulate_mutation_with_failure(
-            file_path, checkpoint_content=self.original_content
-        )
-
+        # The mutation uses the checkpoint up (one checkpoint per gated call).
         consumed_id = tracker.consume_checkpoint()
         if consumed_id != checkpoint_id:
             raise RuntimeError("Consumed checkpoint should match created")
         if tracker.has_valid_checkpoint():
             raise RuntimeError("No valid checkpoint should remain after consumption")
 
-        recovery_rate = 1.0 if result["recovered"] or not result["failed"] else 0.0
-        integrity_rate = 1.0 if result["data_integrity"] else 0.0
+        result = self._simulate_mutation_with_failure(file_path)
+        damaged = self._on_disk_hash(file_path) != self.original_hash
+
+        restore = None
+        recovery_time_ms = 0.0
+        if result["failed"]:
+            recovery_start = time.time()
+            # A rollback uses no checkpoint, and works on a used one.
+            restore = tracker.restore_checkpoint(checkpoint_id)
+            recovery_time_ms = (time.time() - recovery_start) * 1000
+
+        intact = self._on_disk_hash(file_path) == self.original_hash
+        restored = restore is not None and restore.restored and not restore.unrestored
+        recovered = restored and intact
+        recovery_rate = 1.0 if recovered or not result["failed"] else 0.0
+        integrity_rate = 1.0 if intact else 0.0
 
         self.log(f"GA failed during mutation: {result['failed']}")
-        self.log(f"GA recovered via rollback: {result['recovered']}")
+        self.log(f"GA file damaged before restore: {damaged}")
+        self.log(f"GA Restore: {restore}")
         self.log(f"GA recovery rate: {recovery_rate:.0%}")
         self.log(f"GA data integrity: {integrity_rate:.0%}")
-        self.log(f"GA recovery time: {result['recovery_time_ms']:.2f}ms")
+        self.log(f"GA recovery time: {recovery_time_ms:.2f}ms")
 
         return {
             "recovery_rate": recovery_rate,
             "data_integrity_rate": integrity_rate,
-            "lines_preserved": self.file_lines if result["data_integrity"] else 0,
-            "lines_lost": 0 if result["data_integrity"] else self.file_lines,
-            "recovery_time_ms": result["recovery_time_ms"],
+            "lines_preserved": self.file_lines if intact else 0,
+            "lines_lost": 0 if intact else self.file_lines,
+            "recovery_time_ms": recovery_time_ms,
             "has_checkpoint": True,
-            "checkpoint_hash": self.original_hash,
+            "damaged_before_restore": damaged,
+            "restore_restored": bool(restore and restore.restored),
+            "restore_unrestored": len(restore.unrestored) if restore else 0,
+            "restore_changes_reverted": len(restore.changes_reverted) if restore else 0,
         }
 
     def compare(

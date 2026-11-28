@@ -722,7 +722,10 @@ print(f"Capability: {write_mapping.capability_id}")     # "mutate"
 print(f"Risk: {write_mapping.risk}")                     # "high"
 print(f"Requires checkpoint: {write_mapping.requires_checkpoint}")  # True
 
-# Bash commands are classified by content analysis
+# Bash commands are classified by content analysis only under a verified
+# operating-system boundary (the adapter sets os_boundary when it wraps
+# options with its sandbox); with none, every Bash call is mutate and send.
+mapper.os_boundary = lambda: True
 read_cmd = mapper.map_tool("Bash", {"command": "ls -la /tmp"})
 print(f"ls maps to: {read_cmd.capability_id}")  # "observe" (read-only)
 

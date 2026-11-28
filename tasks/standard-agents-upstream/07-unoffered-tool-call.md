@@ -163,10 +163,10 @@ the check. With a scripted provider, conformance checks would cover:
 
 The [Agent Capability Standard](https://github.com/synaptiai/agent-capability-standard)
 is one consumer. Its
-[reference binding](https://github.com/synaptiai/agent-capability-standard/tree/main/examples/standard_agents)
+[reference binding](https://github.com/synaptiai/agent-capability-standard/tree/8ec818c217d55c8138986786c700da38a7ee25a6/examples/standard_agents)
 enforces its rules inside each of its tools' `execute`, so they hold however
 a call arrives. Two arrangements in its
-[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/main/docs/integrations/standard_agents.md)
+[integration notes](https://github.com/synaptiai/agent-capability-standard/blob/8ec818c217d55c8138986786c700da38a7ee25a6/docs/integrations/standard_agents.md)
 rest on the missing rule: a guard tool in front of a tool written without
 the binding, and a parent that gates delegation by spawning children from
 code with every relationship `hidden`.

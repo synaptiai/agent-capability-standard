@@ -16,6 +16,7 @@ interface Fixture {
   offered?: Record<string, string | null>;
   host_actions?: { action: string; tool: string }[];
   host_takes_checkpoints?: boolean;
+  shell_tools?: Record<string, 'none' | 'declared'>;
   expect: {
     errors: { code: string; tool: string }[];
     warnings: { code: string; tool: string }[];
@@ -39,7 +40,7 @@ const pairs = (list: { code: string; location?: { tool: string }; tool?: string 
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(36);
+    expect(CASES).toHaveLength(37);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {
@@ -49,6 +50,7 @@ describe('binding fixtures', () => {
             offered: fixture.offered ?? {},
             hostActions: fixture.host_actions ?? [],
             hostTakesCheckpoints: fixture.host_takes_checkpoints ?? false,
+            shellTools: fixture.shell_tools ?? {},
           }
         : {};
     const { effective, diagnostics } = checkBindings(fixture.records, options);

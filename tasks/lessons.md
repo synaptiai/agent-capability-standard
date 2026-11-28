@@ -360,3 +360,18 @@ than refused.
 suite on each platform or shell it names before pushing, not a chosen
 subset. Run it from a shell whose PATH holds no other plugin's shims (a
 Claude Code session can put a `git` shim first on PATH).
+
+## The Standard's figures are drawn by the site, never written into it
+
+**Pattern.** RFC-0011 lengthened §5.18.3, and the site's figure-gap sweep
+failed on the Standard's page. A mermaid diagram was added to
+`spec/STANDARD-v1.2.0.md` to break the run. `site/test/mermaid.test.ts`
+forbids mermaid in every version of the Standard, because a Standard is a
+release text; its figures come from data in `site/src/lib/spec-slots.ts`
+and the figure code beside it.
+
+**Rule.** When a change to `spec/STANDARD-v*.md` fails the figure-gap
+sweep, add a slot and a site-drawn figure (`spec-slots.ts`,
+`spec-tail-figures.ts` or a module like `spec-tool-figures.ts`), never a
+diagram in the Standard's text. Run `npm test` in `site/` before
+measuring, not only the build and the sweep.

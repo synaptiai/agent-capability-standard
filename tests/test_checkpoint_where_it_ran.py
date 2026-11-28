@@ -32,13 +32,18 @@ from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 ROOT = Path(__file__).resolve().parents[1]
 TAKE = ROOT / "hooks" / "posttooluse_take_checkpoint.sh"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None
-    or shutil.which("bash") is None
-    or shutil.which("jq") is None
-    or shutil.which("openssl") is None,
-    reason="needs git, bash, jq and openssl",
-)
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = [
+    pytest.mark.usefixtures("bash_under_sandbox"),
+    pytest.mark.skipif(
+        shutil.which("git") is None
+        or shutil.which("bash") is None
+        or shutil.which("jq") is None
+        or shutil.which("openssl") is None,
+        reason="needs git, bash, jq and openssl",
+    ),
+]
 
 ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -245,7 +250,10 @@ class TestTheAdaptersRecorder:
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(checkpoint_dir=str(tmp_path / ".cp"), approval="off")
         )
-        options = adapter.wrap_options(ClaudeAgentOptions())
+        # The one permission mode in which the adapter relaxes Bash.
+        options = adapter.wrap_options(
+            ClaudeAgentOptions(permission_mode="bypassPermissions")
+        )
         (pre,) = options.hooks["PreToolUse"][-1].hooks
         posts = [h for entry in options.hooks["PostToolUse"] for h in entry.hooks]
         return project, evil, adapter, pre, posts
@@ -299,6 +307,90 @@ class TestTheAdaptersRecorder:
         printed = stash(project)
         asyncio.run(self._call(adapter, pre, posts, evil, bash_post(project, printed)))
         assert not adapter.checkpoint_tracker.has_valid_checkpoint()
+
+    def test_a_call_classified_without_the_boundary_takes_none(
+        self, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The boundary is verified before the call runs (STANDARD 1.2.0
+        section 5.18.3): a `git stash create` the PreToolUse hook gave the
+        worst case, because the boundary did not hold then, takes no
+        checkpoint and counts as no checkpoint that ran, though the
+        boundary holds again when the call reports back."""
+        project, _, adapter, pre, posts = self._setup(tmp_path)
+        (project / "a.txt").write_text("project change\n")
+        printed = stash(project)
+        held = [False]
+        monkeypatch.setattr(
+            ToolCapabilityMapper,
+            "boundary_holds",
+            lambda self, tool_input, permission_mode=None: held[0],
+        )
+
+        async def run() -> None:
+            adapter.create_checkpoint(["*"], "held by the call")
+            out = await pre(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": STASH},
+                    "cwd": str(project),
+                    "tool_use_id": "toolu_1",
+                },
+                "toolu_1",
+                None,
+            )
+            decision = out.get("hookSpecificOutput", {}).get("permissionDecision")
+            assert decision in (None, "allow"), out
+            held[0] = True
+            for hook in posts:
+                await hook(bash_post(project, printed), "toolu_1", None)
+
+        asyncio.run(run())
+        assert not adapter.checkpoint_tracker.has_valid_checkpoint()
+        assert "checkpoint" not in adapter._executed
+
+    def test_the_boundary_is_decided_once_per_call(
+        self, tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The PreToolUse hook checks the boundary once for a call and
+        classifies it, and keeps it for after the call, from that one
+        result: a boundary that holds at its first check and fails at the
+        next is not counted as held for a call another check gave the worst
+        case (here the first check fails, and every later one holds)."""
+        project, _, adapter, pre, posts = self._setup(tmp_path)
+        (project / "a.txt").write_text("project change\n")
+        printed = stash(project)
+        checks: list[bool] = []
+
+        def boundary_holds(
+            self: Any, tool_input: Any, permission_mode: str | None = None
+        ) -> bool:
+            # The first check fails; every later one holds.
+            checks.append(bool(checks))
+            return checks[-1]
+
+        monkeypatch.setattr(ToolCapabilityMapper, "boundary_holds", boundary_holds)
+
+        async def run() -> None:
+            adapter.create_checkpoint(["*"], "held by the call")
+            await pre(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": STASH},
+                    "cwd": str(project),
+                    "tool_use_id": "toolu_1",
+                },
+                "toolu_1",
+                None,
+            )
+            assert checks == [False]
+            for hook in posts:
+                await hook(bash_post(project, printed), "toolu_1", None)
+
+        asyncio.run(run())
+        assert not adapter._bash_boundary_held("toolu_1")
+        active = adapter.checkpoint_tracker.get_active_checkpoint()
+        assert active is None or active.metadata.get("commit") != printed
+        assert "checkpoint" not in adapter._executed
 
     def test_control_the_project_takes_one(self, tmp_path: Path, outside: Path) -> None:
         project, _, adapter, pre, posts = self._setup(tmp_path)

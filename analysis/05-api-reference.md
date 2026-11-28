@@ -608,7 +608,12 @@ mapping = mapper.map_tool("Write", {"file_path": "/tmp/test.txt"})
 assert mapping.capability_id == "mutate"
 assert mapping.requires_checkpoint is True
 
-# Bash command analysis
+# Bash command analysis: only under a verified operating-system boundary
+# (the adapter sets os_boundary when it wraps options with its sandbox);
+# with none, every Bash call is its worst case, mutate and send.
+mapping = mapper.map_tool("Bash", {"command": "ls -la"})
+assert {"mutate", "send"} <= set(mapping.capabilities)
+mapper.os_boundary = lambda: True
 mapping = mapper.map_tool("Bash", {"command": "ls -la"})
 assert mapping.capability_id == "observe"
 assert mapping.risk == "low"

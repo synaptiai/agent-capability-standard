@@ -61,7 +61,9 @@ def header(path: Path) -> tuple[str, str]:
 
 
 def status_rfcs(path: Path) -> list[Path]:
-    """The RFC files the `**Status:**` text links, up to the next `**Key:**` line."""
+    """The RFC files the `**Status:**` text names after "accepted by", up to
+    the end of that clause (the next `;`): the RFCs the version rests on. A
+    Draft the text also links, for a rule it proposes, is not one of them."""
     text = path.read_text("utf-8")
     block = re.search(
         r"^\*\*Status:\*\*(.*?)(?=^\*\*[A-Za-z ]+:\*\*|^\s*$)",
@@ -69,8 +71,11 @@ def status_rfcs(path: Path) -> list[Path]:
         re.MULTILINE | re.DOTALL,
     )
     assert block, f"{path.name} has no **Status:** line"
+    clause = re.search(r"accepted by(.*?)(?:;|$)", block.group(1), re.DOTALL)
+    assert clause, f"{path.name}: its Status names no RFC it was accepted by"
     return [
-        SPEC / name for name in re.findall(r"\((RFC-\d{4}-[^)]+\.md)\)", block.group(1))
+        SPEC / name
+        for name in re.findall(r"\((RFC-\d{4}-[^)]+\.md)\)", clause.group(1))
     ]
 
 

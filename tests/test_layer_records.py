@@ -157,6 +157,63 @@ class TestDenySettings:
             f"{modules}/libs/a/modules/b/acs",
         ]
 
+    def test_a_submodule_checkout_names_its_superprojects_git_directories(
+        self, tmp_path: Path
+    ) -> None:
+        """A submodule's common git directory is its own modules/<path>: the
+        superproject's acs/ (its key) is found through the superproject,
+        and so is the outermost one's for a nested submodule."""
+        inner = _repo(tmp_path / "inner")
+        library = _repo(tmp_path / "library")
+        _git(
+            library,
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            str(inner),
+            "in",
+        )
+        _git(library, "commit", "-q", "-m", "in")
+        top = _repo(tmp_path / "my top")
+        _git(
+            top,
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            str(library),
+            "lib dir",
+        )
+        _git(
+            top,
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "-q",
+        )
+        _git(top, "commit", "-q", "-m", "lib")
+        common = f"{top}/.git"
+        nested = top / "lib dir" / "in"
+        for project in (top / "lib dir", nested):
+            settings = deny_settings(project)
+            rules = _rules(settings)
+            deny_write = settings["sandbox"]["filesystem"]["denyWrite"]
+            for path in (
+                f"{common}/acs",
+                f"{common}/modules/lib dir/acs",
+                f"{common}/modules/lib dir/modules/in/acs",
+            ):
+                assert f"Edit(/{path}/**)" in rules
+                assert f"Read(/{path}/**)" in rules
+                assert path in deny_write
+            assert len(rules) == len(set(rules))
+
     def test_read_rules_only_for_the_git_directorys_records(
         self, tmp_path: Path
     ) -> None:

@@ -727,8 +727,13 @@ class WorkflowRunner:
         event), which must match it and must not have started a run of it
         before (its ``event_id``), and is given as the input its
         ``delivers_to`` names. The runner applies no sender policy: apply
-        yours before you start the run. Without ``trigger`` the run is
-        attended unless ``attendance`` says otherwise.
+        yours before you start the run. Without ``trigger`` the host gives
+        the run's attendance (§5.10.2), and the run is attended unless
+        ``attendance`` says otherwise. Pass ``"unattended"`` when no person
+        can answer an approval request within its ``expires`` through any
+        channel (the session, a person's side of a conversation, an
+        authenticated endpoint): a ``human`` approver is then not asked and
+        ``when_unattended`` applies at once (§5.14, Attendance).
 
         ``grounding`` is one :class:`GroundingPolicy` or a list of them
         (STANDARD v1.2 §5.20): the core checks each host ``Output`` of a
@@ -930,6 +935,9 @@ class WorkflowRunner:
         With ``save``, the resumed state (``run.snapshot(key)``) is saved
         before this returns, so no action of the resumption is performed
         unsaved (§5.19.4); else save it yourself before you drive it.
+
+        ``attendance`` is the run's attendance from now on, attended by
+        default; decide it as for :meth:`start` without a trigger.
 
         The run continues as the same run: its deferred steps run again,
         each asked afresh (of a person when ``attendance`` is attended, even

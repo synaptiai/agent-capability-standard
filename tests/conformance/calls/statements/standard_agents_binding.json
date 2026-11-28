@@ -7,6 +7,7 @@
   "does_not_cover": "other calls of tools defined with plain defineTool, a call the runtime runs under a name a composite lists for a grounded tool included; provider-executed tools; writes made by effects, hooks, handlers or endpoints",
   "scope": "one thread (threadId), executions ordered by the runtime",
   "boundaries": ["a new execution (flowId)", "a call outside an execution authorises nothing"],
+  "shell_tools": {},
   "checkpoint_max_age": "PT10M",
   "approval": {
     "how": "recorded",

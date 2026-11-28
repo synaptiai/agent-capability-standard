@@ -8,11 +8,12 @@ import { describe, expect, it } from 'vitest';
 import { renderRepoFile } from './pipeline';
 import { repoText, standardFileVersions } from './independent';
 import { cutAtSlots, SLOTS_BY_VERSION, SPEC_SLOTS, SPEC_SLOTS_100, SPEC_SLOTS_110 } from '../src/lib/spec-slots';
-import { placeSlots } from '../src/plugins/rehype-spec-slots';
+import { capabilityTiles, placeSlots } from '../src/plugins/rehype-spec-slots';
 import { REPLAY_FIXTURES, replay } from '../src/lib/run-replay';
 import * as D from '../src/lib/spec-dsl-figures';
 import * as T from '../src/lib/spec-tail-figures';
 import * as H from '../src/lib/spec-host-figures';
+import * as C from '../src/lib/spec-tool-figures';
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { loadOntology } from '../src/data/ontology';
@@ -44,7 +45,8 @@ describe('figure slots', () => {
       }
       expect(cutAtSlots(html, slots).filter((p) => p.key !== undefined)).toHaveLength(slots.length);
     }
-  });
+    // It renders every version of the Standard: about 5 s on a CI runner
+  }, 60_000);
 
   it('places the wait replay directly before the paragraph that opens "Delays."', async () => {
     const html = (await renderRepoFile(STD)).code;
@@ -501,5 +503,55 @@ describe('§3 design principles and §10.4 safety-layer fixtures', () => {
       expect(ours.reduce((a, g) => a + g.count, 0)).toBe(docs.length);
       expect(ours.find((g) => g.label.endsWith('any layer'))?.count ?? 0).toBe(docs.filter((d) => !d.needs || d.needs.length === 0).length);
     }
+  });
+});
+
+describe('§5.18.3 classification figures', () => {
+  // The §5.18.3 lines, up to §5.18.4, scanned without the code under test.
+  const lines = text.split('\n');
+  const from = lines.findIndex((l) => l.startsWith('#### 5.18.3 '));
+  const to = lines.findIndex((l, i) => i > from && l.startsWith('#### '));
+  const sec = lines.slice(from + 1, to);
+
+  it('names, per row of the classification table, the capability ids of its Capability cell, none for a "Not" cell', () => {
+    const ids = new Set(loadOntology().capabilities.map((c) => c.id));
+    const at = sec.findIndex((l) => l.startsWith('| What the call does |'));
+    const body = sec.slice(at + 2).filter((_, i, all) => all.slice(0, i + 1).every((x) => x.startsWith('|')));
+    const want = body.map((l) => {
+      const capCell = l.split('|')[2]!.trim();
+      return /^Not\b/.test(capCell) ? [] : [...new Set([...capCell.matchAll(/`([^`]+)`/g)].map((m) => m[1]!).filter((x) => ids.has(x)))];
+    });
+    const rows = C.classificationRows(text, STD);
+    expect(rows.map((r) => r.caps)).toEqual(want);
+    expect(rows.flatMap((r) => r.caps)).not.toContain('control');
+    expect(C.classificationCaption(rows)).toMatch(/^\d+ rows name \d+ capabilities/);
+  });
+
+  it('counts the cases of the list in which the boundary is unverified, and fails when a phrase it draws is gone', () => {
+    const items = sec.filter((l) => l.startsWith('- ')).length;
+    const f = C.shellFlow(text, STD);
+    expect(f.unverified).toBe(items);
+    expect(() => C.shellFlow(text.replace('the call gets the worst case, not R407', 'the call gets R407'), STD)).toThrow(/not R407/);
+    expect(() => C.shellFlow(text.replace('Any classification other than the worst case relaxes', 'A classification relaxes'), STD)).toThrow(/no longer says/);
+  });
+
+  it('takes the boundary properties from the table and fails when the proxy is no longer the one route out', () => {
+    const at = sec.findIndex((l) => l.startsWith('| Property |'));
+    const want = sec.slice(at + 2).filter((_, i, all) => all.slice(0, i + 1).every((x) => x.startsWith('|'))).map((l) => l.split('|')[1]!.trim());
+    expect(C.boundary(text, STD).properties).toEqual(want);
+    expect(() => C.boundary(text.replace("except the boundary's own network proxy", 'except a proxy'), STD)).toThrow(/one route out/);
+  });
+
+  it('keeps a tile, its code and the punctuation after the code together, and leaves an unnamed code alone', () => {
+    const td = (...children: Element['children']): Element => ({ type: 'element', tagName: 'td', properties: {}, children });
+    const codeEl = (v: string): Element => ({ type: 'element', tagName: 'code', properties: {}, children: [{ type: 'text', value: v }] });
+    const cellOf = td(codeEl('retrieve'), { type: 'text', value: ', ' }, codeEl('search'), { type: 'text', value: '; a write anywhere else is ' }, codeEl('mutate'));
+    const table: Element = { type: 'element', tagName: 'table', properties: {}, children: [{ type: 'element', tagName: 'tbody', properties: {}, children: [{ type: 'element', tagName: 'tr', properties: {}, children: [td({ type: 'text', value: 'x' }), cellOf] }] }] };
+    const problems: string[] = [];
+    expect(capabilityTiles(table, [{ caps: ['retrieve', 'search'] }], problems, 'test')).toBe(2);
+    expect(problems).toEqual([]);
+    const kids = cellOf.children;
+    const groupText = (e: Element['children'][number]) => (e.type === 'element' ? e.children.filter((c) => c.type === 'text').map((c) => (c as { value: string }).value).join('') : null);
+    expect(kids.map((k) => (k.type === 'element' ? `${k.tagName}${k.tagName === 'span' ? `[${groupText(k)}]` : ''}` : k.value))).toEqual(['span[,]', ' ', 'span[;]', ' a write anywhere else is ', 'code']);
   });
 });

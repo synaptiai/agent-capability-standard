@@ -20,6 +20,10 @@ import pytest
 
 from grounded_agency.capabilities import mapper
 
+# The Bash classifier relaxes a call only under a verified sandbox; these
+# tests are about the classifier itself (conftest.bash_under_sandbox).
+pytestmark = pytest.mark.usefixtures("bash_under_sandbox")
+
 HOOK = (
     Path(__file__).resolve().parents[1] / "hooks" / "pretooluse_require_checkpoint.sh"
 )

@@ -131,6 +131,7 @@ def create_checkpoint_recorder(
     *,
     refuses_output: Callable[[str, Any, Any], bool] | None = None,
     call_dir: Callable[[str | None], str | None] | None = None,
+    boundary_held: Callable[[str | None], bool] | None = None,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that records the checkpoint a successful
@@ -158,8 +159,10 @@ def create_checkpoint_recorder(
 
     Args:
         checkpoint_tracker: CheckpointTracker to update
-        mapper: Classifies the calls; a mapper over the packaged ontology
-            when omitted
+        mapper: Classifies the calls. When omitted, a mapper over the
+            packaged ontology with no operating-system boundary, under
+            which every Bash call is its worst case and ``git stash
+            create`` takes no checkpoint: pass the adapter's mapper.
         expiry_minutes: The checkpoints' maximum age (at most 30); the
             tracker's default when omitted
         refuses_output: Whether the safety layer refuses the call's output
@@ -173,6 +176,13 @@ def create_checkpoint_recorder(
             working directory; one whose input names another directory
             than that hook's takes none. The adapter passes what its
             PreToolUse hook kept.
+        boundary_held: Whether the operating-system boundary held when the
+            PreToolUse hook classified a Bash call, by call id (STANDARD
+            1.2.0 section 5.18.3: the boundary is verified before the call
+            runs). A Bash call for which it returns False takes none; one
+            for which it returns True is classified with the boundary held,
+            as that hook classified it, without checking it again. The
+            adapter passes what its PreToolUse hook kept.
 
     Returns:
         Async hook callback function
@@ -204,7 +214,22 @@ def create_checkpoint_recorder(
                     # It reports another directory than the one it was
                     # checked in: where it ran cannot be told.
                     return {}
-            mapping = classify.map_tool(tool_name, tool_input, cwd)
+            if (
+                tool_name == "Bash"
+                and boundary_held is not None
+                and not boundary_held(tool_use_id or input_data.get("tool_use_id"))
+            ):
+                return {}
+            # A Bash call is classified as the PreToolUse hook classified it:
+            # the boundary held then (checked above).
+            mapping = classify.map_tool(
+                tool_name,
+                tool_input,
+                cwd,
+                boundary=(
+                    True if tool_name == "Bash" and boundary_held is not None else None
+                ),
+            )
             if "checkpoint" not in mapping.capabilities:
                 return {}
             tool_response = input_data.get("tool_response")

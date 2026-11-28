@@ -2,6 +2,117 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: approval-human
 title: Approval, people and identity
+changes_in_1_2_0:
+- row: approval-01
+  sections: '§5.18.7, §5.21.3'
+  effect: 'Approval is required over calls too, and a profile can require a person for a step.'
+- row: approval-02
+  sections: '§5.18, §10.4'
+  effect: 'The obligation is stated for safety layers over calls, with conformance class SL.'
+- row: approval-03
+  sections: '§5.14'
+  effect: 'A step that requires approval and has no `approval` field is asked as a human approval in
+    session, shown its resolved inputs, with no expiry.'
+- row: approval-04
+  sections: '§5.17'
+  effect: 'With `identity@1`, approvers are counted by principal and checked against the requested kind
+    and role.'
+- row: approval-05
+  sections: '§5.14'
+  effect: '`in_session` and `out_of_band` are defined; a human approver is still never asked in an
+    unattended run.'
+- row: approval-06
+  sections: '§5.14, §10.3'
+  effect: 'The digest input is the array of resolved `shows` values in order, with normative vectors.'
+- row: approval-07
+  sections: '§5.14, §5.17'
+  effect: 'A decision''s `decision_id` must not have been used before in the run, and it can carry
+    `approver_identities`.'
+- row: approval-08
+  sections: '§5.14, §5.19.3'
+  effect: '`expires` runs from the request, and an answer at the deadline is in time.'
+- row: approval-09
+  sections: '§5.14'
+  effect: '`recheck` behaviour is stated: the source is read again after a valid approval and before the
+    checkpoint is used; `reask`, `replan` and `stop` are defined.'
+- row: approval-10
+  sections: '§5.14, §5.18.7'
+  effect: 'Single use is stated per run by `decision_id`, and per call for safety layers.'
+- row: approval-11
+  sections: '§5.14, §5.10.2, §5.14.1'
+  effect: 'A human approver is never asked in an unattended run; a host gives the attendance of a run no
+    trigger started; a deferred run can be resumed.'
+- row: approval-12
+  sections: '§5.14'
+  effect: 'A standing mandate is asked in an unattended run, except for a step with an always-ask item or
+    one a profile requires a person for.'
+- row: approval-13
+  sections: '§6.4, §5.17'
+  effect: 'Action records gain `approval.decision_id` and `approver_identities`.'
+- row: approval-14
+  sections: '§5.19.6'
+  effect: 'A prompt to approvers that carries only the action''s values is protocol traffic, not a `send`
+    step.'
+- row: approval-15
+  sections: '§5.18.7'
+  effect: 'Approval for calls applies wherever the code runs behind a tool.'
+- row: approval-16
+  sections: '§5.15.2'
+  effect: 'With `agents`, a `delegate` step''s flags are raised to what its targets may do.'
+- row: approval-17
+  sections: '§5.18.7'
+  effect: 'One decision per call, used up when the call is allowed.'
+- row: approval-18
+  sections: '§5.14.1'
+  effect: 'A resumption asks a queued step afresh, names `queued_action_id` and updates its `planned`
+    record in place.'
+- row: wait-02
+  sections: '§5.19.4, §5.14'
+  effect: 'Saving and continuing a run is specified, and a host that asks out of band keeps the run''s
+    state while it waits.'
+- row: identity-02
+  sections: '§5.17'
+  effect: '`agent_identity` gains `model_id` (`agent_identity_schema.yaml` 1.1.0).'
+- row: identity-03
+  sections: '§5.17'
+  effect: 'In a workflow that targets 1.2, approver fields can carry `sender_check` and
+    `accept_trust_classes`.'
+- row: identity-04
+  sections: '§5.14'
+  effect: 'A step with an always-ask item is not asked of a standing mandate and follows `when_unattended`
+    in an unattended run.'
+- row: identity-05
+  sections: '§5.17'
+  effect: 'A run keeps its actor while it continues; a handoff cancels the run unless it ended `deferred`,
+    and a resumption may name a new actor.'
+- row: inquiry-01
+  sections: '§5.13.1'
+  effect: 'Answers to an inquiry are defined: `inquiry_id`, question `id` and `answer_type`, and `receive`
+    items'' `answers` (ontology 2.2.0).'
+- row: event-01
+  sections: '§5.10.2'
+  effect: 'A host accepts an event whose `event_type` equals the trigger''s, so event types are compared
+    exactly.'
+- row: approval-19
+  sections: '§5.19.1'
+  effect: '`expires_at` is computed by the executor from the request time, and the exchange is part of the
+    normative host protocol.'
+- row: approval-20
+  sections: '§5.14.1'
+  effect: 'A deferred step runs again when the run is resumed.'
+- row: approval-21
+  sections: '§5.21.3'
+  effect: 'An applied profile can raise `requires_approval` and require a person for a step.'
+- row: approval-22
+  sections: '§5.17'
+  effect: 'Approver identities are checked against the requested kind.'
+- row: approval-23
+  sections: '§5.18, §10.4'
+  effect: 'A library around a host''s tool loop is a safety layer under §5.18, and can claim class SL.'
+- row: approval-24
+  sections: '§5.14, §5.17'
+  effect: 'Validity also requires an unused `decision_id`, and approvers with identities are counted by
+    principal.'
 rows:
 - id: approval-01
   relation: acs_only

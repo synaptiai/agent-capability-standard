@@ -2,6 +2,126 @@
 # Part of the Standard Agent Specification mapping; index.yaml explains the fields.
 concern: published-api-extension-points
 title: The published TypeScript API as a binding surface
+changes_in_1_2_0:
+- row: tools-01
+  sections: '§5.18.1, §5.18.4'
+  effect: 'A tool call is classified through a tool binding, and a composite tool lists the tools it calls
+    (`invokes`).'
+- row: tools-02
+  sections: '§5.18.1'
+  effect: 'The classification record of a tool is the normative tool binding.'
+- row: tools-03
+  sections: '§5.18.5 to §5.18.8, §10.4'
+  effect: 'A safety layer that acts on effective flags over calls is specified, with conformance class
+    SL.'
+- row: tools-04
+  sections: '§5.18.8, §5.18.9, §5.18.10'
+  effect: 'Refusals, records and fail-closed loading, text-only results and the capability checks are
+    stated for calls.'
+- row: tools-05
+  sections: '§5.18.5, §5.18.4'
+  effect: '`requires` is evaluated over calls within a layer''s scope, and a composite tool''s calls are
+    covered through `invokes`.'
+- row: tools-06
+  sections: '§5.18.2'
+  effect: 'A tool the layer has no binding for is still gated, as the strictest case; this is the rule for
+    calls the binding did not author.'
+- row: options-01
+  sections: '§5.2.4'
+  effect: 'Step `domain` values are domain ids with a host selection rule.'
+- row: provext-01
+  sections: '§5.18'
+  effect: 'The check before a call''s effect is specified for tool-calling hosts.'
+- row: hooks-01
+  sections: '§5.18, §10.4'
+  effect: 'Safety hooks around tool use are a safety layer under §5.18; a layer claims class SL with a
+    statement of its scope.'
+- row: hooks-02
+  sections: '§6.4, §6.5'
+  effect: 'Audit records (action records and canonical events, required or best-effort capture, no silent
+    capture failure) and one evidence anchor type are defined.'
+- row: hooks-03
+  sections: '§6.5, §6.6'
+  effect: 'Anchors can carry a `digest` and the kind `record`, and evidence stores are specified.'
+- row: callid-01
+  sections: '§5.18.8, §6.4'
+  effect: 'An action record carries `run_id`, `tool` and `call_id`, which tie a record to one call.'
+- row: thread-01
+  sections: '§4.4.1, §5.14'
+  effect: 'A checkpoint reports what it captured, its digest and expiry, and the approval digest input is
+    defined.'
+- row: thread-02
+  sections: '§5.18.2, §5.18.3'
+  effect: 'Classifying an arbitrary call is the Standard''s rule: by its binding, which classifies by
+    effect, and as the strictest case when it has none.'
+- row: thread-03
+  sections: '§4.4.1, §6.6'
+  effect: 'A rollback never restores the record of what happened (stores, trace, records, audit log), and
+    evidence stores are specified.'
+- row: thread-04
+  sections: '§5.19.3, §5.10.2'
+  effect: 'Tick boundaries are stated (an answer at the deadline is in time), and schedule fire times
+    follow the declared time zone.'
+- row: thread-05
+  sections: '§5.2.2, §5.19.2'
+  effect: 'A checkpoint''s validity ends at the end of a wait or delay and at a resumption, and a run''s
+    `run_id` is unique.'
+- row: thread-06
+  sections: '§5.15.1 to §5.15.4'
+  effect: 'Agent manifests, `continues`, `effective.model_id` and `effective.checkpointed` are added to
+    delegation.'
+- row: decide-01
+  sections: '§3.1, §4.1.1'
+  effect: 'An output is grounded by an anchor to evidence its producer had, or marked inferred by
+    `inference_method` and `confidence`.'
+- row: consume-01
+  sections: '§5.2.2, §5.18.6, §5.18.7'
+  effect: 'Single use is stated for steps and for calls: one checkpoint per gated step or call, and one
+    decision per call.'
+- row: erase-01
+  sections: '§4.4.1, §6.4'
+  effect: 'A rollback never restores the record of what happened, and audit records are specified.'
+- row: hitl-01
+  sections: '§5.14, §10.3'
+  effect: 'The digest input is the array of resolved `shows` values (or `[inputs]`), SHA-256 in lowercase
+    hex, with normative vectors.'
+- row: endpoint-01
+  sections: '§5.14, §5.17'
+  effect: '`out_of_band` is defined, and with `identity@1` a decision carries `approver_identities`
+    checked against the requested kind and role.'
+- row: shown-01
+  sections: '§5.14'
+  effect: 'A step with no `approval` field is shown its resolved inputs, and the digest is computed over
+    the shown values in order.'
+- row: user-01
+  sections: '§5.17'
+  effect: 'A run keeps its actor while it continues: a restore for another actor is refused and a
+    resumption may name a new actor.'
+- row: grant-01
+  sections: '§4.4.2'
+  effect: 'Each transmission has an `idempotency_key` and at most one transmission per key; destination
+    policies refuse a `send` with F504.'
+- row: agent-01
+  sections: '§5.10.2'
+  effect: 'A host that starts a run other than by a trigger gives the run''s attendance itself.'
+- row: handler-01
+  sections: '§5.19, §10.5'
+  effect: 'The host protocol is normative, and the runtime fixtures are normative for executors (class
+    EX).'
+- row: pack-01
+  sections: '§11.5, §11.6'
+  effect: 'The catalog header is an explicit value of the start operation, and how documents cite the
+    ontology version is stated.'
+- row: valid-01
+  sections: '§9.8'
+  effect: 'Every location key is defined, with `path` (RFC 6901) and `catalog`.'
+- row: ext-01
+  sections: 'Appendix B'
+  effect: 'The prefix `x-acs-` is reserved for the Standard.'
+- row: drift-02
+  sections: '§10.3, §10.5'
+  effect: 'Vectors and runtime fixtures are normative, so agreement with the reference is checked by
+    conformance classes.'
 rows:
 - id: tools-01
   relation: partial

@@ -282,6 +282,7 @@ class TestToolCapabilityMapper:
         assert mapping.risk == "low"
         assert mapping.requires_checkpoint is False
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     def test_map_bash_read_only(self, mapper: ToolCapabilityMapper):
         """Test mapping read-only Bash commands."""
         mapping = mapper.map_tool("Bash", {"command": "ls -la"})
@@ -302,6 +303,7 @@ class TestToolCapabilityMapper:
         assert mapping.capability_id == "mutate"
         assert mapping.requires_checkpoint is True
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     def test_map_bash_curl_post(self, mapper: ToolCapabilityMapper):
         """Test mapping curl POST command."""
         mapping = mapper.map_tool(
@@ -935,6 +937,7 @@ class TestHooks:
         # Evidence should be collected
         assert len(evidence_store) > 0
 
+    @pytest.mark.usefixtures("bash_under_sandbox")
     @pytest.mark.asyncio
     async def test_checkpoint_recorder_hook(
         self,
