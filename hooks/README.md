@@ -8,7 +8,7 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool, `onFailure: "block"`) | Classify the call; one checkpoint marker per gated call; ask for approval; let a restore of a recorded checkpoint run as a rollback |
+| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool), PreSkillShellCommand (`Bash`, `PowerShell`); both `onFailure: "block"` | Classify the call; one checkpoint marker per gated call; ask for approval; let a restore of a recorded checkpoint run as a rollback; refuse a gated command that a skill injects as it loads |
 | `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create`, with its commit entered in the git directory (`<git dir>/acs/checkpoints/commits/`), filing a marker it replaces under `.claude/checkpoints/ended/` |
 | `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity, filing it under `.claude/checkpoints/ended/`: the end and the start of a turn or a session are execution boundaries |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure (every tool) | Log every tool call as an action record (§6.4), with the configuration that decided it, for the audit trail and provenance; it is not an `audit` step |
@@ -79,13 +79,35 @@ the tool call as a JSON object on stdin; exit 0 allows the call (with an
 it, with the reason on stderr shown to Claude. Any other non-zero exit, a
 run that cannot start and one that gives no verdict within the hook's
 `timeout` (30 seconds) are failures: `hooks.json` sets `onFailure: "block"`
-on this hook, so Claude Code blocks the call (a Claude Code that does not
-support the setting treats a failure as a non-blocking error and runs the
-tool). Every tool call is routed here (matcher `*`). The reason opens with the
+on this hook, so Claude Code blocks the call. Claude Code honours
+`onFailure` from version 2.1.295; an earlier version treats a failure as a
+non-blocking error and runs the tool, so the plugin needs 2.1.295 or later.
+Every tool call is routed here (matcher `*`). The reason opens with the
 Standard's code and name for the refusal, such as `F501
 CHECKPOINT_REQUIRED:`. Only Claude Code's JSON object is read: a payload that
 is not one, or a system without `jq`, is blocked with `R407
 SAFETY_CHECK_FAILED:`.
+
+The same hook runs on `PreSkillShellCommand` (matcher `Bash|PowerShell`,
+`onFailure: "block"`, 30 seconds): before each shell command that a skill,
+or a command such as `/security-review`, injects as it loads
+(``!`cmd` `` and ```` ```! ```` blocks), which no PreToolUse hook sees.
+Claude Code runs such a command through the Bash or PowerShell tool, and
+the hook classifies it as it classifies that tool's call. On this event a
+hook can block a command but cannot ask a person (Claude Code treats `ask`
+as a block), so a command that needs nothing (an `observe` read, or
+`git stash create`, under the strict sandbox) runs, and every other one,
+a restore included, is refused with `F502 APPROVAL_REQUIRED:`, whatever
+`ACS_HOOK_APPROVAL` and the permission mode say. The refusal is decided
+before the checkpoint marker is read, so it uses no marker. The skill still
+loads, with `[not run: blocked by hook: <reason>]` in place of the
+command's output; Claude can run the command afterwards as a tool call,
+which can be approved. Without the strict sandbox every Bash command is
+gated, so every injected command is refused. The event needs Claude Code
+2.1.332 or later: an earlier version runs injected commands without calling
+it, and shows `Unknown hook event "PreSkillShellCommand" was ignored` when a
+session starts. There, `disableSkillShellExecution` in the user or managed
+settings keeps skills from running injected commands at all.
 
 The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
 `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`), and any variable that is not one of
@@ -177,13 +199,27 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         ]
       }
     ],
+    "PreSkillShellCommand": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse_require_checkpoint.sh",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       },
@@ -192,7 +228,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh",
+            "timeout": 90
           }
         ]
       }
@@ -203,7 +240,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       }
@@ -213,7 +251,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -223,7 +262,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -233,7 +273,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -243,7 +284,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -253,7 +295,8 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -267,7 +310,7 @@ Each hook entry specifies:
 - **hooks**: Array of hook commands to execute
 - **type**: Hook type (`command` for shell scripts)
 - **command**: Path to the hook script (`${CLAUDE_PLUGIN_ROOT}` resolves to the plugin directory)
-- **timeout**: Seconds the hook may run (Claude Code's default otherwise)
+- **timeout**: Seconds the hook may run. Every entry sets one: 30 for the pre-tool-use hook; 90 for the log and checkpoint hooks, above the longest their bounded reads and the log's lock wait (`AUDIT_LOCK_WAIT`, at most 55) can take together; 10 for the boundary hook, which on SessionEnd also raises Claude Code's 1.5-second budget for that event
 - **onFailure**: `block` makes a run that fails, cannot start or times out block the call
 
 ## Checkpoint System
@@ -308,7 +351,10 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
   arguments substituted into them) as the skill loads, under its
   `allowed-tools`, and the hooks and MCP servers a subagent's definition
-  names as the subagent runs; none of them reaches a hook, and a project's
+  names as the subagent runs; before Claude Code 2.1.332 none of them
+  reaches a hook, and from 2.1.332 the embedded commands reach this hook
+  on `PreSkillShellCommand` (above) but the subagent's hooks and MCP
+  servers still do not. A project's
   skill or agent can take any name (a project's agent replaces a built-in
   one of the same name). The call is asked for approval with the reason
   `<tool> (capability 'mutate': the shell commands a skill's file embeds,
@@ -1601,6 +1647,15 @@ As a store ([STANDARD v1.2 §6.6](../spec/STANDARD-v1.2.0.md#66-evidence-records
 the log is `durable`: a file in the project, which outlives the session,
 with no retention of its own: lines are kept until someone removes them
 (§6.3).
+
+The layer's records grow with use, and the plugin neither rotates nor prunes
+any of them:
+
+| Record | Grows by | Size |
+|--------|----------|------|
+| `.claude/audit.log` | one line per tool call, succeeded or failed | about 0.7 KB a line (689 bytes on average over 30 lines for `Bash` and `Write` calls; a longer tool or skill name, or an anchor's reason, adds its length) |
+| `.claude/checkpoints/used/`, `.claude/checkpoints/ended/` | one marker file per checkpoint: under `used/` when a gated call takes it, under `ended/` when its validity ends unused | about 190 bytes a file (189 for a marker with a 40-digit commit id) |
+| `<git dir>/acs/checkpoints/commits/` | one entry per checkpoint taken, named by its commit | 64 bytes a file (the commit's signature), plus the objects `git stash create` wrote |
 
 Each entry is an action record with these fields, in this order:
 

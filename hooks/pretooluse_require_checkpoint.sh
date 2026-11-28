@@ -1998,6 +1998,24 @@ if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
   exit 0
 fi
 
+# PreSkillShellCommand (Claude Code 2.1.332 and later): a shell command that
+# a skill or a command injects while it loads, classified above as the same
+# command run by the Bash tool is (Claude Code runs it through that tool).
+# On this event a hook can only block (an ask blocks too), so no person can
+# approve the command: every call this hook does not let pass outright, a
+# restore included, is refused here, before the checkpoint marker is read,
+# so the refusal uses no marker. This holds whatever ACS_HOOK_APPROVAL and
+# the permission mode say.
+event=$(printf '%s' "$payload" | jq -r '.hook_event_name // empty | strings' 2>/dev/null) || event=""
+if [ "$event" = "PreSkillShellCommand" ]; then
+  injected_by=$(printf '%s' "$payload" | jq -r '.command_name // empty | strings' 2>/dev/null) || injected_by=""
+  why=""
+  if [ "$tool_name" = Bash ] && [ "$SANDBOX_CHECKED" = not ]; then
+    why=" Claude Code's strict sandbox is not verified (${SANDBOX_REASON:-unknown}), so every Bash command is a gated call."
+  fi
+  block "F502 APPROVAL_REQUIRED: ${shown_tool} command that '$(plain_name "${injected_by:-unknown}")' injects while it loads is a gated call, and no person can approve a command on this event; ask Claude to run it as a tool call, which can be approved.${why}"
+fi
+
 # BEGIN link-count (tests/test_layer_records.py runs the hook without these blocks and expects the same verdicts)
 # The project's records, for every call this hook does not let pass
 # outright (a gated call, a checkpoint put to a person, a restore): another

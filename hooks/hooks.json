@@ -13,13 +13,27 @@
         ]
       }
     ],
+    "PreSkillShellCommand": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse_require_checkpoint.sh",
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       },
@@ -28,7 +42,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh",
+            "timeout": 90
           }
         ]
       }
@@ -39,7 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh",
+            "timeout": 90
           }
         ]
       }
@@ -49,7 +65,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -59,7 +76,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -69,7 +87,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -79,7 +98,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }
@@ -89,7 +109,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh",
+            "timeout": 10
           }
         ]
       }

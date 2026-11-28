@@ -943,7 +943,7 @@ _do_append() {
 # cannot be taken here; flock(1) elsewhere (any flock(1): only -x and -n are
 # used). Both are flock(2), so sessions using either exclude each other. A
 # run tries every 0.05 s for at most AUDIT_LOCK_WAIT seconds (default 40, at
-# most 55: Claude Code stops a hook after 60), then appends without the lock,
+# most 55, within the 90 seconds hooks.json gives this hook), then appends without the lock,
 # as it does at once where the lock cannot be taken at all. An entry out of
 # chain order is reported by the verifier, a missing one is not, so a held
 # lock cannot silence the log.

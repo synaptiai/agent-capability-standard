@@ -216,6 +216,8 @@ that. On native Windows, which has no sandbox, it writes nothing. See
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 
+The hooks need Claude Code 2.1.295 or later. An earlier version ignores `onFailure: "block"`, so a call runs when the pre-tool-use hook fails or does not answer within its 30 seconds. The check on the shell commands a skill injects as it loads needs Claude Code 2.1.332 or later; an earlier version runs those commands with no hook seeing them ([Pre-Tool-Use Hooks](hooks/README.md#pre-tool-use-hooks)).
+
 ### Option 2: Standalone Validation
 
 Use the validator independently:
@@ -327,7 +329,7 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool) | Classify the call (an unbound tool, MCP tools included, is a gated `mutate`; Bash is read by command only under Claude Code's strict sandbox, verified from the settings files, and is otherwise a gated `mutate`); one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback` |
+| `pretooluse_require_checkpoint.sh` | PreToolUse (every tool), PreSkillShellCommand (`Bash`, `PowerShell`) | Classify the call (an unbound tool, MCP tools included, is a gated `mutate`; Bash is read by command only under Claude Code's strict sandbox, verified from the settings files, and is otherwise a gated `mutate`); one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback`; refuse a command a skill injects as it loads unless it needs nothing |
 | `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Take the checkpoint after a successful `git stash create`: write the marker, with its commit recorded for a later rollback |
 | `stop_end_checkpoints.sh` | Stop, StopFailure, UserPromptSubmit, SessionStart, SessionEnd | End the marker's validity when a turn or a session ends or starts, filing it under `.claude/checkpoints/ended/` |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
@@ -496,6 +498,8 @@ claude plugin install agent-capability-standard
 | **Remote writes** | An MCP server with typed tools for push, tag, pull request, merge, release and issue writes, each a gated change a person approves, to the origin a person recorded ([hooks/README.md](hooks/README.md#remote-writes)) |
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
+
+The hooks need Claude Code 2.1.295 or later. An earlier version ignores `onFailure: "block"`, so a call runs when the pre-tool-use hook fails or does not answer within its 30 seconds. The check on the shell commands a skill injects as it loads needs Claude Code 2.1.332 or later; an earlier version runs those commands with no hook seeing them ([Pre-Tool-Use Hooks](hooks/README.md#pre-tool-use-hooks)).
 
 ### Local Development
 

@@ -12,6 +12,10 @@ Validates:
 3) Status / Target / Date metadata are present and well-formed
 4) Every section GOVERNANCE requires is present and non-empty
 5) Repository paths referenced by the RFC actually exist
+6) An Accepted RFC records its review window, of at least 14 days and ending
+   on its Date, and who accepted it: at least one maintainer named in
+   .github/CODEOWNERS (spec/GOVERNANCE.md, "Decision-making"). The RFCs
+   accepted before that rule (ACCEPTED_BEFORE_REVIEW_RULE) are exempt.
 
 Usage:
 - python3 tools/validate_rfcs.py
@@ -25,6 +29,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +42,22 @@ STATUS_PATTERN = re.compile(
 )
 TARGET_PATTERN = re.compile(r"^\*\*Target:\*\*\s*\S")
 DATE_PATTERN = re.compile(r"^\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})\s*$")
+REVIEW_WINDOW_PATTERN = re.compile(
+    r"^\*\*Review window:\*\*\s*(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})\s*$"
+)
+ACCEPTED_BY_PATTERN = re.compile(r"^\*\*Accepted by:\*\*\s*(.*?)\s*$")
+HANDLE_PATTERN = re.compile(r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?")
+
+# spec/GOVERNANCE.md: an RFC is open for review for at least this many days
+# before it is Accepted, and acceptance needs this many maintainers.
+MIN_REVIEW_DAYS = 14
+MIN_APPROVERS = 1
+CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
+
+# Accepted before the review rule existed; they record neither line.
+ACCEPTED_BEFORE_REVIEW_RULE = frozenset(
+    {"0001", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011"}
+)
 
 # spec/GOVERNANCE.md: "Changes require: Motivation, Alternatives, Backward
 # compatibility analysis, Conformance test updates."
@@ -92,9 +113,107 @@ def parse_sections(text: str) -> dict[str, str]:
     return sections
 
 
+def header_lines(lines: list[str]) -> list[str]:
+    """The lines before the first `## ` section: the title and metadata."""
+    header: list[str] = []
+    for line in lines:
+        if line.startswith("## "):
+            break
+        header.append(line)
+    return header
+
+
+def maintainers(codeowners: Path = CODEOWNERS) -> set[str]:
+    """The handles .github/CODEOWNERS names, lower-cased."""
+    try:
+        text = codeowners.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    handles: set[str] = set()
+    for line in text.splitlines():
+        line = line.split("#", 1)[0]
+        for token in line.split()[1:]:
+            if HANDLE_PATTERN.fullmatch(token):
+                handles.add(token.lower())
+    return handles
+
+
+def validate_review(
+    lines: list[str], errors: list[str], name: str, owners: set[str]
+) -> None:
+    """An Accepted RFC records its review window and who accepted it."""
+    header = header_lines(lines)
+    status = next((m for line in header if (m := STATUS_PATTERN.match(line))), None)
+    if status is None or status.group(1) != "Accepted":
+        return
+    number_match = FILENAME_PATTERN.match(name)
+    number = number_match.group(1) if number_match else None
+    window_line = next(
+        (line for line in header if line.startswith("**Review window:**")), None
+    )
+    accepted_line = next(
+        (line for line in header if line.startswith("**Accepted by:**")), None
+    )
+    if (
+        number in ACCEPTED_BEFORE_REVIEW_RULE
+        and window_line is None
+        and accepted_line is None
+    ):
+        return
+
+    window = REVIEW_WINDOW_PATTERN.match(window_line) if window_line else None
+    if window is None:
+        errors.append(
+            f"[{name}] An Accepted RFC needs a '**Review window:** YYYY-MM-DD to "
+            "YYYY-MM-DD' line in the header"
+        )
+    else:
+        try:
+            opened, accepted = (date.fromisoformat(g) for g in window.groups())
+        except ValueError:
+            errors.append(f"[{name}] Review window has an invalid date")
+        else:
+            days = (accepted - opened).days
+            if days < MIN_REVIEW_DAYS:
+                errors.append(
+                    f"[{name}] Review window is {days} days; acceptance needs at "
+                    f"least {MIN_REVIEW_DAYS}"
+                )
+            date_value = next(
+                (m.group(1) for line in header if (m := DATE_PATTERN.match(line))),
+                None,
+            )
+            if date_value is not None and date_value != window.group(2):
+                errors.append(
+                    f"[{name}] Review window ends {window.group(2)}, but the "
+                    f"RFC's Date (its acceptance date) is {date_value}"
+                )
+
+    accepted_by = ACCEPTED_BY_PATTERN.match(accepted_line) if accepted_line else None
+    handles = HANDLE_PATTERN.findall(accepted_by.group(1)) if accepted_by else []
+    if not handles:
+        errors.append(
+            f"[{name}] An Accepted RFC needs an '**Accepted by:** @<login>' line "
+            "in the header"
+        )
+        return
+    approvers = {handle.lower() for handle in handles}
+    unknown = sorted(approvers - owners)
+    if unknown:
+        errors.append(
+            f"[{name}] Accepted by {', '.join(unknown)}, who .github/CODEOWNERS "
+            "does not name as a maintainer"
+        )
+    if len(approvers & owners) < MIN_APPROVERS:
+        errors.append(
+            f"[{name}] Acceptance needs at least {MIN_APPROVERS} maintainer(s) "
+            "named in .github/CODEOWNERS"
+        )
+
+
 def validate_metadata(lines: list[str], errors: list[str], name: str) -> None:
-    """Title, Status, Target and Date sit in the first few lines."""
-    header = lines[:8]
+    """Title, Status, Target and Date sit in the header, before the first section."""
+    header = header_lines(lines)
 
     title_match = next(
         (TITLE_PATTERN.match(line) for line in header if TITLE_PATTERN.match(line)),
@@ -153,9 +272,15 @@ def main() -> None:
         default=None,
         help="Override the directory searched for RFC-*.md files.",
     )
+    parser.add_argument(
+        "--codeowners",
+        default=None,
+        help="Override the CODEOWNERS file that names the maintainers.",
+    )
     args = parser.parse_args()
 
     rfc_dir = Path(args.rfc_dir) if args.rfc_dir else DEFAULT_RFC_DIR
+    owners = maintainers(Path(args.codeowners) if args.codeowners else CODEOWNERS)
 
     errors: list[str] = []
     seen_numbers: dict[str, str] = {}
@@ -197,6 +322,7 @@ def main() -> None:
         validate_metadata(prose.splitlines(), errors, name)
         validate_sections(prose, errors, name)
         validate_referenced_paths(prose, errors, name)
+        validate_review(prose.splitlines(), errors, name, owners)
         validated_count += 1
 
     if errors:

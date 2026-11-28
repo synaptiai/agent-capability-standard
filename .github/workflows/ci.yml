@@ -40,6 +40,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The ontology version check reads the latest release tag.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -63,6 +66,9 @@ jobs:
 
       - name: Validate ontology graph
         run: python tools/validate_ontology.py
+
+      - name: Check the ontology version against the latest release
+        run: python tools/check_ontology_version.py
 
       - name: Validate workflows
         run: python tools/validate_workflows.py --strict

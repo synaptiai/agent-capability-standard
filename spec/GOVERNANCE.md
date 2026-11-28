@@ -22,6 +22,19 @@ SemVer:
   - Alternatives
   - Backward compatibility analysis
   - Conformance test updates
+- An RFC is open for review for at least 14 days before it is Accepted, and
+  its acceptance needs the approval of at least one maintainer named in
+  `.github/CODEOWNERS`. An Accepted RFC's header records both, ending the
+  window on its `**Date:**`:
+  `**Review window:** YYYY-MM-DD to YYYY-MM-DD` and
+  `**Accepted by:** @<login>`. `tools/validate_rfcs.py` checks them in CI.
+  RFC-0001 and RFC-0003 to RFC-0011 were Accepted before this rule and
+  carry neither line.
+- A change to a capability's safety flags or to a `requires`, `precedes` or
+  `conflicts_with` edge needs a new MAJOR ontology version (STANDARD
+  §11.6). `tools/check_ontology_version.py` compares the ontology with the
+  one at the latest release tag and fails in CI when such a change keeps the
+  MAJOR version.
 
 ## Standard versions
 Each version of the Standard is one document, `spec/STANDARD-vX.Y.Z.md`, and

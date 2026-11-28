@@ -1436,6 +1436,209 @@ class TestValidateRFCs:
         assert "Traceback" not in result.stderr, result.stderr
         assert "Could not read" in result.stdout
 
+    # An Accepted RFC records its review window and who accepted it
+    # (spec/GOVERNANCE.md, "Decision-making"; issue #164, ORG-201-D).
+
+    def _accepted(
+        self,
+        tmp_path: Path,
+        window: str | None = "2026-11-01 to 2026-11-15",
+        accepted_by: str | None = "@maintainer-a",
+        name: str = "RFC-0099-x.md",
+    ) -> list[str]:
+        """Validator args for an Accepted RFC with the given review lines,
+        against a CODEOWNERS naming @maintainer-a and @maintainer-b."""
+        number = name[4:8]
+        lines = ["**Status:** Accepted", "**Target:** Standard v1.3.0"]
+        lines.append("**Date:** 2026-11-15")
+        if window is not None:
+            lines.append(f"**Review window:** {window}")
+        if accepted_by is not None:
+            lines.append(f"**Accepted by:** {accepted_by}")
+        text = self.RFC.read_text().replace("# RFC-0002:", f"# RFC-{number}:")
+        text = text.replace("**Status:** Draft", "\n".join(lines[:1]))
+        text = text.replace("**Date:** 2026-08-29", "\n".join(lines[2:]))
+        directory = tmp_path / "rfcs"
+        directory.mkdir(exist_ok=True)
+        (directory / name).write_text(text)
+        owners = tmp_path / "CODEOWNERS"
+        owners.write_text("# owners\n/spec/ @maintainer-a @Maintainer-B\n")
+        return ["--rfc-dir", str(directory), "--codeowners", str(owners)]
+
+    def test_accepts_an_accepted_rfc_with_its_review_record(
+        self, tmp_path: Path
+    ) -> None:
+        result = run_validator("validate_rfcs.py", self._accepted(tmp_path))
+        assert result.returncode == 0, result.stdout
+
+    def test_approver_handles_match_codeowners_in_any_case(
+        self, tmp_path: Path
+    ) -> None:
+        args = self._accepted(tmp_path, accepted_by="@maintainer-b")
+        result = run_validator("validate_rfcs.py", args)
+        assert result.returncode == 0, result.stdout
+
+    @pytest.mark.parametrize(
+        ("window", "accepted_by", "message"),
+        [
+            (None, "@maintainer-a", "Review window:"),
+            ("2026-11-14 to 2026-11-15", "@maintainer-a", "is 1 days"),
+            ("2026-11-01 to 2026-11-16", "@maintainer-a", "ends 2026-11-16"),
+            ("2026-11-01 to 2026-11-15", None, "Accepted by:"),
+            ("2026-11-01 to 2026-11-15", "the maintainer", "Accepted by:"),
+            ("2026-11-01 to 2026-11-15", "@someone-else", "does not name"),
+        ],
+    )
+    def test_rejects_an_accepted_rfc_without_a_valid_review_record(
+        self,
+        tmp_path: Path,
+        window: str | None,
+        accepted_by: str | None,
+        message: str,
+    ) -> None:
+        args = self._accepted(tmp_path, window=window, accepted_by=accepted_by)
+        result = run_validator("validate_rfcs.py", args)
+        assert result.returncode != 0, result.stdout
+        assert message in result.stdout
+
+    def test_rfcs_accepted_before_the_rule_are_exempt(self, tmp_path: Path) -> None:
+        args = self._accepted(
+            tmp_path, window=None, accepted_by=None, name="RFC-0010-x.md"
+        )
+        result = run_validator("validate_rfcs.py", args)
+        assert result.returncode == 0, result.stdout
+
+    def test_review_lines_below_line_eight_are_read(self, tmp_path: Path) -> None:
+        """The header runs to the first section, not a fixed eight lines."""
+        args = self._accepted(tmp_path)
+        rfc = next((tmp_path / "rfcs").glob("RFC-*.md"))
+        text = rfc.read_text().replace(
+            "**Status:** Accepted", "**Status:** Accepted\n**Note:** a\n**Other:** b"
+        )
+        rfc.write_text(text)
+        result = run_validator("validate_rfcs.py", args)
+        assert result.returncode == 0, result.stdout
+
+
+# ─── Ontology version check ───
+
+
+class TestCheckOntologyVersion:
+    """Tests for tools/check_ontology_version.py (issue #164, ORG-201-E).
+
+    STANDARD §11.6 makes a change to a safety flag, a layer, a capability's
+    presence or a requires/precedes/conflicts_with edge a MAJOR change.
+    """
+
+    ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
+
+    def _run(self, tmp_path: Path, edit, version: str | None = None):
+        import yaml
+
+        head = yaml.safe_load(self.ONTOLOGY.read_text())
+        edit(head)
+        if version is not None:
+            head["meta"]["version"] = version
+        path = tmp_path / "head.yaml"
+        path.write_text(yaml.safe_dump(head, sort_keys=False))
+        return run_validator(
+            "check_ontology_version.py",
+            ["--base-file", str(self.ONTOLOGY), "--ontology", str(path)],
+        )
+
+    @staticmethod
+    def _node(ontology: dict, cap: str) -> dict:
+        return next(n for n in ontology["nodes"] if n["id"] == cap)
+
+    @staticmethod
+    def _module(monkeypatch):
+        # The test jobs check out one commit with no tags, so the tag lookup
+        # is tested on a stubbed `git tag` listing, not on this repository's.
+        monkeypatch.syspath_prepend(str(ROOT / "tools"))
+        import check_ontology_version
+
+        return check_ontology_version
+
+    def test_the_base_is_the_newest_release_tag(self, monkeypatch) -> None:
+        module = self._module(monkeypatch)
+        listing = "v1.2.0\nv2.0.0\nv10.0.0-rc1\nv2.0.10\nv9\nvx\n"
+        monkeypatch.setattr(module, "git", lambda *args: listing)
+        assert module.latest_release_tag() == "v2.0.10"
+
+    def test_no_release_tag_is_an_error(self, monkeypatch) -> None:
+        module = self._module(monkeypatch)
+        monkeypatch.setattr(module, "git", lambda *args: "v3.0.0-rc1\n")
+        with pytest.raises(RuntimeError, match="no release tag"):
+            module.latest_release_tag()
+
+    def test_passes_with_no_change(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, lambda o: None)
+        assert result.returncode == 0, result.stdout
+        assert "no MAJOR change" in result.stdout
+
+    def test_description_change_needs_no_major(self, tmp_path: Path) -> None:
+        def edit(o: dict) -> None:
+            self._node(o, "mutate")["description"] = "changed"
+
+        assert self._run(tmp_path, edit).returncode == 0
+
+    @pytest.mark.parametrize(
+        ("label", "message"),
+        [
+            ("flag", "mutate.requires_approval: True -> False"),
+            ("absent-flag", "retrieve.mutation_overridable: False -> True"),
+            ("layer", "retrieve.layer"),
+            ("edge-added", "edge added: retrieve requires detect"),
+            ("edge-removed", "edge removed: checkpoint requires mutate"),
+            ("capability-removed", "capability recall removed"),
+        ],
+    )
+    def test_breaking_change_fails_without_a_major_bump(
+        self, tmp_path: Path, label: str, message: str
+    ) -> None:
+        def edit(o: dict) -> None:
+            if label == "flag":
+                self._node(o, "mutate")["requires_approval"] = False
+            elif label == "absent-flag":
+                self._node(o, "retrieve")["mutation_overridable"] = True
+            elif label == "layer":
+                self._node(o, "retrieve")["layer"] = "UNDERSTAND"
+            elif label == "edge-added":
+                o["edges"].append(
+                    {"from": "retrieve", "to": "detect", "type": "requires"}
+                )
+            elif label == "edge-removed":
+                o["edges"] = [
+                    e
+                    for e in o["edges"]
+                    if (e["from"], e["to"], e["type"])
+                    != ("checkpoint", "mutate", "requires")
+                ]
+            else:
+                o["nodes"] = [n for n in o["nodes"] if n["id"] != "recall"]
+
+        result = self._run(tmp_path, edit, version="2.3.0")
+        assert result.returncode != 0, result.stdout
+        assert message in result.stdout
+        assert "raise it to 3.0.0" in result.stdout
+
+        bumped = self._run(tmp_path, edit, version="3.0.0")
+        assert bumped.returncode == 0, bumped.stdout
+
+    def test_soft_edge_change_needs_no_major(self, tmp_path: Path) -> None:
+        def edit(o: dict) -> None:
+            o["edges"].append({"from": "recall", "to": "plan", "type": "enables"})
+
+        assert self._run(tmp_path, edit).returncode == 0
+
+    def test_fails_when_the_base_cannot_be_read(self) -> None:
+        result = run_validator(
+            "check_ontology_version.py", ["--base-ref", "no-such-ref-xyz"]
+        )
+        assert result.returncode != 0
+        assert "Traceback" not in result.stderr, result.stderr
+        assert "FAIL" in result.stdout
+
 
 def _resolved_depth(doc: Any, pointer: str) -> tuple[int, int]:
     """How many tokens of an RFC 6901 pointer resolve in ``doc``, and how
