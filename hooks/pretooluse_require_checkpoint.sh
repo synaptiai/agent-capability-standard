@@ -238,15 +238,17 @@ block() {
 # the input's digest and recorded_by (posttooluse_log_tool.sh --refused).
 # Best effort, and never in the way of the verdict: once per run, from the
 # hook's own shell only (a refusal in a subshell ends the subshell, not the
-# call), with the ERR trap off, and for at most 10 seconds (the log hook
-# waits at most 5 for its lock); what the log hook says (a line written
-# unsigned, a lock not taken) follows the reason on standard error. Not
+# call), with the ERR trap off, and for at most 10 seconds, and never past
+# 25 seconds of this hook's run (the log hook waits at most 5 for its lock,
+# and 5 for a git that does not answer); what the log hook says (a line
+# written unsigned, a lock not taken), or that it was stopped, follows the
+# reason on standard error. Not
 # recorded: a refusal before the call could be read (no jq, no tool name),
 # and the R407 for the project's settings, under which the log hook signs
 # nothing.
 refusal_recorded=0
 record_refusal() {
-  local code="${1%% *}" class="$capability" pid watch
+  local code="${1%% *}" class="$capability" pid watch status budget
   trap - ERR
   set +e
   [ "$refusal_recorded" = 0 ] && [ "${BASH_SUBSHELL:-0}" = 0 ] || return 0
@@ -263,19 +265,33 @@ record_refusal() {
     echo "The refusal is not in the audit log: there is no log hook at ${refusal_log_hook}." >&2
     return 0
   fi
-  (exec "${BASH:-bash}" -p "$refusal_log_hook" --refused "$code" "$class" <<< "$payload" > /dev/null) &
+  budget=$((25 - SECONDS))
+  ((budget <= 10)) || budget=10
+  if ((budget < 1)); then
+    echo "The refusal is not in the audit log: the hook had no time left to record it." >&2
+    return 0
+  fi
+  # The payload reaches it through a pipe: bash before 5.1 writes a
+  # here-string to a temporary file, and a persist refusal's payload holds
+  # what looks like a credential.
+  (exec "${BASH:-bash}" -p "$refusal_log_hook" --refused "$code" "$class" < <(printf '%s' "$payload") > /dev/null) &
   pid=$!
   (
     trap 'kill "${sleeper:-}" 2> /dev/null; exit 0' TERM
-    sleep 10 &
+    sleep "$budget" &
     sleeper=$!
     wait "$sleeper"
-    kill -KILL "$pid" 2> /dev/null
+    kill -KILL "$pid" 2> /dev/null && exit 124
+    exit 0
   ) > /dev/null 2>&1 &
   watch=$!
   wait "$pid"
   kill -TERM "$watch" 2> /dev/null
   wait "$watch"
+  status=$?
+  if [ "$status" = 124 ]; then
+    echo "The refusal may not be in the audit log: the log hook was stopped after ${budget} seconds." >&2
+  fi
   return 0
 }
 trap 'block "R407 SAFETY_CHECK_FAILED: the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR

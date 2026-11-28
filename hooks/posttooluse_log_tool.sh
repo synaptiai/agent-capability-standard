@@ -45,7 +45,8 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #     input, taken over its compact JSON with sorted keys (jq -cS
 #     .tool_input), or "unavailable", and, for a call that used a
 #     checkpoint marker, "checkpoint_id" and "commit": the marker's
-#     checkpoint id and the commit it records, from the marker the
+#     checkpoint id and the commit it records (none in a marker the SDK's
+#     CheckpointTracker wrote), from the marker the
 #     pre-tool-use hook filed for this call under .claude/checkpoints/used/
 #     (hooks/README.md, The used marker): `git stash apply <commit>`
 #     restores the tracked state the checkpoint saved; "HEAD" says the
@@ -716,10 +717,13 @@ if [ -n "$call_id" ] && [ -z "$refused_code" ] && [ -d "$log_dir/checkpoints/use
     used_line=$(head -c 4096 "$used" 2>/dev/null) || continue
     used_id=$(printf '%s' "$used_line" | jq -r 'if type == "object" then (.checkpoint_id | strings) else empty end' 2>/dev/null) || used_id=""
     used_commit=$(printf '%s' "$used_line" | jq -r 'if type == "object" then (.commit | strings) else empty end' 2>/dev/null) || used_commit=""
-    if [[ "$used_id" =~ ^[A-Za-z0-9._-]{1,128}$ ]] && [[ "$used_commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|HEAD)$ ]] \
+    if [[ "$used_id" =~ ^[A-Za-z0-9._-]{1,128}$ ]] \
       && [ "${used##*/}" = "$(used_name "$used_id").${used_call}.${used##*.}" ]; then
       checkpoint_id="$used_id"
-      checkpoint_commit="$used_commit"
+      # The SDK's CheckpointTracker writes a marker with no commit.
+      if [[ "$used_commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|HEAD)$ ]]; then
+        checkpoint_commit="$used_commit"
+      fi
       capability="mutate"
       break
     fi
@@ -918,8 +922,8 @@ _do_append() {
      + {details: ({event: $event}
                   + (if $skill == "" then {} else {skill: $skill} end)
                   + {input_sha256: $input_sha256}
-                  + (if $checkpoint_id == "" then {}
-                     else {checkpoint_id: $checkpoint_id, commit: $commit} end)),
+                  + (if $checkpoint_id == "" then {} else {checkpoint_id: $checkpoint_id} end)
+                  + (if $commit == "" then {} else {commit: $commit} end)),
         recorded_by: {name: "agent-capability-standard plugin hooks",
                       version: $version, config_sha256: $config_sha256,
                       settings: {approval: $approval, checkpoint_max_age_s: $max_age}},

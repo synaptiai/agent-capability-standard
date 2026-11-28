@@ -226,6 +226,12 @@ def test_an_approved_write_is_traced_to_its_checkpoint_and_undone(
     assert len(writes) == 1
     call_id = writes[0]["call_id"]
     assert call_id == "toolu_tt_03"
+    # The line names the restore point itself.
+    assert writes[0]["capability"] == "mutate"
+    assert writes[0]["details"]["commit"] == commit
+    # Step 1's refusal is a line of the same chain.
+    refusals = [e for e in lines if e["status"] == "rejected"]
+    assert [(e["call_id"], e["code"]) for e in refusals] == [("toolu_tt_01", "F501")]
     found = _shell(project, FIND_WRITE)
     assert found.returncode == 0, found.stderr
     (row,) = [json.loads(line) for line in found.stdout.splitlines()]

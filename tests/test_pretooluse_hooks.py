@@ -1159,8 +1159,12 @@ class TestShellHookPersistSecrets:
             f"F504 CONSTRAINT_VIOLATED: {tool} (persist): the data it would store "
             "holds what looks like a credential"
         )
-        # Nothing was used or written.
-        assert not (tmp_path / ".claude").exists()
+        # Nothing was used; the refusal is the audit log's one line.
+        assert not (tmp_path / ".claude" / "checkpoints" / "used").exists()
+        (line,) = (tmp_path / ".claude" / "audit.log").read_text().splitlines()
+        record = json.loads(line)
+        assert (record["status"], record["code"]) == ("rejected", "F504")
+        assert "AKIAIOSFODNN7EXAMPLE" not in line
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
