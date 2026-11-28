@@ -497,6 +497,8 @@ claude plugin install agent-capability-standard
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 
+The hooks need Claude Code 2.1.295 or later, the first version that honours `onFailure: "block"`: an older one runs a call whose hook failed or timed out.
+
 ### Local Development
 
 ```bash

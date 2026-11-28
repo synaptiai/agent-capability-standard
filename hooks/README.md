@@ -79,9 +79,10 @@ the tool call as a JSON object on stdin; exit 0 allows the call (with an
 it, with the reason on stderr shown to Claude. Any other non-zero exit, a
 run that cannot start and one that gives no verdict within the hook's
 `timeout` (30 seconds) are failures: `hooks.json` sets `onFailure: "block"`
-on this hook, so Claude Code blocks the call (a Claude Code that does not
-support the setting treats a failure as a non-blocking error and runs the
-tool). Every tool call is routed here (matcher `*`). The reason opens with the
+on this hook, so Claude Code blocks the call. Claude Code honours the
+setting for command hooks from version 2.1.295; an older Claude Code treats
+a failure as a non-blocking error and runs the tool, so the plugin needs
+2.1.295 or later. Every tool call is routed here (matcher `*`). The reason opens with the
 Standard's code and name for the refusal, such as `F501
 CHECKPOINT_REQUIRED:`. Only Claude Code's JSON object is read: a payload that
 is not one, or a system without `jq`, is blocked with `R407
@@ -1817,7 +1818,16 @@ does not name a commit a checkpoint entered in `<git dir>/acs/checkpoints/commit
 or that runs in another repository, restores no checkpoint and is blocked
 with `F503 ROLLBACK_FAILED:`; it reads the command's words as the shell
 passes them, and any spelling of a stash restore but `git stash apply|pop
-<id>`, those four words alone, is blocked the same way.
+<id>`, those four words alone, is blocked the same way. It runs git as
+the hooks here do: with `core.fsmonitor` and hooks turned off, no object
+fetched, no input, and for at most 5 seconds, in POSIX `sh` (`rb_git`); a
+git that did not answer names no git directory, so the restore is blocked
+with `F503 ROLLBACK_FAILED:`.
+
+A skill's file can also embed shell commands that Claude Code runs while
+it loads the skill. No `PreToolUse` hook sees them, and a skill the person
+runs from the prompt (`/name`) is no tool call at all, so set Claude Code's
+`disableSkillShellExecution` in your user or managed settings.
 
 The `persist` skill's command hook, the `audit` skill's `Bash` hook and
 `pretooluse_require_checkpoint.sh` (for `TodoWrite`, `TaskCreate` and
@@ -1919,6 +1929,51 @@ opens a set it cannot read exactly, the run from it to the last `]` may
 match any run, so it matches every name bash does, never fewer, and it
 reads a word in time linear in its length. The send hook, which removes a
 run's quotes before, also reads a `]` after a set as part of it.
+
+## Host Gaps
+
+The places where Claude Code can run a call without the hooks' check, and
+what is decided for each. [SECURITY.md §5.5](../spec/SECURITY.md#decisions-on-the-host-gaps)
+gives the reasons. Tracked items are in
+[#144](https://github.com/synaptiai/agent-capability-standard/issues/144).
+
+- **A Claude Code older than 2.1.295** ignores `onFailure: "block"` and runs
+  a call whose hook failed or timed out. Closed from 2.1.295; accepted
+  below it.
+- **A hook that waits on git.** Closed: every git command the hooks and the
+  rollback skill's hook run stops after 5 seconds.
+- **The marker is used before the person answers the prompt.** Tracked: no
+  hook event carries the person's answer with the call id. Accepted until
+  Claude Code has one.
+- **The layer's records are files any process of the user can write.**
+  Closed for sandboxed commands by the deny rules and the sandbox
+  ([Keeping the Agent from the Records](#keeping-the-agent-from-the-records));
+  accepted otherwise.
+- **Settings given when Claude Code starts, and the sources it applied,**
+  are not visible to a hook. Tracked: a host feature request. Accepted
+  until then.
+- **Hooks start through `/bin/sh -c` with the project's `env`.** Tracked: a
+  host feature request. Until then the hooks refuse every call while the
+  project's settings set a variable that is not Claude Code's own; review
+  a repository's settings before accepting them.
+- **A skill's embedded commands** run with no `PreToolUse` event. Tracked: a
+  check on Claude Code's `PreSkillShellCommand` event. Until then set
+  `disableSkillShellExecution`. A subagent definition's hooks and MCP
+  servers: accepted, no event covers them.
+- **The Bash tool's shell snapshot and the login shell** reach no hook.
+  Accepted: the hooks' reading of a command is advisory, and the sandbox is
+  the boundary.
+- **No destination policy.** Accepted: Bash reaches only the sandbox's
+  network allowlist, and the remote-write tools write only to the recorded
+  origin. A destination policy for the remote-write and MCP tools is
+  tracked.
+- **A file the agent writes that another program later runs** outside the
+  sandbox (a git hook, an editor's task, a CI configuration). Accepted.
+- **A sandbox that cannot start.** Closed: the setup command writes
+  `failIfUnavailable: true`, and the hook relaxes Bash only while it is
+  verified.
+- **A change a person approves with a valid credential.** Accepted: the
+  approval is the control.
 
 ## Relationship to Spec
 
