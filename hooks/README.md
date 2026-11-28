@@ -1602,6 +1602,15 @@ the log is `durable`: a file in the project, which outlives the session,
 with no retention of its own: lines are kept until someone removes them
 (§6.3).
 
+The hooks create the layer's records private to the user, whatever umask
+Claude Code started with: `.claude/`, `.claude/checkpoints/` and its
+`used/` and `ended/`, and the git directory's `acs/` with mode 700, and
+the log, its head, the anchor, the markers, the checkpoint key and the
+commit entries with mode 600. A directory that already existed keeps its
+mode ([SECURITY.md §8.3](../spec/SECURITY.md#83-for-operators) gives the
+commands that tighten one). `tests/test_record_modes.py` runs the hooks
+under umask 022 and checks every mode.
+
 Each entry is an action record with these fields, in this order:
 
 | Field | Value |

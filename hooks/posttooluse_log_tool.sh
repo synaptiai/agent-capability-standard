@@ -602,6 +602,10 @@ fi
 max_age=$((10#$max_age))
 
 log_dir="${project_dir}/.claude"
+# Everything this hook creates (.claude/, the log, the head and its anchor,
+# .claude/checkpoints/) is the user's alone: directories 0700, files 0600,
+# whatever umask Claude Code started with. Its only git command reads.
+umask 077
 mkdir -p "$log_dir"
 
 log_file="$log_dir/audit.log"

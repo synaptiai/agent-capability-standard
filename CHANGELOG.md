@@ -1778,6 +1778,14 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   `\u` escape inserted, the `hmac` moved) now fails, as does a blank line;
   a line the hook wrote verifies as before. `verify_entry` checks a parsed
   entry; `verify_line` checks a line.
+- Plugin hooks (Changed): the hooks create the layer's records private to
+  the user, whatever the umask: `.claude/`, `.claude/checkpoints/` and its
+  `used/` and `ended/`, and `<git dir>/acs/` with mode 700, and the audit
+  log, its head, the head's anchor and the checkpoint key and entries with
+  mode 600. Records that already exist keep their modes; tighten them from
+  the project directory with `find .claude -type d -exec chmod 700 {} +`,
+  `chmod 600 .claude/audit.log .claude/audit.head` and
+  `chmod -R go= "$(git rev-parse --git-dir)/acs"` (`spec/SECURITY.md` §8.3).
 
 **Standard Agents binding and TypeScript package.**
 
@@ -2765,6 +2773,17 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   removed.
 
 ### Changed
+- Plugin hooks: every directory the hooks create for the layer's records
+  is mode 700 and every record file mode 600, whatever umask Claude Code
+  started with; the project's own files are unchanged.
+- `spec/SECURITY.md` §6 is the operator's incident runbook: where each
+  layer's signals are, an alert list with a first check, a default response
+  and an escalation level for each, the response and recovery steps, and
+  §6.4, the audit review procedure (owner, cadence, anomaly rules with
+  default thresholds). §8.3 gives the audit key's provisioning and
+  rotation, and who can write, read and verify each record. The EU AI Act
+  post-market monitoring plan names only measurement sources that exist,
+  and says so where none exists.
 - `spec/SECURITY.md` §1.4 and §2.2.2: the identity merge constraints of
   Standard §7.3 are a requirement on hosts that merge or split entities;
   the reference layers perform no merge and do not enforce them.

@@ -597,7 +597,7 @@ Deployments SHOULD:
 - Set appropriate time decay half-lives
 - Configure approval requirements for high-risk actions
 - Enable hooks for checkpoint enforcement
-- Monitor audit logs for anomalies
+- Review the audit records on a set cadence, with the anomaly rules of §6.4
 
 ---
 
@@ -740,27 +740,210 @@ The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard
 
 ## 6. Incident Response
 
+This section is the operator's runbook for the plugin's hooks and the SDK
+adapter. Each alert below is something their records or messages show, with
+where to look first, the default response, who it goes to and how soon.
+
+The roles and response times are the four escalation levels of the
+[post-market monitoring plan](../docs/compliance/eu-ai-act/post_market_monitoring.md#61-four-level-escalation-model).
+A deployment names the person in each role.
+
+| Level | Goes to | Respond within |
+|-------|---------|----------------|
+| L1 | AI System Operator | the next business day |
+| L2 | AI System Operator and AI Safety Officer | 8 hours |
+| L3 | AI Safety Officer and AI System Owner | 2 hours |
+| L4 | AI System Owner, with legal or regulatory staff | at once |
+
 ### 6.1 Detection
 
-Signs of security issues:
-- Unexpected F5xx (safety) errors in logs
-- High rate of rollback operations
-- Audit entries without corresponding checkpoints
-- World state versions without parent links
+Where each layer's signals are:
+
+| Source | What it holds |
+|--------|---------------|
+| What the plugin's hooks print in the session | Each refusal of the pre-tool-use hook (F501, F502, F504, R407), with its reason. Claude Code shows a blocked call's reason in the session and keeps it in the session's transcript, under the user configuration directory's `projects/`. The plugin's log holds no line for a refused call (§5.2). |
+| The log hook's warnings | A non-blocking hook error that Claude Code shows in the session: an unsigned line, a refused key file, a log that no longer holds the entry its head records, a head that cannot be written (the list is in [hooks/README.md](../hooks/README.md#audit-trail)). |
+| `.claude/audit.log` | One line per tool call that ran: time, tool, `call_id`, `status` (`executed` or `failed`), a digest of the input, and `recorded_by` with the plugin's version, `config_sha256` and `settings` (`approval`, `checkpoint_max_age_s`). `tools/verify_audit_log.py` checks its chain, its head and its anchor. |
+| `.claude/checkpoints/used/` | One file per gated call that used a checkpoint, named `<checkpoint_id>.<call_id>.<six random characters>` (each character outside letters, digits, `.`, `_` and `-` written as `_`). The file holds the checkpoint's `commit`, the call's restore point. `ended/` holds the checkpoints whose validity ended unused. |
+| The SDK adapter's records | `export_action_records(scope)` gives every call the adapter decided. A refusal is a record that carries a `code`: status `rejected` for a call refused before it ran, `failed` for a call that ran and whose result was refused (R402, F505, F504). Each refusal is also logged at WARNING on the `grounded_agency.adapter` logger as `Refused: <code> ...`. |
+| An executor run's record | The terminal action's `outcome` and `cause` (the code that caused an escalation) and its action records ([STANDARD 1.2.0 §5.19.1](STANDARD-v1.2.0.md#5191-actions-and-responses)). |
+
+The alerts:
+
+1. **R407 on every call.** The pre-tool-use hook blocks each call with
+   `R407 SAFETY_CHECK_FAILED`. Look first at the reason. When it says the
+   project's settings files set variables in `env` that are not Claude
+   Code's own, the repository's `.claude/settings.json` or
+   `.claude/settings.local.json` sets them: remove them there, outside the
+   session, and set the layer's own settings in `~/.claude/settings.json`,
+   managed settings or the environment Claude Code starts in. A variable
+   that changes what a command runs (`BASH_ENV`, `PATH`, `LD_PRELOAD`,
+   `GIT_CONFIG_*`) in a repository's settings is a possible attack: L2.
+   Any other R407 reason (the hook failed, could not read the call, could
+   not count the records' links): L1, and L2 when it repeats after a
+   restart.
+2. **F501 loops.** The same session is refused with `F501` again and again.
+   Look first at the reason. When the strict sandbox is not verified, every
+   Bash call is gated, so no checkpoint can be taken: run the setup
+   ([hooks/README.md](../hooks/README.md#setting-up-the-sandbox)) and its
+   write command in a terminal. When the marker expired, was taken by
+   another call, is tracked by git or sits in a git directory a repository
+   shipped, take a new checkpoint (`git stash create`) and remove the
+   shipped files. Default threshold: three F501 refusals in a row in one
+   session with no checkpoint taken between them. L1; L2 when a marker
+   tracked by git or shipped in a repository was the cause.
+3. **F502 in `bypassPermissions`, `dontAsk` or `auto` mode.** The hook
+   blocks every gated call in a permission mode other than `default`,
+   `acceptEdits` and `plan`, because those modes put no call to a person.
+   Restart in `default`, `acceptEdits` or `plan` mode. Setting `ACS_HOOK_APPROVAL=off`
+   leaves approval to Claude Code's permission rules, and is a decision for
+   the AI Safety Officer, recorded where the deployment records its
+   configuration: every log line then shows `"approval":"off"`. L1.
+4. **F504 refusals of the records guard.** A call named the layer's records
+   (`.claude/checkpoint.ok`, `.claude/checkpoints/`, `.claude/audit.head`,
+   the project's `.claude` directory, the git directory's `acs/`), or a
+   record has a second hard link outside the records. A refusal of a
+   command that only reads, such as `ls .claude`, happens only when the
+   strict sandbox is not verified and every Bash call is gated: it is L1,
+   and the fix is the sandbox setup (alert 2). A refusal of a write, a move or a removal, a
+   second hard link, or three or more F504 refusals in one session: stop
+   the session and treat it as alert 6. L2.
+5. **A burst of refusals.** Default threshold: more than one call in five
+   refused (F501, F502 or F504) over a session of at least ten calls, or
+   five refusals within ten minutes. Count the plugin's refusals in the
+   session's transcript and the adapter's in its records that carry a
+   `code` (status `rejected`, or `failed` with a code). Stop
+   the session, read what the agent was asked to do and what it tried, and
+   preserve the records (§6.2). L2.
+6. **The log hook says the log no longer holds the entry its head records.**
+   The message reads `audit.log no longer holds the entry its head records,
+   or the head's anchor ... does`. Entries were removed or changed, or the
+   log was removed with its head. Stop the session at once, before another
+   call appends to the log. Preserve the records, then verify them with
+   every witness kept (§6.2). The hook keeps the head and the anchor as the
+   evidence; do not move them aside until they are copied. L3.
+7. **`tools/verify_audit_log.py` fails.** A broken chain link, a line that
+   is not the bytes the hook signed, a log that does not hold the entry its
+   head, anchor or a witness records: treat it as alert 6. L3. Unsigned
+   lines alone mean the hook had no usable key: see alert 8.
+8. **Unsigned lines, or a refused key file.** The log hook says it logged a
+   call unsigned, or names why it refused the key file (its mode, owner,
+   links, directory, or a directory inside the project). Provision the key
+   as §8.3 says. Lines written before the key was in place cannot be
+   signed afterwards. L1; L2 when the key file was in place and has changed
+   mode, owner or links, which may mean the agent or another process
+   reached it, and then rotate the key (§6.2).
+9. **A gated call with no checkpoint.** A line of `.claude/audit.log` with
+   status `executed` for a tool the pre-tool-use hook gates by its name
+   (every tool but Bash and the ungated tools it lists, such as `Read`,
+   `Grep`, `WebFetch` and `TodoWrite`: so `Write`, `Edit`, `NotebookEdit`,
+   `Skill`, `Agent`, `Task`, every MCP tool and any tool it does not know)
+   whose `call_id` names no file
+   under `.claude/checkpoints/used/`; or a record of the adapter with
+   status `executed` and capability `mutate` or `send` and no
+   `checkpoint_id`. Either is a call that ran past the checkpoint rule.
+   Bash calls cannot be checked this way: the hook gates them by their
+   command, which the log does not hold. Stop the session, preserve the
+   records, and find how the call passed (a hook not registered, a
+   Claude Code version that ignored `onFailure: "block"`, a changed
+   `config_sha256`). L3.
+10. **A run ends `escalated` with a safety code.** An executor run's
+    terminal action has `outcome: escalated` and a `cause` from F501 to
+    F506 or R407. Read the run's action records for the failing step and
+    its last checkpoint, and restore that checkpoint when the step changed
+    anything. L2; L3 when the cause is F501 or F504.
+11. **A configuration change.** `recorded_by.config_sha256`,
+    `recorded_by.version` or `recorded_by.settings` differs from the line
+    before it. A plugin upgrade on record explains a change of `version`
+    and `config_sha256`. Any other change, and any line with
+    `"approval":"off"` that no recorded decision covers: L2.
 
 ### 6.2 Response
 
-1. **Contain**: Stop affected workflows
-2. **Assess**: Review audit logs and world state history
-3. **Rollback**: Restore to last known-good checkpoint
-4. **Investigate**: Trace provenance to identify root cause
-5. **Remediate**: Update policies, trust weights, or constraints
+1. **Contain.** Stop the Claude Code session, or stop the host that runs
+   the adapter. Run nothing more through the agent: each call it makes
+   appends to the records under investigation.
+2. **Preserve.** From a terminal outside Claude Code, copy
+   `.claude/audit.log`, `.claude/audit.head`, `<git dir>/acs/audit.head`,
+   `.claude/checkpoints/` and `<git dir>/acs/checkpoints/commits/` to
+   storage the agent cannot write, with the session's transcript and the
+   adapter's exported records.
+3. **Verify.** Run `python tools/verify_audit_log.py`, with `--witness` for
+   each witness head kept, on the copies.
+4. **Restore.** For a call in the plugin's log, find its restore point:
+   the file under `.claude/checkpoints/used/` whose name holds the call's
+   `call_id`, and the `commit` in it. From a terminal outside Claude Code,
+   restore the files with `git restore --source=<commit> --worktree --
+   <paths>` and their staged state with `git restore --source=<commit>^2
+   --staged -- <paths>`; a checkpoint taken on a clean tree records `HEAD`
+   as its commit (`git restore --source=HEAD --staged --worktree --
+   <paths>`). `git stash apply <commit>`, which the rollback skill runs,
+   fails when the files changed since the checkpoint. The
+   [tabletop exercise](../docs/compliance/nist-ai-rmf/tabletop_exercise_template.md)
+   plays these steps on an approved Write. For the
+   adapter, pass the `checkpoint_id` its record names to its checkpoint
+   tracker's `restore_checkpoint` (a tracker with a snapshot store), and
+   for an executor run, restore the last checkpoint its action records
+   name. A rollback restores files, not effects: a
+   `send` cannot be recalled (§1.1).
+5. **Rotate the key** when the key may have been read by the agent or by
+   another process, or its file changed: move the log, its head and the
+   anchor aside together outside Claude Code (§8.3), keep the old key with
+   the moved files, offline, to verify them, and create a new key file.
+6. **Report.** Record the alert, its level, the records preserved and the
+   actions taken in the deployment's incident log, and escalate as the
+   level says. A serious incident (L4) follows the reporting procedure of
+   the [post-market monitoring plan](../docs/compliance/eu-ai-act/post_market_monitoring.md#7-serious-incident-reporting-art-62).
 
 ### 6.3 Recovery
 
-- Use `rollback` capability to restore checkpointed state
-- Use world state versioning to identify last-good version
-- Use audit logs to reconstruct what happened
+- Restore with the recorded checkpoint of each call that changed files
+  (§6.2, step 4), and check the work tree against it.
+- Start a new audit log only after the old one is preserved and verified:
+  move `audit.log`, `audit.head` and the anchor aside together. The hook
+  then begins a new chain.
+- Remove the cause before resuming: the repository settings, the changed
+  configuration or the key exposure the alert named.
+- Resume with a new session, and confirm that the first gated call is
+  asked for approval and logged.
+
+### 6.4 Audit Review
+
+The AI System Operator owns the review of the audit records, and the AI
+Safety Officer reviews its results.
+
+Cadence:
+
+- **At the end of each session**: run `python tools/verify_audit_log.py`
+  in the project, and copy `.claude/audit.head` (and the anchor) to storage
+  the agent cannot write, as a witness for the next run with `--witness`.
+  No hook runs this: the operator does.
+- **Weekly**: apply the rules below to the week's plugin log, used markers
+  and the adapter's exported records, and file each finding at its level.
+- **Monthly**: report the counts to the monitoring plan's KPIs.
+
+Anomaly rules, over fields the records hold. The thresholds are defaults;
+a deployment may set its own and records them with its configuration.
+
+| Rule | Records and fields | Default threshold | Level |
+|------|--------------------|-------------------|-------|
+| Chain, head, anchor or witness mismatch | `verify_audit_log.py` on `.claude/audit.log` | any | L3 |
+| Unsigned line | `hmac` empty | any | L1, L2 when a key was in place |
+| Gated call with no checkpoint | plugin: `status`, `tool`, `call_id` against `.claude/checkpoints/used/`; adapter: `status`, `capability`, `checkpoint_id` | any | L3 |
+| Approval off | `recorded_by.settings.approval` is `off` | any line no recorded decision covers | L2 |
+| Configuration change | `recorded_by.config_sha256`, `version`, `settings` differ between consecutive lines | any change no upgrade or decision on record explains | L2 |
+| Refusal rate | adapter: share of `call_id`s with a record that carries a `code` (`rejected`, or `failed` with a code); plugin: refusals in the session's transcript over the session's calls | more than one call in five over at least ten calls, or five refusals within ten minutes | L2 |
+| Records-guard refusals | `code` `F504` in the adapter's records; `F504` in the session's transcript | three in one session, or any write | L2 |
+| Gap in the adapter's records | `action_id` is `<scope>/<seq>`: a missing `seq` | a gap at the start of an export means records were evicted before export; others come from boundary entries, which have no record | L1 |
+| Escalated run | run's terminal `outcome` `escalated`, `cause` a safety code | any | L2 |
+
+The plugin's log has no sequence number of its own: its chain and head
+show a removed line. It keeps no line for a refused call, so its refusal
+counts come from the session's transcript. The log has no retention of its
+own: a file in the project, kept until someone removes it
+([hooks/README.md](../hooks/README.md#audit-trail)). Keep the copies the
+review takes, and the exported adapter records, for as long as the
+deployment's retention policy requires.
 
 ---
 
@@ -825,10 +1008,64 @@ Unless anonymity is requested.
 ### 8.3 For Operators
 
 - [ ] Security hooks are enabled
-- [ ] Audit logs are monitored
-- [ ] Incident response plan exists
+- [ ] The audit key file is in place and kept from the agent (below)
+- [ ] The audit records are private to the user that runs Claude Code (below)
+- [ ] Audit logs are monitored: the review of §6.4, with its owner and cadence
+- [ ] Incident response plan exists: the runbook of §6, with a person named for each role
 - [ ] Trust model is configured appropriately
 - [ ] Approval workflows are defined for high-risk actions
+
+**The audit key.** The log hook signs the audit log with the key in
+`~/.config/acs/audit.key`, else with `AUDIT_HMAC_KEY`; without either, it
+writes every line unsigned and says so on each call. To provision it:
+
+1. Run `/grounded-setup` in Claude Code, and run the write command it
+   prints in a terminal outside Claude Code
+   ([hooks/README.md](../hooks/README.md#setting-up-the-sandbox)). That
+   command creates the key file when there is none (32 random bytes as 64
+   hexadecimal digits, mode 600, in a directory of mode 700) and writes the
+   user settings that deny the agent reading and writing it. Without the
+   setup, create the file with the commands in
+   [hooks/README.md](../hooks/README.md#the-audit-key) and add the deny
+   rules it lists.
+2. Keep the file where the hook accepts it: a regular file of mode 600 or
+   400, owned by the user, with one link, in a directory only that user can
+   write, outside every project directory. The hook refuses any other file
+   and does not fall back to `AUDIT_HMAC_KEY`.
+3. Use `AUDIT_HMAC_KEY` only where the file cannot be used, set in user or
+   managed settings or the environment Claude Code starts in, never in a
+   project's settings, and deny it to sandboxed commands with a
+   `sandbox.credentials.envVars` entry.
+4. Keep a copy of the key offline. A log verifies only with the key that
+   signed it, so each archived log needs its key.
+5. Rotate the key when it may have been read outside the hooks and the
+   verifier (§6.2, step 5): move `.claude/audit.log`, `.claude/audit.head`
+   and `<git dir>/acs/audit.head` aside together, outside Claude Code,
+   archive them with the old key, and create a new key file. The hook then
+   begins a new log.
+
+**Access to the records.** The hooks create every record directory with
+mode 700 and every record file with mode 600, whatever the umask. A
+directory that existed before keeps its mode; tighten them from a
+terminal in the project directory:
+`find .claude -type d -exec chmod 700 {} +`,
+`chmod 600 .claude/audit.log .claude/audit.head` and
+`chmod -R go= "$(git rev-parse --git-dir)/acs"`.
+
+| Record | Written by | Read and verified by | The agent's commands and file tools |
+|--------|------------|----------------------|-------------------------------------|
+| `.claude/audit.log`, `.claude/audit.head` | the log hook, by appending and by replacing the head | the operator, with `tools/verify_audit_log.py` and the key | may read the log; writes refused by the setup's deny rules (§5.5); the pre-tool-use hook also refuses a call that names the head (F504) |
+| `<git dir>/acs/audit.head` (the anchor), `<git dir>/acs/checkpoints/key` and `commits/` | the log hook (anchor); the checkpoint hook (key, entries) | the hooks; the operator verifies the anchor with the log | denied reading and writing by the setup's rules |
+| `.claude/checkpoint.ok`, `.claude/checkpoints/used/`, `ended/` | the checkpoint hooks | the operator, to find a call's restore point (§6.2) | writes refused by the deny rules; the pre-tool-use hook also refuses a call that names them (F504), which a command that builds the path when it runs escapes |
+| `~/.config/acs/audit.key` | the setup's write command, or the operator | the log hook and the verifier only | denied reading and writing |
+| `.claude/audit/records.jsonl` (the `audit` skill's records) | the agent, by appending a checked record | the operator, with the verifier's `--no-head` | may read and append; created with the session's umask, private when the hooks created `.claude` first |
+| The SDK adapter's stores | the adapter: the snapshot store (directories 700, files 600), the JSONL evidence store's file (600), the checkpoint tracker's files (600) | the host that runs the adapter | as the host's sandbox and deny rules allow |
+
+Two limits remain. File modes keep other users out, not other processes of
+the same user: any process the user runs can read and write every record,
+and only Claude Code's deny rules and sandbox keep the agent's commands from
+them (§5.5). And the records have no roles: whoever runs as the user can
+append, verify and remove them alike.
 
 Encryption at rest of the audit log and the other records is the
 operator's storage choice. Audit and evidence records hold no secret the
@@ -837,8 +1074,7 @@ layer recognises
 the plugin's log keeps a SHA-256 digest of each tool input in place of the
 input (§5.2). Checkpoints copy the files in their scope, so where those
 files hold confidential data, the operator keeps the checkpoint store on
-storage they protect. Who may read the audit files is tracked in
-[#173](https://github.com/synaptiai/agent-capability-standard/issues/173).
+storage they protect.
 
 ---
 
@@ -881,11 +1117,10 @@ Planned:
   ([STANDARD 1.2.0 §5.15.1](STANDARD-v1.2.0.md#5151-agent-manifests)); no
   layer refuses a call because its capability is outside a deployment's
   allowed set.
-- **Anomaly detection over the audit records**: a monitor of the log's
-  invariants
-  ([#172](https://github.com/synaptiai/agent-capability-standard/issues/172))
-  and the anomaly rules and review procedure
-  ([#165](https://github.com/synaptiai/agent-capability-standard/issues/165)).
+- **Automated anomaly detection over the audit records**: a tool that
+  applies the rules of §6.4, run by a hook at each session's end
+  ([#172](https://github.com/synaptiai/agent-capability-standard/issues/172)).
+  Today the operator applies them.
 
 ### 9.2 Open Research Questions
 

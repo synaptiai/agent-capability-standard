@@ -465,7 +465,7 @@ if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || (( 10#$max_age < 1 || 10#$max_age > 180
 fi
 
 claude_dir="${project}/.claude"
-mkdir -p "$claude_dir" 2>/dev/null || exit 0
+(umask 077 && mkdir -p "$claude_dir") 2>/dev/null || exit 0
 marker="${claude_dir}/checkpoint.ok"
 if [ -L "$marker" ]; then
   exit 0
@@ -595,7 +595,7 @@ fi
 # The new marker is written in .claude/checkpoints/, a directory the deny
 # rules cover as a whole (on the marker's file system, so the rename is
 # atomic), so that no command can link or change it before the rename.
-mkdir -p "${claude_dir}/checkpoints" 2>/dev/null || exit 0
+(umask 077 && mkdir -p "${claude_dir}/checkpoints") 2>/dev/null || exit 0
 [ ! -L "${claude_dir}/checkpoints" ] || exit 0
 tmp=$(mktemp "${claude_dir}/checkpoints/.marker.XXXXXX") || exit 0
 if jq -c -n \
@@ -607,7 +607,7 @@ if jq -c -n \
   # The marker this one replaces ends unused: keep its record (ended/).
   if [ -f "$marker" ] && [ ! -L "$marker" ]; then
     ended_dir="${claude_dir}/checkpoints/ended"
-    mkdir -p "$ended_dir" 2>/dev/null || true
+    (umask 077 && mkdir -p "$ended_dir") 2>/dev/null || true
     if ended=$(mktemp "${ended_dir}/replaced.XXXXXX" 2>/dev/null); then
       mv -f "$marker" "$ended" 2>/dev/null || rm -f "$ended"
     fi

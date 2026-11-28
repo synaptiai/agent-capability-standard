@@ -3035,7 +3035,7 @@ max_age=$((10#$max_age))
 if ((now > expires_at || now > created_at + max_age)); then
   # Its validity has ended, not its record: file it under ended/, so that a
   # rollback can still restore its commit. Removed only if that fails.
-  mkdir -p "$ended_dir" 2>/dev/null || true
+  (umask 077 && mkdir -p "$ended_dir") 2>/dev/null || true
   if ! { ended=$(mktemp "${ended_dir}/expired.XXXXXX" 2>/dev/null) && mv -f "$marker" "$ended" 2>/dev/null; }; then
     rm -f "$marker" "${ended:-}" 2>/dev/null || true
   fi
@@ -3055,7 +3055,7 @@ safe() {
 }
 call_id=$(printf '%s' "$payload" | jq -r '.tool_use_id // empty | strings' 2>/dev/null) || call_id=""
 call_id="${call_id:-$(date +%s)-$$}"
-mkdir -p "$used_dir"
+(umask 077 && mkdir -p "$used_dir")
 claim=$(mktemp -d "${used_dir}/.claim.XXXXXX")
 if ! mv "$marker" "${claim}/marker" 2>/dev/null || [ ! -e "${claim}/marker" ]; then
   rmdir "$claim" 2>/dev/null || true
