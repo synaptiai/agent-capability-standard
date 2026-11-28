@@ -2,9 +2,10 @@
 
 **Authors:** Grounded Agency Contributors
 **Date:** 2026-01-29
-**OASF Target Version:** 0.8.x
 **OASF Version Referenced:** 0.8.0 (category numbers and skill IDs are based on this version)
-**Status:** Draft Proposal
+**Status:** Reference
+
+> **Note:** On 2026-11-27 the maintainer decided to keep this proposal as a reference document and not to submit it to the OASF project. Whether to submit it is a separate decision. The proposal's statements about OASF describe version 0.8.0. OASF has since released 1.0.0 and 1.1.0, and in 1.1.0 skill category uid 16 is Mathematical Reasoning, so the Category 16 and the skill ids 160101 to 160103 proposed below are not free there. The section after the executive summary lists where the proposal differs from Standard 1.2.0.
 
 ---
 
@@ -32,6 +33,18 @@ flowchart LR
   rb["Rollback: recovery when an operation fails"] --> all
   con["Pre-execution constraints: policies enforced first"] --> all
 ```
+
+---
+
+## How this proposal differs from Standard 1.2.0
+
+The schemas and rules proposed below were written before [Agent Capability Standard 1.2.0](../../spec/STANDARD-v1.2.0.md) and ontology 2.2.0. They differ from the Standard in these places:
+
+- **Evidence anchors (section 3.1).** This proposal's anchor has `source`, `type` (`document`, `observation`, `computation`, `external_api`, `human_input`), `excerpt` and `location`. The Standard's anchor has `ref`, `kind` (`file`, `url`, `tool`, `log`, `sensor`, `human_note`, `api`, `record` or an `x-` kind), and optionally `timestamp`, `excerpt` and `digest`. The Standard accepts bare strings and objects of a producer's own shape only as deprecated legacy forms (Standard §6.5).
+- **Confidence (sections 3.1, 4.3 and 4.5).** Here `confidence` is the degree to which the cited evidence supports the output, and it may be `null`. In the Standard it is the producer's self-reported probability that the output's claim is correct, required where a capability's contract requires it and optional elsewhere (§4.1.1). In a workflow that targets 1.2 or later, and in a safety layer, a required `confidence` that is not a number from 0 to 1, `null` included, fails the step (R402; §5.19.1, §5.18.10). Where a profile's `minimum_confidence` applies, a `confidence` that is not a number from 0 to 1, `null` included, and that the contract check has not already refused, fails the step with F504 and the reason `invalid_confidence` (§5.21.3).
+- **Risk classification (section 4.1).** Here every `medium` skill requires approval, and every `high` skill requires a checkpoint and verification. The ontology sets these flags per capability: among the medium-risk capabilities only `execute` requires approval, `mutate` and `send` require a checkpoint and approval, and `rollback` requires a prior checkpoint through a `requires` edge (§4.4).
+- **Checkpoint rule (section 4.2).** Here the rule applies to the workflow graph only. The Standard also applies it to calls: one checkpoint authorises one gated call and is used up when that call starts (§5.18.6). A runtime that enforces the rule at call time conforms to class SL (§10.4).
+- **Checkpoint and rollback outputs (sections 3.2 and 3.3).** The Standard has the host report what a checkpoint holds (`mechanism`, `captured`, `excluded`, `digest` and `expires_at`) and the outcome of a rollback (`restored`, `unrestored` with a reason for each item, `not_covered`, `changes_reverted` with the `operation` each one undid, and `verification`) (§4.4.1). The schemas proposed here have none of these fields.
 
 ---
 
@@ -64,7 +77,7 @@ flowchart LR
 
 The fundamental insight motivating this proposal is that agent safety cannot be achieved through optional skills. Safety must be woven into the execution fabric itself. Consider an analogy: a programming language does not make memory safety "a library you can import." Languages like Rust encode memory safety into the type system. Similarly, agent frameworks should encode safety into their capability contracts.
 
-The Grounded Agency Capability Ontology demonstrates this approach. Most of its 36 atomic capabilities include `evidence_anchors` and `confidence` in their output schemas. Most capabilities in the EXECUTE layer (all 3), REMEMBER layer (both), and most of the VERIFY layer (4 of 5) and COORDINATE layer (3 of 4) omit the `confidence` field. The `verify` and `inquire` capabilities are exceptions within their respective layers because they produce assessments where confidence is meaningful. Additionally, `receive` in the PERCEIVE layer also omits confidence, as received events are factual data rather than assessments. (The ontology's `meta.principles` now say that every capability output carries evidence anchors or is marked inferred with an inference method and a confidence, and that a capability whose contract requires a confidence returns one; since Standard 1.2 every output contract declares `confidence`, optional on these 13 capabilities, as a self-reported probability, STANDARD §4.1.1.) High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
+The Grounded Agency Capability Ontology demonstrates this approach. Every one of its 36 atomic capabilities requires `evidence_anchors` and declares `confidence` in its output contract. `confidence` is required on 23 of them and optional on the other 13: `receive`, `execute`, `mutate`, `send`, `checkpoint`, `rollback`, `constrain`, `audit`, `persist`, `recall`, `delegate`, `synchronize` and `invoke`. It is the producer's self-reported probability that the output's claim is correct (Standard 1.2.0 §4.1.1). The ontology's principles say that every capability output carries evidence anchors, or is marked inferred with an inference method and a confidence, and that a capability whose contract requires a confidence returns one. High-risk capabilities structurally require checkpoints before execution. Constraint checking precedes any mutation. These are not conventions to be followed by diligent implementers -- they are contracts enforced by the schema itself.
 
 ### 2.3 Real-World Failure Modes
 
@@ -281,7 +294,7 @@ skill:
 
 > **Note:** Elevating `timestamp` from optional to required is an intentional OASF strengthening -- audit trails require temporal ordering to be meaningful.
 
-> **Note:** The OASF checkpoint schema includes `confidence` to indicate the completeness of the captured state snapshot, even though the source ontology omits confidence from action-oriented capabilities. This is an intentional OASF strengthening.
+> **Note:** The OASF checkpoint schema uses `confidence` for the completeness of the captured state snapshot. In the ontology, `confidence` is optional on `checkpoint` and is the producer's probability that the output's claim is correct (Standard 1.2.0 §4.1.1), so this schema gives the field a different meaning.
 
 **TTL Semantics:**
 - Rollback against an expired checkpoint MUST return an error including the expiry timestamp
@@ -394,7 +407,7 @@ skill:
         maximum: 1
 ```
 
-> **Note:** The OASF rollback schema includes `confidence` to indicate the completeness of the restoration, even though the source ontology omits confidence from action-oriented capabilities. This is an intentional OASF strengthening.
+> **Note:** The OASF rollback schema uses `confidence` for the completeness of the restoration. In the ontology, `confidence` is optional on `rollback` and is the producer's probability that the output's claim is correct (Standard 1.2.0 §4.1.1), so this schema gives the field a different meaning. The Standard reports how complete a rollback was in `restored` and `unrestored` (§4.4.1).
 
 #### Checkpoint-Rollback Interaction Pattern
 
@@ -773,7 +786,7 @@ category:
 
 Evidence anchoring is not a separate skill but a schema extension that applies to all existing skills.
 
-**Versioning:** Category 16 skills follow OASF's existing semantic versioning scheme. The category should be stabilized and reviewed before OASF reaches 1.0. Breaking changes to safety primitives require a major version increment at the category level.
+**Versioning:** Category 16 skills follow OASF's existing semantic versioning scheme. Breaking changes to safety primitives require a major version increment at the category level.
 
 ### 4.5 Backward Compatibility
 
@@ -1028,8 +1041,9 @@ Adopting these patterns at the agent framework level standardizes safety across 
 
 ## 7. References
 
-1. **Grounded Agency Capability Ontology v2.0.0** -- The capability ontology that defines the safety primitives proposed in this document.
+1. **Agent Capability Standard 1.2.0 and its capability ontology 2.2.0** -- The Standard and the ontology that define the safety primitives proposed in this document.
    - Repository: [agent-capability-standard](https://github.com/synaptiai/agent-capability-standard)
+   - Standard: [`spec/STANDARD-v1.2.0.md`](../../spec/STANDARD-v1.2.0.md)
    - Core ontology: `schemas/capability_ontology.yaml`
 
 2. **Open Agentic Schema Framework (OASF)** -- The target framework for these proposed extensions.
@@ -1050,4 +1064,4 @@ Adopting these patterns at the agent framework level standardizes safety across 
 
 ---
 
-*This proposal was prepared by the Grounded Agency contributors as a constructive contribution to the OASF community. We welcome feedback and collaboration.*
+*This proposal was prepared by the Grounded Agency contributors. It has not been submitted to the OASF project.*

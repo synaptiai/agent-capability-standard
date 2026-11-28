@@ -44,7 +44,13 @@
  * text), AWS access key ids, GitHub and Slack tokens, `sk-` keys, JWTs,
  * service tokens by their prefix (Stripe's `sk_live_` and `rk_live_`,
  * Google's `AIza`, GitLab's `glpat-`, npm's `npm_`, Vault's `hvs.`,
- * SendGrid's `SG.`, a Slack webhook's path),
+ * SendGrid's `SG.`, a Slack webhook's path), each starting where the
+ * character before it is not an ASCII letter or digit (so after `_`, as in
+ * an MCP tool's name, `mcp__srv__ghp_...`, but not glued after a letter or
+ * digit), a signed URL's signature (an `X-Amz-Signature`,
+ * `X-Goog-Signature`, `sig` or `Signature` query parameter's value of 16
+ * or more characters, after `?` or `&`, percent-encoded or as their JSON
+ * escapes),
  * and a header or credential given as a name/value pair or a `[name, value]`
  * tuple in JSON or code text (`"name": "Authorization", "value": "Basic
  * ..."`, `('Cookie', 'sid=...')`); quotes around a name and a value may be
@@ -89,10 +95,14 @@
  * A refusal is another matter: `persist` data or an `audit` record that
  * holds a secret is refused, not redacted (§6.7), so {@link holdsCredential}
  * recognises only credential-shaped values, as the Python redactor's
- * `holds_credential` and the plugin's `hooks/secret_scan.sh` do: a
+ * `holds_credential` does (and the plugin's `hooks/secret_scan.sh`, except
+ * that it reads `sk-` anywhere and reads no signed URL's signature): a
  * registered value (in a string, a member name or a number's JSON text), key
  * and token formats (PEM and OpenPGP private keys, AWS, GitHub,
- * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), the
+ * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters; the
+ * longer prefixes anywhere, glued after a letter or digit too, and `sk-`
+ * only where a token starts, since its two letters end words such as `task`
+ * and `risk`), a signed URL's signature as above, the
  * password of a URL's userinfo unless it is a placeholder, an
  * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
  * characters mixing letters and digits, with no scheme or after any scheme
@@ -303,8 +313,27 @@ const COOKIE_OPTION = `${after('A-Za-z0-9_-')}(?:-b${OPTION_SEPARATOR}?|--cookie
  */
 const NETRC = `${after('A-Za-z0-9_-')}(?:machine|login|account|default)${WS}+(?:[^${NOT_WS}]+${WS}+)?password${WS}+`;
 
-/** Where a token starts: a word boundary (`\b` before a word character), or after a quote's JSON escape. */
-const WORD = after('A-Za-z0-9_');
+/**
+ * Where a prefix-shaped token starts: after a character that is not an ASCII
+ * letter or digit (so after `_`, `-`, `.`, `/`, `:` or a quote: a token in an
+ * MCP tool's name, `mcp__srv__ghp_...`, is read), or after a quote's JSON
+ * escape. A token glued after a letter or digit (`xghp_...`) is not read
+ * here; the refusal rule ({@link CREDENTIAL_SHAPES}) still refuses it.
+ */
+const WORD = after('A-Za-z0-9');
+
+/**
+ * A signed URL's signature: the value of an `X-Amz-Signature` (S3 SigV4),
+ * `X-Goog-Signature` (Cloud Storage), `sig` (Azure SAS) or `Signature` (S3
+ * SigV2, CloudFront) query parameter, read only after `?` or `&` (as
+ * themselves, percent-encoded or as their JSON escapes), so prose such as
+ * `signature=` is not read. The value is 16 or more characters, a `/` in it
+ * written as itself or as its JSON escape `\/`; it stops at `&` and `?` in
+ * any of those forms, so no run is read again from each of its positions.
+ */
+const SIGNED_URL_PARAMETER =
+  '(?:[?&]|%3F|%26|\\\\u00(?:3F|26))(?:x-amz-signature|x-goog-signature|sig|signature)(?:=|%3D|\\\\u003D)';
+const SIGNATURE_VALUE = '(?:[A-Za-z0-9._~+/=-]|\\\\/|%(?!26|3F)[0-9A-F]{2}){16,}';
 
 /**
  * The patterns of a value after `prefix` in double or single quotes (escaped
@@ -399,8 +428,9 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   ...quotedForms(`${CREDENTIAL_OPTION_NAME}${CREDENTIAL_OPTION_SEPARATOR}`, '(?!-)'),
   // ... or not.
   new RegExp(`${CREDENTIAL_OPTION}(?<secret>${valueChar()}{4,})`, 'dgi'),
-  // AWS access key ids.
-  new RegExp(`${WORD}(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\\b`, 'dg'),
+  // AWS access key ids, which end where no ASCII letter or digit follows (`_`
+  // may follow, as in `mcp__<key id>__<tool>`).
+  new RegExp(`${WORD}(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})(?![A-Za-z0-9])`, 'dg'),
   // GitHub tokens.
   new RegExp(`${WORD}(?<secret>gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})`, 'dg'),
   // Slack tokens.
@@ -416,14 +446,17 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
       '|SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,})',
     'dg',
   ),
+  // A signed URL's signature.
+  new RegExp(`${SIGNED_URL_PARAMETER}(?<secret>${SIGNATURE_VALUE})`, 'dgi'),
   // ... and a Slack webhook's path.
   /hooks\.slack\.com\/services\/(?<secret>T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]{16,})/dg,
   // JWTs: three base64url parts, the first a JSON object's encoding,
-  // starting at a word boundary. Read from the start of a run of base64url
-  // characters to its first `eyJ` at a word boundary (the run's start or
-  // after `-`), so a run is read once, not again from each `eyJ` in it.
+  // starting where a prefix-shaped token starts (WORD). Read from the start
+  // of a run of base64url characters to its first `eyJ` at a token start
+  // (the run's start or after `_` or `-`), so a run is read once, not again
+  // from each `eyJ` in it.
   new RegExp(
-    `${after('A-Za-z0-9_-')}(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?` +
+    `${after('A-Za-z0-9_-')}(?:(?!eyJ)(?:[A-Za-z0-9]|[_-](?!eyJ))*[_-])?` +
       '(?<secret>eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)',
     'dg',
   ),
@@ -728,15 +761,19 @@ export function holdsSecret(value: Json, secrets: readonly string[] = []): boole
 }
 
 // Credential shapes a refusal relies on: the formats of keys and tokens, no
-// prose (grounded_agency/state/redaction.py and hooks/secret_scan.sh hold
-// the same).
+// prose (grounded_agency/state/redaction.py holds the same, and
+// hooks/secret_scan.sh too but for `sk-`, which it reads anywhere, and
+// signed URLs, which it does not read).
 const CREDENTIAL_SHAPES: readonly RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/,
   /(?:AKIA|ASIA)[0-9A-Z]{16}/,
   /gh[pousr]_[A-Za-z0-9]{36}/,
   /github_pat_[A-Za-z0-9_]{22,}/,
   /xox[abprs]-[A-Za-z0-9-]{10,}/,
-  /sk-[A-Za-z0-9_-]{20,}/,
+  // `sk-` only where a token starts (not after an ASCII letter or digit):
+  // its two letters end common words (`task-...`, `risk-...`, `disk-...`).
+  // The longer prefixes above and below are read anywhere.
+  /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/,
   new RegExp(`[Bb]earer${WS}+[A-Za-z0-9._~+/=-]{20,}`),
   // Read from the start of a run to its first `eyJ` (whose first part is
   // the longest), so a run is read once.
@@ -744,6 +781,8 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   // Service tokens by their prefix (Stripe, Google, GitLab, npm, Vault,
   // SendGrid) and a Slack webhook's path.
   /[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\.[A-Za-z0-9_-]{24,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]{16,}/,
+  // A signed URL's signature.
+  new RegExp(`${SIGNED_URL_PARAMETER}${SIGNATURE_VALUE}`, 'i'),
 ];
 // A quoted value with no whitespace, 8 or more characters (its quotes
 // escaped or not), after an assignment or a credential option.

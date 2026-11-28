@@ -27,6 +27,19 @@
  * reported done is the cut-off one itself. A hook delivered twice for one
  * call adds nothing.
  *
+ * An entry a composite's state wrote (a nested call, or a call made while
+ * the composite's invocation of the tool was pending) is linked only while
+ * the composite's own entry waits: a runtime that fires the hook for an
+ * invocation fires it while the composite runs, and once the composite's
+ * hook has come, a later call of the same tool the model made in that step
+ * takes its own entry, not the nested call's, which keeps no call id.
+ * This relies on the order the rest of the matching relies on: the calls
+ * of a step run one after another, each hook before the next call. A hook
+ * of the model's own call that came while a composite's entry still waits
+ * would take a finished nested entry of the same tool, and a model's call
+ * that ran while a composite's invocation of the tool was pending would be
+ * taken for a nested one.
+ *
  * An entry the hook writes is redacted (§6.7) with the default patterns,
  * the secrets registered layer-wide (`configureLayer({ secrets })` and each
  * grounded tool's `secrets`, which join them) and any `secrets` the hook
@@ -45,6 +58,7 @@ import {
   samePosition,
   stale,
   stepOf,
+  withoutOrphans,
   type Store,
   type TraceEntry,
   type Unlinked,
@@ -79,7 +93,9 @@ export async function recordToolCall(
     const secrets = options.secrets ?? [];
     const name = redactedName(toolCall.function.name, secrets);
     const unlinked = (await state.getValue<Unlinked[]>(KEYS.unlinked)) ?? [];
-    const here = unlinked.filter((u) => samePosition(u, flow, step));
+    // A nested call's entry whose composite no longer waits belongs to no
+    // hook (`withoutOrphans`): this call is not that one.
+    const here = withoutOrphans(unlinked).filter((u) => samePosition(u, flow, step));
     const cutOff: Unlinked[] = [];
     let match: { waiting: Unlinked; entry: TraceEntry } | undefined;
     for (const waiting of here.filter((u) => redactedName(u.action, secrets) === name)) {
@@ -104,7 +120,8 @@ export async function recordToolCall(
       settled.add(match.waiting);
       for (const waiting of cutOff) if (waiting.seq < match.waiting.seq) settled.add(waiting);
     }
-    const remaining = unlinked.filter((u) => !settled.has(u) && !stale(u, flow, step));
+    // So do the entries of the nested calls of a composite this hook linked.
+    const remaining = withoutOrphans(unlinked.filter((u) => !settled.has(u) && !stale(u, flow, step)));
     if (remaining.length !== unlinked.length) await state.setValue(KEYS.unlinked, remaining);
 
     let linked: TraceEntry;

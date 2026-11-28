@@ -26,27 +26,7 @@ Lead with concrete problems this solves:
 
 ### What's the adoption path?
 
-Incremental adoption works. You don't need to adopt everything at once.
-
-| Timeline | Action | Outcome |
-|----------|--------|---------|
-| **Week 1** | Run validator on existing workflows | Find hidden issues |
-| **Week 2** | Add checkpoints to mutation-heavy workflows | Enable rollback |
-| **Month 1** | Implement grounding for high-risk capabilities | Traceable decisions |
-| **Quarter 1** | Achieve L2 conformance | Full type safety |
-| **Quarter 2** | Implement trust model for multi-source workflows | Conflict resolution |
-
-```mermaid
----
-title: The adoption path
----
-flowchart TB
-  accDescr: Week 1 runs the validator on existing workflows and finds hidden issues; week 2 adds checkpoints to mutation-heavy workflows and enables rollback; month 1 adds grounding for high-risk capabilities for traceable decisions; quarter 1 reaches L2 conformance for full type safety; and quarter 2 adds the trust model for conflict resolution.
-  w1["Week 1: run the validator. Finds hidden issues"] --> w2["Week 2: add checkpoints. Enables rollback"]
-  w2 --> m1["Month 1: grounding for high-risk capabilities. Traceable decisions"]
-  m1 --> q1["Quarter 1: L2 conformance. Full type safety"]
-  q1 --> q2["Quarter 2: trust model. Conflict resolution"]
-```
+Adopt it in stages; you don't need everything at once. The [adoption guide](guides/ADOPTION.md) gives the five stages, from the validator in CI to the plugin's hooks, a safety layer (class SL), an executor (class EX), and domain profiles with the trust model. Each stage names its component and ends with a check you can run, and the guide has a starting point for each domain profile.
 
 ### What if we only need part of it?
 

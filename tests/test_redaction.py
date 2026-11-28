@@ -297,6 +297,30 @@ _LONG_RUNS = [
     "a:\\/\\/b:",
     "token\\u003d",
     "\\/",
+    # Prefix-shaped tokens start after `_` and `-` as well (not after an
+    # ASCII letter or digit), and a JWT's run is read to its first `eyJ`
+    # after `_` or `-`; a signed URL's signature is read after `?` or `&`
+    # in any of their forms, and its value stops at each.
+    "_eyJ",
+    "a_eyJ",
+    "_eyJ-",
+    "eyJ_",
+    "_ghp_",
+    "_github_pat_",
+    "_sk-",
+    "-sk-a",
+    "_xoxb-",
+    "_AKIA",
+    "_glpat-",
+    "_SG.a",
+    "&sig=",
+    "?sig=a",
+    "&sig=a%3F",
+    "?Signature=a%26",
+    "?Signature=\\/",
+    "&X-Amz-Signature=",
+    "%3FX-Goog-Signature%3D",
+    "\\u0026sig\\u003da",
 ]
 
 
@@ -817,12 +841,50 @@ def test_holds_credential_lets_prose_pass(text: str) -> None:
     assert not holds_credential({"todos": [{"content": text}]})
 
 
+# The forms the refusal rule reads and redaction does not: a long-prefix
+# token glued after a letter or digit (`xghp_...`), and an AWS access key
+# id with a letter or digit glued after it. No token starts, and no key id
+# ends, there for redaction, and the refusal rule reads these prefixes
+# anywhere. Each is pinned in both vector files: refused in
+# credentials.json, kept as written in redact.json.
+_REFUSAL_ONLY = {
+    v["input"]
+    for v in DOC["vectors"]
+    if v["name"].endswith(("_glued_after_a_letter", "_glued_before_a_letter"))
+    and v["expect"]["output"] == v["input"]
+} & set(BLOCKED)
+
+
+def test_the_refusal_only_forms_are_the_glued_long_prefixes() -> None:
+    """Every long-prefix family has its refusal-only vector; `sk-` has
+    none, since neither rule reads it glued after a letter. An AWS access
+    key id has one more, for a letter glued after it."""
+    names = {v["name"] for v in _TEXT if v["input"] in _REFUSAL_ONLY}
+    assert names == {"aws_key_id_glued_before_a_letter"} | {
+        f"{family}_glued_after_a_letter"
+        for family in (
+            "aws_key_id",
+            "github_token",
+            "github_pat",
+            "slack_token",
+            "stripe_key",
+            "google_api_key",
+            "gitlab_token",
+            "npm_token",
+            "vault_token",
+            "sendgrid_key",
+            "jwt",
+        )
+    }
+
+
 def test_what_a_refusal_recognises_the_redactor_redacts() -> None:
     """Every credential the refusal rule recognises in text is a secret the
-    same layer redacts (§6.7), except a PEM key's opening line alone: the
-    redactor replaces a key's body, and the line has none."""
+    same layer redacts (§6.7), except a PEM key's opening line alone (the
+    redactor replaces a key's body, and the line has none) and the glued
+    forms of _REFUSAL_ONLY."""
     for text in BLOCKED:
-        if text.startswith("-----BEGIN"):
+        if text.startswith("-----BEGIN") or text in _REFUSAL_ONLY:
             continue
         assert holds_secret(text), text
 
@@ -865,14 +927,21 @@ def test_layer_refuses_persist_data_that_holds_a_credential(
 
 
 @pytest.mark.parametrize(
-    "name",
+    ("name", "secret"),
     [
-        "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
-        "mcp__srv__hk_live_9f8e7d6c5b4a39281706",
+        ("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "ghp_aBc"),
+        ("mcp__srv__hk_live_9f8e7d6c5b4a39281706", "hk_live"),
+        # Unregistered tokens glued after `_` (#148): a token starts after
+        # any character that is not an ASCII letter or digit.
+        ("mcp__srv__ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "ghp_aBc"),
+        ("mcp__srv__AKIAQ7ZX2M4K9T3B8N5W", "AKIAQ7ZX"),
+        ("mcp__AKIAQ7ZX2M4K9T3B8N5W__list", "AKIAQ7ZX"),
+        ("mcp__srv__sk-proja1B2a1B2a1B2a1B2a1B2a1B2", "sk-proj"),
+        ("mcp__srv__eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_DEF-123", "eyJhbG"),
     ],
 )
 def test_layer_redacts_a_tool_name_that_holds_a_secret(
-    tmp_path: Path, name: str
+    tmp_path: Path, name: str, secret: str
 ) -> None:
     """The name of a call is the model's (or an MCP server's): its call
     record, the audit record exported from it and the diagnostic hold the
@@ -891,7 +960,7 @@ def test_layer_redacts_a_tool_name_that_holds_a_secret(
         + json.dumps([[d.message, d.location] for d in adapter.diagnostics])
         + json.dumps(adapter.export_action_records("s"))
     )
-    assert "ghp_aBc" not in kept and "hk_live" not in kept
+    assert secret not in kept
     (record,) = adapter.export_action_records("s")
     assert "[REDACTED]" in record["tool"]
     assert record["intent"] == f"{record['tool']} call"

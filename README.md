@@ -450,15 +450,16 @@ async with ClaudeSDKClient(options) as client:
 
 See [docs/integrations/claude_agent_sdk.md](docs/integrations/claude_agent_sdk.md) for the full integration guide.
 
-**Install the Python package:**
+**Install the Python package:** it is not on PyPI yet. Install it from a clone; the install compiles its Rust core, so it needs Python >= 3.14 and Rust >= 1.88:
 
 ```bash
-pip install grounded-agency
-# Or with SDK support:
-pip install grounded-agency[sdk]
+git clone https://github.com/synaptiai/agent-capability-standard.git
+cd agent-capability-standard
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[sdk]"
 ```
 
-The package includes a compiled Rust extension; installing from a source distribution needs a Rust toolchain (>= 1.88).
+To adopt the standard in stages, from the validator in CI to a safety layer and an executor, see the [adoption guide](docs/guides/ADOPTION.md).
 
 ---
 
@@ -484,6 +485,7 @@ claude plugin install agent-capability-standard
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
 | **Setup command** | `/grounded-setup`: turns on Claude Code's strict sandbox in your user settings, after showing the change ([Setting up the sandbox](hooks/README.md#setting-up-the-sandbox)) |
 | **Validator** | Design-time validation for custom workflows |
+| **Remote writes** | An MCP server with typed tools for push, tag, pull request, merge, release and issue writes, each a gated change a person approves, to the origin a person recorded ([hooks/README.md](hooks/README.md#remote-writes)) |
 
 Until Claude Code's strict sandbox is set up in your user settings ([The strict sandbox](hooks/README.md#the-strict-sandbox)), the hooks treat every Bash call, read-only commands included, as a change that needs a checkpoint and approval, so Bash calls are refused.
 

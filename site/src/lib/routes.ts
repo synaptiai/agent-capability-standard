@@ -316,6 +316,7 @@ export function buildRoutes(): Route[] {
   add(
     'guides',
     { source: null, url: '/guides/', title: 'Overview', template: 'listing' },
+    prose('docs/guides/ADOPTION.md', '/guides/adoption/', 'Adopting the Standard'),
     prose('docs/guides/RUNNING_WORKFLOWS.md', '/guides/running-workflows/', 'Running workflows'),
     prose('docs/guides/ORCHESTRATION_EXTENSIONS.md', '/guides/orchestration-extensions/', 'Orchestration extensions'),
     prose('docs/guides/MODALITY_HANDLING.md', '/guides/modality-handling/', 'Modality handling'),
@@ -394,6 +395,11 @@ export function buildRoutes(): Route[] {
       ['nonconformity_procedure.md', 'Nonconformity procedure'],
     ].map(([f, t]) => prose(`${iso}/${f}`, `/compliance/iso-42001/${kebab(f!)}/`, t!, 'ISO/IEC 42001')),
     prose('docs/compliance/nist-ai-rmf/nist_ai_rmf_profile.md', '/compliance/nist-ai-rmf/', 'NIST AI RMF profile'),
+    ...[
+      ['decommissioning_procedure.md', 'Decommissioning procedure'],
+      ['third_party_risk_procedure.md', 'Third-party AI risk procedure'],
+      ['tabletop_exercise_template.md', 'Tabletop exercise template'],
+    ].map(([f, t]) => prose(`docs/compliance/nist-ai-rmf/${f}`, `/compliance/nist-ai-rmf/${kebab(f!)}/`, t!)),
   );
 
   add('rfcs', { source: null, url: '/rfcs/', title: 'Overview and process', template: 'rfcs-index' });

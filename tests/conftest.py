@@ -87,7 +87,8 @@ def strict_sandbox_settings(
     directory in ``covered`` (as written and as resolved), which cover the
     records, settings files and hook scripts of every project and plugin
     copy under them, and for the user configuration directory
-    ``config_dir``; with rules for the audit key file and Read rules for the
+    ``config_dir``; with an Edit rule for ``~/.config/acs`` (the audit key and
+    the remote-write record), a Read rule for the audit key file and Read rules for the
     user's credentials (~/.ssh, gh's hosts.yml, ~/.git-credentials, the
     keychains); and with envVars denials for the token variables."""
     dirs: list[str] = []
@@ -98,8 +99,8 @@ def strict_sandbox_settings(
     home = os.path.expanduser("~")
     deny = [f"{tool}(/{d.rstrip('/')}/**)" for d in dirs for tool in ("Edit", "Read")]
     for h in dict.fromkeys((home, os.path.realpath(home))):
-        k = os.path.join(h, ".config", "acs", "audit.key")
-        deny += [f"Edit(/{k})", f"Read(/{k})"]
+        k = os.path.join(h, ".config", "acs")
+        deny += [f"Edit(/{k}/**)", f"Read(/{k}/audit.key)"]
         deny += [f"Read(/{h}/.ssh/**)", f"Read(/{h}/Library/Keychains/**)"]
         deny += [f"Read(/{h}/.config/gh/hosts.yml)", f"Read(/{h}/.git-credentials)"]
     deny.append("Read(//Library/Keychains/**)")
@@ -263,6 +264,29 @@ GNU_GREP = (
     in subprocess.run(
         ["grep", "--version"], capture_output=True, text=True, check=False
     ).stdout
+)
+
+
+# The text vectors of tests/conformance/secrets/credentials.json on which
+# the plugin's shell scan (hooks/secret_scan.sh and its copies) does not
+# yet give the answer of the Python and TypeScript refusal rule: `sk-` read
+# only where a token starts, and signed-URL signatures (#147, #148). The
+# shell tests assert that the scan still gives the other answer on each, so
+# the set must be emptied when the scan takes the same rule.
+SHELL_SCAN_PENDING = frozenset(
+    {
+        "task_slug",
+        "risk_slug",
+        "sk_key_glued_after_a_letter",
+        "s3_sigv4_signed_url",
+        "gcs_signed_url",
+        "azure_sas_url",
+        "cloudfront_signed_url",
+        "s3_sigv2_signed_url",
+        "signed_url_percent_encoded",
+        "signed_url_json_escaped",
+        "signed_url_json_escaped_slash",
+    }
 )
 
 

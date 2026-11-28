@@ -7641,3 +7641,245 @@ reproduced first.
   pass is charged to the budgets. The same call takes 3.33 s (three
   passes); 16 strings of 4 090 bytes to an MCP tool, refused over budget,
   3.92 s (3.42 s before the commit, 8.94 s with `sort`).
+
+## Round 6: the Standard Agents binding and the TypeScript package
+
+Issue #142, decision 23 (b): rounds run by layer group as open pull
+requests land, and convergence is counted per group. This round's group
+is the one no open pull request touched on 2026-11-27: the Standard Agents
+binding (`examples/standard_agents/src/acs/`) and the TypeScript package
+code it calls (`packages/acs-core/src/`: `binding.ts`, `destinations.ts`,
+`canonical.ts`, `ijson.ts`, `flags.ts`, and `redact.ts` as the binding
+applies it). The redactors' pattern tables, the SDK adapter and the
+plugin's hooks wait for #147, #148 and the sandbox pull requests.
+
+### Method
+
+This round did not run the method of rounds 1 to 5. One reviewer read the
+group's code and ran each of the six lenses below, and reproduced each
+finding on 8ec818c2 (origin/main) with a test in the binding's or the
+package's vitest suite. There were no separate finders and no independent
+verifier per finding. The dependencies of the binding's suite were taken
+from the npm cache and checked against the integrity hashes of its
+`package-lock.json`, not installed with `npm ci`.
+
+The six lenses, and what each probed:
+
+1. **Approval timing.** Whether a composite's decisions are checked at the
+   nested call for every nested call that needs approval: the expiry at
+   that moment, a person requirement, flags the profiles raise.
+2. **Composites and nesting.** Nested calls that take no token (arguments
+   the runtime validates), plain and grounded nested tools, a nested call
+   two composites deep.
+3. **Profiles and effective flags.** Where the flags the profiles raise
+   are applied: the composite's own call, a nested call, the lint's F506
+   and V102.
+4. **Records and diagnostics.** What a grounded or control tool returns or
+   throws to the runtime, and how the audit hook links trace entries to
+   tool call ids.
+5. **Binding records.** `checkBindings`, `annotationRecord` and the lint
+   with tool names that a plain object answers from its prototype.
+6. **Secrets as the binding applies them.** Credentials in member names of
+   `persist` data and of a refusal's diagnostic, and the argument digest.
+
+| Reported | New | Confirmed | High | Medium | Low |
+|---|---|---|---|---|---|
+| 7 | 6 | 4 | 0 | 3 | 1 |
+
+The group has not converged: this round confirmed three new medium defects.
+
+### 1. A nested call was not held to the flags the composite's profiles raise for it (medium)
+
+A composite's profiles raised the composite's own flags for what its nested
+calls perform (§5.21.3), but the nested call was checked with its own flags
+only. `invokePlain` checked the composite's decisions against a plain
+tool's approval only when the binding record required approval, and
+`check` used the grounded tool's own flags, which include the profiles
+given to that tool and the layer's, not those given to an enclosing
+composite. §5.18.4 covers a nested call only by decisions the composite's
+call counted that meet the nested call when it runs, and §5.21.3 makes a
+profile given to a composite govern the calls its approval covers.
+
+- Probe: `block_autonomous: ['persist']` given to `batch` (invoke, its
+  approval valid for one minute), which invokes `store` (persist, no
+  approval of its own). A person approves `batch`; `batch` runs 55 s
+  later and invokes `store` 10 s after that. `store` ran on the lapsed
+  approval as a plain tool, as a grounded tool, with the profiles put in
+  force by the layer (plain tool), and two composites deep (both kinds).
+  It was refused (F502) only where `store` was given the profiles itself.
+  With the arguments validated by the runtime (a zod `.default`), the
+  nested grounded call took no token and ran with no approval at all,
+  though the profiles require a person's.
+- Fix (`grounded.ts`): each nesting token, and the composite's nesting
+  state, carries the profiles the composite applies (its own and the
+  layer's) and those of the composites enclosing it. `pendingRules`
+  returns them with the other rules, and `check` raises the call's flags
+  and person requirement with them (`raisedFor`) before coverage, approval
+  and the checkpoint are decided, whether or not the call takes the token:
+  for what the call performs and for what its own nested calls perform, as
+  the tool's own profiles raise them. A nested composite that takes no
+  token so asks the raised approval (a person's where they require one)
+  and uses the raised checkpoint itself, and its decisions then cover its
+  nested calls. Every entry of such a call carries `person_required`
+  where only the enclosing profiles require a person, the R407 entries of
+  a check it cannot complete and of secrets it cannot read included.
+  `invokePlain` raises a plain tool's flags the same way: a raised approval
+  is covered only by the composite's decisions that still meet it
+  (`decisionsCover`), a raised person requirement only by a composite
+  whose decisions were all a person's, and a checkpoint only when the
+  composite's call used one. A covering composite passes on whether its
+  decisions were all a person's (`personAuthority`), so the coverage of a
+  call two levels down is decided on the decisions that covered it.
+- Python: the SDK adapter does not see nested calls (its statement), so it
+  has no sibling.
+- Tests: `profiles.test.ts` "a nested call needs the composite's
+  decisions valid when the profiles raise its approval" (seven placements,
+  each refused after the lapse and covered while the approval is valid)
+  and "the flags a composite's profiles raise reach a nested call that
+  takes no token" (a person is asked; control: the unchanged arguments
+  are covered), and "a composite that took no token is held, for its plain
+  nested call, to the outer composite's profiles" (`outer`, with the
+  profiles, invokes `middle`, whose arguments the runtime validates, which
+  invokes the plain `store`: `middle` is refused F502 when the profiles
+  require a person's approval and F501 when they require a checkpoint, and
+  `store` runs, covered by `middle`, once a person approves `middle` or a
+  checkpoint is taken for it; `store` is refused F502 when `middle`'s own
+  approval lapsed before it; the R407 entries of a nested grounded call
+  whose secrets cannot be read or whose checks cannot complete carry
+  `person_required`; controls: `middle` takes the token, and `middle`'s
+  approval is still valid). Two composites deep, the lapse refuses the
+  middle composite itself. On the round's first fix (head 6a928cf6) 8 of
+  the 47 tests of `profiles.test.ts` fail; with the fix all pass.
+
+### 2. A control tool's thrown error reached the runtime unredacted (medium)
+
+The thrown path of round 5 batch 5 #1's control-tool sibling: `controlTool`
+redacted the error result its code returned, but an error its code threw
+passed to the runtime, the thread's messages and the model as thrown, with
+a registered secret or a token in it (§6.7).
+
+- Fix (`grounded.ts`): `controlTool` catches what its code throws and
+  returns it as an error result, redacted with the default patterns and the
+  layer's secrets, as a grounded tool returns its own code's error. The
+  call's entry is still `executed`: a control tool is never refused.
+- Tests: `evidence.test.ts` "returns a control tool's thrown error as a
+  redacted error result" (a database URL with a registered password and a
+  GitHub token). It fails on 8ec818c2's `grounded.ts`.
+
+### 3. `checkBindings` read tool names from the prototype of a plain object (low)
+
+`checkBindings` and the lint read the loaded bindings with
+`effective[name]`, so a tool offered or tied to a host action under
+`constructor`, `toString`, `hasOwnProperty` or `__proto__`, whose record
+did not load, found a function or `Object.prototype`: the check threw
+(`tool.capabilities is not iterable`) where the Python loader reports W617
+or F506, and a record whose `tool` is `__proto__` set the prototype of the
+bindings returned instead of being among them. It fails closed (the lint
+throws, and `groundedTool` throws while it defines a composite that lists
+such a name), so it is low.
+
+- Fix: `binding.ts` reads `effective`, `known` and `raised` by own members
+  only and sets each binding as an own member; `lint.ts` sets `offered`,
+  `raised` and the host actions' names as own members and reads a tool's
+  annotation by an own member; `invokedBinding` in `grounded.ts` reads the
+  loaded binding by an own member.
+- Python: the loader keeps bindings in dicts, which answer no name they do
+  not hold, so it has no sibling.
+- Tests: the package's `bindings.test.ts` "tool names a plain object holds
+  on its prototype" (W617, F506, a loaded `__proto__` binding, V107 for
+  each of the four names; a control); the binding's `grounded.test.ts`
+  "reports a tool named for a member of a plain object, whose annotation
+  does not load" (W617 and F506 for three names). On 8ec818c2's
+  `binding.ts` 9 of the 17 package tests fail; on its `binding.ts` and
+  `lint.ts` the binding's test fails.
+
+### 4. The audit hook gave a model's call id to a nested call's entry (medium)
+
+An entry a nested call wrote waited for a tool call id as a top-level
+call's does. Whether a runtime fires `tool_call_done` for
+`state.invokeTool` is not stated by the Standard Agent Specification
+(0.2.0; `@standardagents/spec` 0.45.10 says only that the hook "fires once
+per tool call"). In a runtime that fires none for an invocation, the hook
+of the model's direct call of the same tool later in the step took the
+oldest finished entry of that name, the nested one: the nested call's
+record carried the direct call's id, and the direct call's own entry kept
+none (§6.4: a record names the call that produced it).
+
+- Probe: `gather` (integrate) invokes `fetch` (retrieve) with `{n: 1}`;
+  the model then calls `fetch` with `{n: 2}` in the same step. With no
+  hook for the invocation, the hook of the direct call linked `c2` to the
+  nested entry and left the direct entry unlinked. The same with
+  `fetch`'s arguments validated by the runtime, so that the nested call
+  took no token.
+- Fix (`records.ts`, `grounded.ts`, `audit.ts`): an entry written through
+  a composite's state, a nested call's, or a call made while the
+  composite's invocation of the tool was pending (`pendingUnder`, for a
+  nested call that takes no token), records the composite's `seq`
+  (`under`) in the list of entries waiting for a call id. Such an entry
+  waits only while the composite's own entry waits, at any depth
+  (`withoutOrphans`): once the composite's hook has linked it, the nested
+  entry keeps no call id, and a later call of the same tool takes its own
+  entry. A runtime that does fire the hook for an invocation fires it
+  while the composite runs, so the nested entry is still linked to it.
+- Limit: the rule relies on the order the rest of the matching relies on,
+  the calls of a step running one after another with each hook before the
+  next call (Tools §9). A hook of the model's own call delivered while a
+  composite's entry still waits would still take a finished nested entry
+  of the same tool.
+- Python: the SDK adapter's records come from its own hooks, which do not
+  see nested calls, so it has no sibling.
+- Tests: `evidence.test.ts` "the audit hook links a nested call only while
+  its composite waits" (no hook for the invocation; the same with the
+  nested call taking no token; control: the runtime fires the hook for the
+  invocation and it is linked to the nested entry). On 50167f14's
+  `audit.ts`, `grounded.ts` and `records.ts` the first two fail and the
+  control passes.
+
+### Reported and not confirmed
+
+- **A covered nested call is not held to the checkpoint's age at the
+  nested call, nor to the nested tool's `checkpoint_max_age_ms`.** Not a
+  defect: §5.18.4 applies "no further checkpoint when that call used one".
+- **F506 for a stop tool that can be refused for a destination or a
+  secret.** Not a defect: §5.18.3 and the code table define F506 by
+  unbound, a prerequisite, or an effective `requires_checkpoint` or
+  `requires_approval`.
+- **The argument digest of a call whose arguments hold a secret.** A
+  duplicate: round 1 batch 7 checked it (the digest is of the whole
+  arguments, which §6.7 allows).
+- Probed and clean: a credential in a member name of `persist` data or of
+  a refusal's diagnostic is refused and redacted (`holdsCredential`,
+  `redactJson`).
+
+### Documentation
+
+The Standard Agents guide (the secrets bullet: a control tool's thrown
+error; "Rules that reach a nested call without a token": the raised flags
+and person requirement; "A tool is not told which call it is serving":
+a nested call's entry), the `profiles` option's comment in
+`grounded.ts`, `CHANGELOG.md` (the binding's entries for each defect), and
+`spec/SECURITY.md` (§1.5: a control tool's thrown error; §5.5: the raised
+flags of a nested call). The §5.5 sentence on the loop's convergence is
+left to the wave-2 pass that edits §5.5 and `CLAUDE.md` once.
+
+### Checks after the batch
+
+On the round's fixes at 3463ac8c (merged with origin/main at 18c38b74):
+
+- Binding: `tsc --noEmit`, `vitest run` (322 passed, 2 skipped).
+- Old code: `profiles.test.ts`, `grounded.test.ts` and `evidence.test.ts`
+  against 8ec818c2's `grounded.ts`, `lint.ts`, `audit.ts`, `records.ts`
+  and the package's `binding.ts`, copied in place and then restored: 16 of
+  134 tests fail, each a test of this round; at 3463ac8c all 134 pass.
+  One of the 16 is a control ("covers the plain call made while
+  `middle`'s own approval is valid"), which needs `middle` to ask an
+  approval of its own, as only the fix makes it do.
+- TypeScript package, on the round's first fixes merged with origin/main
+  (no package file changed after them): `npm run build:wasm` (toolchain
+  1.99.1), `npm run build`, `npm run check`, `npm test` (2186 passed); on
+  8ec818c2's `binding.ts`, 9 of the 17 tests of this round fail.
+- `tools/validate_doc_links.py`.
+- Not run here: the site build and the figure-gap sweep for the Standard
+  Agents guide (no Chromium run here; the pull request's CI runs them).
+  No Python, Rust, hook or skill file changed, so the Python suite, the
+  Rust checks and the hook tests were not run.
