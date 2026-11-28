@@ -30,15 +30,15 @@ The framework provides five built-in telemetry sources that form the foundation 
 |-----------------|---------------|-------------------|---------|
 | **Audit log** (`.claude/audit.log`) | Every tool call that runs: timestamp, tool name, call id, status (`executed` or `failed`), skill name on a `Skill` call, digest of the tool input, and `recorded_by` (plugin version, digest of the hook configuration, the approval setting and the checkpoint maximum age). It names the tool, not the capability, and has no line for a call the hooks refused | PostToolUse and PostToolUseFailure hook (`posttooluse_log_tool.sh`) | Append-only log file, HMAC-chained, checked by `tools/verify_audit_log.py` |
 | **Used checkpoint markers** (`.claude/checkpoints/used/`) | One file per gated call that used a checkpoint, named by the checkpoint id and the call id, holding the checkpoint's commit | PreToolUse hook (`pretooluse_require_checkpoint.sh`) | Files in the project |
-| **SDK adapter's action records** (`GroundedAgentAdapter.export_action_records`) | Every call the adapter decided: tool, capability, call id, status (`rejected` with its code for a refusal), checkpoint id, approval | Programmatic via SDK adapter | In memory, up to `call_record_limit`; the host exports them |
-| **EvidenceStore** (`grounded_agency/state/evidence_store.py`) | Evidence anchors, confidence scores, provenance records | Programmatic via SDK adapter | In memory; `JsonlEvidenceStore` keeps a file |
+| **SDK adapter's action records** (`GroundedAgentAdapter.export_action_records`) | Every call the adapter decided: tool, capability, call id, status (a refusal carries a `code`: `rejected` for a call refused before it ran, `failed` for one whose result was refused), checkpoint id, approval | Programmatic via SDK adapter | In memory, up to `call_record_limit`; the host exports them |
+| **EvidenceStore** (`grounded_agency/state/evidence_store.py`) | Evidence anchors with their kind, reference, capability and call id, and the store's capture failures; it holds no confidence value | Programmatic via SDK adapter | In memory; `JsonlEvidenceStore` keeps a file |
 | **CheckpointTracker** (`grounded_agency/state/checkpoint_tracker.py`) | Checkpoints taken, used, expired and pruned | Programmatic via SDK adapter | `tracker_state.json` and `pruned_checkpoints.jsonl` in its `checkpoint_dir` |
 
 ### 3.2 Data Collection Requirements (Art. 61(2))
 
 | Art. 61(2) Requirement | Framework Data Source | Collection Mechanism |
 |-----------------------|----------------------|---------------------|
-| (a) Data on performance throughout lifetime | EvidenceStore confidence trends, audit log frequency analysis | Automated aggregation from existing telemetry |
+| (a) Data on performance throughout lifetime | Audit log and adapter record frequency analysis; evidence anchor counts per capability from the EvidenceStore's `records()` | Automated aggregation from existing telemetry |
 | (b) Feedback from users (deployers) | `inquire` capability invocations, escalation events | The adapter's action records (`capability` `inquire`); executor runs that end `escalated` |
 | (c) Other available information | Validator results, profile configuration changes | Validator outputs (`tools/validate_*.py`), git history on profile files |
 
@@ -49,11 +49,11 @@ Beyond existing telemetry, the following data points should be collected at the 
 | Data Point | Description | Collection Frequency | Source |
 |-----------|-------------|---------------------|--------|
 | Capability invocation distribution | Count of each capability invoked per period | Continuous | The adapter's action records (`capability`); the plugin's audit log counts tools, not capabilities |
-| Confidence score distribution | Statistical summary (mean, P50, P95, min) per capability | Daily | EvidenceStore query |
+| Confidence score distribution | Statistical summary (mean, P50, P95, min) per capability | Daily | None: no shipped component keeps the confidence values; capability outputs carry them, so a host that keeps the outputs computes this |
 | Checkpoint enforcement rate | % of mutations preceded by valid checkpoint | Continuous | Plugin: audit log lines of gated calls joined by call id with the used checkpoint markers; SDK: the adapter's action records (`checkpoint_id` on each executed `mutate` or `send`) |
-| Evidence coverage ratio | % of outputs with complete evidence anchors (vs. required anchor types) | Daily | EvidenceStore completeness check |
+| Evidence coverage ratio | % of outputs with complete evidence anchors (vs. required anchor types) | Daily | Computed by the operator from the EvidenceStore's `records()` or `export()` against the anchor types the profile requires; there is no built-in check |
 | Trust weight drift | Changes in effective trust weights over time | Weekly | Domain profile monitoring |
-| Domain profile override frequency | Count of risk threshold overrides per period | Weekly | Audit log + profile config |
+| Domain profile override frequency | Count of risk threshold overrides per period | Weekly | None: no shipped component records an override |
 | Error and exception rate | Capability execution failures, timeout events | Continuous | `failed` lines of the audit log; `failed` and `rejected` records of the adapter |
 | Human escalation rate | % of actions requiring human intervention vs. automated | Daily | The adapter's action records (`inquire` calls, and calls with an `approval`) |
 
@@ -66,8 +66,8 @@ The trust weight drift and profile override rows presuppose a host that applies 
 | Cadence | Activities | Responsible Role | Output |
 |---------|-----------|-----------------|--------|
 | **Continuous** (real-time) | Checkpoint enforcement, high-risk capability gating; audit log integrity at each session's end | Automated (hooks + SDK) for enforcement; the AI System Operator runs the audit log check ([SECURITY.md §6.4](../../../spec/SECURITY.md#64-audit-review)) | Refusals shown in the session; the log hook's warnings |
-| **Daily** | Confidence score aggregation, evidence coverage check, error rate computation | AI System Operator | Daily monitoring dashboard |
-| **Weekly** | Trend analysis (confidence drift, capability distribution shifts), trust weight drift review | AI System Operator | Weekly monitoring report |
+| **Daily** | Evidence coverage check (computed from the EvidenceStore's records), error rate computation | AI System Operator | Daily monitoring dashboard |
+| **Weekly** | Trend analysis (capability distribution shifts), trust weight drift review | AI System Operator | Weekly monitoring report |
 | **Monthly** | KPI review against targets, domain profile calibration assessment, corrective action status | AI Safety Officer | Monthly performance report |
 | **Quarterly** | Comprehensive performance review, risk model reassessment, regulatory compliance check | AI Safety Officer + AI System Owner | Quarterly review report (input to AIMS-MGR-001 management review) |
 | **Annual** | Full system audit, risk classification review (EUAIA-CLS-001 reassessment), regulatory update incorporation | AI System Owner + external audit (if applicable) | Annual conformity assessment update |
@@ -93,8 +93,8 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 | KPI | Definition | Target | Measurement Source | Alert Threshold |
 |-----|-----------|--------|-------------------|-----------------|
 | **Checkpoint enforcement rate** | % of high-risk capability invocations preceded by valid checkpoint | 100% | Plugin: gated calls in the audit log joined by call id with the used checkpoint markers (Bash calls are gated by their command, which the log does not hold, so they are not counted); SDK: executed `mutate` and `send` records of the adapter that carry a `checkpoint_id` | < 100% (any failure is critical) |
-| **Evidence coverage** | % of capability outputs with all required evidence anchor types present | ≥ 99% | EvidenceStore completeness validation | < 95% |
-| **Confidence floor adherence** | % of outputs meeting domain minimum confidence threshold | ≥ 99.5% | EvidenceStore confidence analysis | < 98% |
+| **Evidence coverage** | % of capability outputs with all required evidence anchor types present | ≥ 99% | Computed by the operator from the EvidenceStore's `records()` or `export()`; there is no built-in check | < 95% |
+| **Confidence floor adherence** | % of outputs meeting domain minimum confidence threshold | ≥ 99.5% | SDK: the adapter's F504 refusals with reason `below_minimum_confidence` (outputs below the applied profiles' minimum confidence), over its executed calls whose result carries a capability output | < 98% |
 | **Human oversight response time** | Mean time from escalation request (`inquire`) to human response | < SLA (domain-specific) | Timestamps of the adapter's records of `inquire` calls; the plugin's log writes one line per call, after it ran, so it holds no start time | > 2x SLA |
 
 ### 5.2 Performance KPIs
@@ -102,7 +102,7 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 | KPI | Definition | Target | Measurement Source | Alert Threshold |
 |-----|-----------|--------|-------------------|-----------------|
 | **Mutation frequency** | Count of `mutate`/`send` invocations per period | Stable trend (no unexplained increase) | The adapter's action records (`capability`); the plugin's log: lines of `Write`, `Edit` and the other tools it gates | > 2σ from rolling mean |
-| **Confidence drift** | Change in mean confidence per capability over 30-day window | < 5% drift | EvidenceStore trend analysis | > 10% drift |
+| **Confidence drift** | Change in mean confidence per capability over 30-day window | < 5% drift | None: no shipped component keeps the confidence values; a host that keeps the capability outputs computes this | > 10% drift |
 | **Error rate** | Capability execution failure rate | < 1% | `failed` lines of the audit log; `failed` records of the adapter | > 5% |
 | **Rollback frequency** | Count of `rollback` invocations per period | Decreasing trend | The adapter's action records (`capability` `rollback`); the plugin's log: `Skill` lines with `skill` `rollback` (a restore run through Bash is not identifiable there: the log holds no command) | Increasing over 3 consecutive periods |
 

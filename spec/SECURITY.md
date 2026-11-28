@@ -765,7 +765,7 @@ Where each layer's signals are:
 | The log hook's warnings | A non-blocking hook error that Claude Code shows in the session: an unsigned line, a refused key file, a log that no longer holds the entry its head records, a head that cannot be written (the list is in [hooks/README.md](../hooks/README.md#audit-trail)). |
 | `.claude/audit.log` | One line per tool call that ran: time, tool, `call_id`, `status` (`executed` or `failed`), a digest of the input, and `recorded_by` with the plugin's version, `config_sha256` and `settings` (`approval`, `checkpoint_max_age_s`). `tools/verify_audit_log.py` checks its chain, its head and its anchor. |
 | `.claude/checkpoints/used/` | One file per gated call that used a checkpoint, named `<checkpoint_id>.<call_id>.<six random characters>` (each character outside letters, digits, `.`, `_` and `-` written as `_`). The file holds the checkpoint's `commit`, the call's restore point. `ended/` holds the checkpoints whose validity ended unused. |
-| The SDK adapter's records | `export_action_records(scope)` gives every call the adapter decided, a refusal as `rejected` with its `code`; each refusal is also logged at WARNING on the `grounded_agency.adapter` logger as `Refused: <code> ...`. |
+| The SDK adapter's records | `export_action_records(scope)` gives every call the adapter decided. A refusal is a record that carries a `code`: status `rejected` for a call refused before it ran, `failed` for a call that ran and whose result was refused (R402, F505, F504). Each refusal is also logged at WARNING on the `grounded_agency.adapter` logger as `Refused: <code> ...`. |
 | An executor run's record | The terminal action's `outcome` and `cause` (the code that caused an escalation) and its action records ([STANDARD 1.2.0 §5.19.1](STANDARD-v1.2.0.md#5191-actions-and-responses)). |
 
 The alerts:
@@ -802,14 +802,17 @@ The alerts:
 4. **F504 refusals of the records guard.** A call named the layer's records
    (`.claude/checkpoint.ok`, `.claude/checkpoints/`, `.claude/audit.head`,
    the project's `.claude` directory, the git directory's `acs/`), or a
-   record has a second hard link outside the records. One refusal of a
-   read (`ls .claude`) is L1. A refusal of a write, a move or a removal, a
+   record has a second hard link outside the records. A refusal of a
+   command that only reads, such as `ls .claude`, happens only when the
+   strict sandbox is not verified and every Bash call is gated: it is L1,
+   and the fix is the sandbox setup (alert 2). A refusal of a write, a move or a removal, a
    second hard link, or three or more F504 refusals in one session: stop
    the session and treat it as alert 6. L2.
 5. **A burst of refusals.** Default threshold: more than one call in five
    refused (F501, F502 or F504) over a session of at least ten calls, or
    five refusals within ten minutes. Count the plugin's refusals in the
-   session's transcript and the adapter's in its `rejected` records. Stop
+   session's transcript and the adapter's in its records that carry a
+   `code` (status `rejected`, or `failed` with a code). Stop
    the session, read what the agent was asked to do and what it tried, and
    preserve the records (§6.2). L2.
 6. **The log hook says the log no longer holds the entry its head records.**
@@ -929,7 +932,7 @@ a deployment may set its own and records them with its configuration.
 | Gated call with no checkpoint | plugin: `status`, `tool`, `call_id` against `.claude/checkpoints/used/`; adapter: `status`, `capability`, `checkpoint_id` | any | L3 |
 | Approval off | `recorded_by.settings.approval` is `off` | any line no recorded decision covers | L2 |
 | Configuration change | `recorded_by.config_sha256`, `version`, `settings` differ between consecutive lines | any change no upgrade or decision on record explains | L2 |
-| Refusal rate | adapter: share of `call_id`s with a `rejected` record; plugin: refusals in the session's transcript over the session's calls | more than one call in five over at least ten calls, or five refusals within ten minutes | L2 |
+| Refusal rate | adapter: share of `call_id`s with a record that carries a `code` (`rejected`, or `failed` with a code); plugin: refusals in the session's transcript over the session's calls | more than one call in five over at least ten calls, or five refusals within ten minutes | L2 |
 | Records-guard refusals | `code` `F504` in the adapter's records; `F504` in the session's transcript | three in one session, or any write | L2 |
 | Gap in the adapter's records | `action_id` is `<scope>/<seq>`: a missing `seq` | a gap at the start of an export means records were evicted before export; others come from boundary entries, which have no record | L1 |
 | Escalated run | run's terminal `outcome` `escalated`, `cause` a safety code | any | L2 |
@@ -1043,9 +1046,11 @@ writes every line unsigned and says so on each call. To provision it:
 
 **Access to the records.** The hooks create every record directory with
 mode 700 and every record file with mode 600, whatever the umask. A
-directory that existed before keeps its mode; tighten one from a terminal:
-`chmod 700 .claude .claude/checkpoints .claude/checkpoints/*/` and
-`chmod 600 .claude/audit.log .claude/audit.head`.
+directory that existed before keeps its mode; tighten them from a
+terminal in the project directory:
+`find .claude -type d -exec chmod 700 {} +`,
+`chmod 600 .claude/audit.log .claude/audit.head` and
+`chmod -R go= "$(git rev-parse --git-dir)/acs"`.
 
 | Record | Written by | Read and verified by | The agent's commands and file tools |
 |--------|------------|----------------------|-------------------------------------|

@@ -96,6 +96,7 @@ def _project(tmp_path: Path) -> tuple[Path, str]:
     _git(project, "add", "a.txt")
     _git(project, "commit", "-q", "-m", "init")
     (project / "a.txt").write_text("b\n")
+    (project / "a.txt").chmod(0o644)
     return project, _git(project, "stash", "create")
 
 
@@ -181,7 +182,9 @@ def test_the_checkpoint_lifecycle_keeps_every_record_private(
     pre = _run(bash, PRE, _write_call("PreToolUse", "toolu_m1", project), project, home)
     assert pre.returncode == 0, pre.stderr
     assert '"permissionDecision":"ask"' in pre.stdout, pre.stdout
-    log = _run(bash, LOG, _write_call("PostToolUse", "toolu_m1", project), project, home)
+    log = _run(
+        bash, LOG, _write_call("PostToolUse", "toolu_m1", project), project, home
+    )
     assert log.returncode == 0, log.stderr
 
     modes = _modes(project)
@@ -201,8 +204,27 @@ def test_the_checkpoint_lifecycle_keeps_every_record_private(
     assert any(n.startswith(".claude/checkpoints/ended/replaced.") for n in modes)
     assert any(n.startswith(".claude/checkpoints/ended/turn-ended.") for n in modes)
     _assert_private(modes, project)
-    # The project's own files keep the umask's modes: only the records change.
+    # The project's own files keep their modes: only the records change.
     assert stat.S_IMODE((project / "a.txt").stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("bash", _bashes())
+def test_the_stop_hook_files_the_marker_in_a_private_directory(
+    bash: str, tmp_path: Path
+) -> None:
+    """One checkpoint, then the turn ends: the stop hook creates ended/ and
+    files the marker there."""
+    home = _home(tmp_path)
+    project, commit = _project(tmp_path)
+    _take(bash, project, home, commit)
+    assert not (project / ".claude" / "checkpoints" / "ended").exists()
+    stop = _run(bash, STOP, {"hook_event_name": "Stop"}, project, home)
+    assert stop.returncode == 0, stop.stderr
+    assert not (project / ".claude" / "checkpoint.ok").exists()
+    modes = _modes(project)
+    assert ".claude/checkpoints/ended" in modes, sorted(modes)
+    assert any(n.startswith(".claude/checkpoints/ended/turn-ended.") for n in modes)
+    _assert_private(modes, project)
 
 
 @pytest.mark.parametrize("bash", _bashes())
@@ -211,10 +233,17 @@ def test_the_log_hook_alone_creates_a_private_log(bash: str, tmp_path: Path) -> 
     .claude/ itself."""
     home = _home(tmp_path)
     project, _ = _project(tmp_path)
-    log = _run(bash, LOG, _write_call("PostToolUse", "toolu_m2", project), project, home)
+    log = _run(
+        bash, LOG, _write_call("PostToolUse", "toolu_m2", project), project, home
+    )
     assert log.returncode == 0, log.stderr
     modes = _modes(project)
-    for name in (".claude", ".claude/audit.log", ".claude/audit.head", ".git/acs/audit.head"):
+    for name in (
+        ".claude",
+        ".claude/audit.log",
+        ".claude/audit.head",
+        ".git/acs/audit.head",
+    ):
         assert name in modes, f"{name} was not written: {sorted(modes)}"
     _assert_private(modes, project)
 
@@ -238,7 +267,7 @@ def test_an_expired_marker_is_filed_in_a_private_directory(
     pre = _run(bash, PRE, _write_call("PreToolUse", "toolu_m3", project), project, home)
     assert "F501" in pre.stdout + pre.stderr, pre.stdout + pre.stderr
     modes = _modes(project)
-    assert any(n.startswith(".claude/checkpoints/ended/expired.") for n in modes), sorted(
-        modes
+    assert any(n.startswith(".claude/checkpoints/ended/expired.") for n in modes), (
+        sorted(modes)
     )
     _assert_private(modes, project)
