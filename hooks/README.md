@@ -598,6 +598,21 @@ is written for the reader:
 {"checkpoint_id": "3f2a...", "commit": "3f2a...", "created_at": 1706000000, "expires_at": 1706001800, "source": "git stash create"}
 ```
 
+### The used marker
+
+A gated call that takes the marker files it, unchanged, as
+`.claude/checkpoints/used/<checkpoint id>.<call id>.<6 characters>`: the
+marker's `checkpoint_id` and the call's `tool_use_id` (or
+`<epoch>-<pid>` when the call has none), each with every character outside
+`A-Za-z0-9._-` made `_` and cut to 120 characters, then the six random
+characters of the directory the rename went through. This name links a call
+to its restore point. The log hook reads it: the audit line of a call that
+used a marker carries `capability: "mutate"` and, under `details`, the
+marker's `checkpoint_id` and `commit` (Audit Trail, below), so the log
+alone says what changed and how to undo it. `git stash apply <commit>`
+restores the tracked state the checkpoint saved; `HEAD` says the tree was
+clean when it was taken.
+
 ### Keeping the Agent from the Records
 
 The hooks alone write the layer's records:
@@ -1569,7 +1584,7 @@ one action record ([STANDARD v1.2 §6.4](../spec/STANDARD-v1.2.0.md#64-audit-rec
 per call, in `.claude/audit.log`. It is not an `audit` step: the `audit`
 skill writes its own records, of the events a workflow reports.
 
-- Logs every tool call that ran, one JSON line per call (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
+- Logs every tool call that ran, one JSON line per call (the `PostToolUse` and `PostToolUseFailure` matchers are `*`), and every call the plugin's pre-tool-use hook refused (`F501`, `F502`, `F504`, `R407`; STANDARD 1.2.0 §5.18.8): that hook runs this one with `--refused <code> [<capability>]`, which appends a `rejected` record with the code to the same chain, under the same lock and head, waiting at most 5 seconds for the lock. Not logged: a call another hook, a permission rule or the person refused (no hook of the plugin's runs after its `PreToolUse`), and a refusal the pre-tool-use hook made before it could read the call (no `jq`, a payload that is not a tool call) or because the project's settings set variables in `env` that are not Claude Code's own (`R407`: this hook signs nothing then). What the log hook says about a refusal's line (written unsigned, a lock not taken) follows the refusal's reason
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005), under the key in `~/.config/acs/audit.key`, else `AUDIT_HMAC_KEY` (below)
 - Each entry includes the HMAC of the previous entry, creating a hash chain: a changed or removed entry breaks the link of the entry after it
@@ -1610,10 +1625,12 @@ Each entry is an action record with these fields, in this order:
 | `timestamp` | Time of the entry, ISO 8601 in UTC |
 | `actor` | `agent` |
 | `intent` | `<tool> call`, the tool's name as `tool` shows it |
-| `status` | `executed` (the call succeeded, `PostToolUse`) or `failed` (`PostToolUseFailure`) |
+| `status` | `executed` (the call succeeded, `PostToolUse`), `failed` (`PostToolUseFailure`) or `rejected` (the pre-tool-use hook refused it) |
 | `tool` | Tool name, as written when it is plain (1 to 128 ASCII letters, digits, `.`, `_`, `:` or `-`) and the secret scan (`hooks/secret_scan.sh`) finds no credential in it, else `[REDACTED]` (STANDARD 1.2.0 §6.7: an MCP server names its tools) |
+| `capability` | The capability the pre-tool-use hook classified the call as, where it is known: `mutate` for a call that used a checkpoint marker (every call that takes one is a gated `mutate`), and on a refusal the class the call had when it was refused (`persist` for a persist tool's data, `mutate` for a gated call; none for a refusal made before the call was classified) |
 | `call_id` | The call's `tool_use_id`, when the input names one |
-| `details` | `event` (the hook event), `skill` (the skill name, on a `Skill` call only, shown as `tool` is: the model chooses it, and an MCP skill address is any text after a server's name, so one that is not plain or holds a credential is `[REDACTED]`) and `input_sha256`: SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (no SHA-256 tool, the one used fails, or jq's compact text is not JSON: jq prints a value nested past 256 levels as `<skipped: too deep>`, and a jq whose parser reads deeper input, as the CI runner's does, would otherwise digest that cut text) |
+| `code` | On a refusal, its code: `F501`, `F502`, `F504` or `R407` |
+| `details` | `event` (the hook event; `PreToolUse` on a refusal), `skill` (the skill name, on a `Skill` call only, shown as `tool` is: the model chooses it, and an MCP skill address is any text after a server's name, so one that is not plain or holds a credential is `[REDACTED]`) and `input_sha256`: SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (no SHA-256 tool, the one used fails, or jq's compact text is not JSON: jq prints a value nested past 256 levels as `<skipped: too deep>`, and a jq whose parser reads deeper input, as the CI runner's does, would otherwise digest that cut text); and, for a call that used a checkpoint marker, `checkpoint_id` and `commit`, the marker's, read from the marker filed for this call under `.claude/checkpoints/used/` (The used marker, above; a file that is a link, not JSON, or named for another call is passed over) |
 | `recorded_by` | The layer and the configuration that decided the call (STANDARD 1.2.0 §5.18.8): `name`, `version` (from `.claude-plugin/plugin.json`), `config_sha256` (SHA-256 of `hooks/hooks.json`) and `settings`, the effective `approval` (`ask`, or `off` with `ACS_HOOK_APPROVAL=off`) and `checkpoint_max_age_s` (`ACS_CHECKPOINT_MAX_AGE`, 1 to 1800, default 1800) |
 | `prev_hmac` | HMAC of the previous entry, empty on the first |
 | `hmac` | HMAC of this entry's other fields, as written |

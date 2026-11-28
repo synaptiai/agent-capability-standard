@@ -31,7 +31,9 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #   2  block it; the reason on stderr is shown to Claude
 #
 # Each reason opens with the Standard's code and name (§9.8), for example
-# "F501 CHECKPOINT_REQUIRED: ...".
+# "F501 CHECKPOINT_REQUIRED: ...". Each refusal (exit 2) is also recorded in
+# the audit log, .claude/audit.log, as a rejected action record with its
+# code, by the log hook beside this one (record_refusal, §5.18.8).
 #
 # Classification (§5.18.3). The lists below are subsets of the SDK mapper's
 # (grounded_agency/capabilities/mapper.py: _TOOL_MAPPINGS, _READ_ONLY_COMMANDS,
@@ -206,9 +208,75 @@ set -euo pipefail
 # each character read in split_words several times slower.
 export LC_ALL=C
 
+# The log hook beside this one, which records a refusal (record_refusal),
+# as an absolute path: taken before anything changes the directory.
+refusal_log_hook="${BASH_SOURCE[0]:-$0}"
+case "$refusal_log_hook" in
+  */*) refusal_log_hook="${refusal_log_hook%/*}/posttooluse_log_tool.sh" ;;
+  *) refusal_log_hook="posttooluse_log_tool.sh" ;;
+esac
+case "$refusal_log_hook" in
+  /*) ;;
+  *) refusal_log_hook="${PWD%/}/${refusal_log_hook}" ;;
+esac
+# The class the call is given below (none until then): a refusal's record
+# names it.
+capability=""
+# 1 for a refusal the log hook cannot record (below).
+refusal_unlogged=0
+
 block() {
   echo "$1" >&2
+  record_refusal "$1"
   exit 2
+}
+
+# Record the refusal whose reason is $1 in the audit log (STANDARD 1.2.0
+# §5.18.8): the log hook appends it to the same HMAC chain, under its lock
+# and head, as a rejected action record with the code, the tool, the call
+# id, the capability the call had been classified as (when it had been),
+# the input's digest and recorded_by (posttooluse_log_tool.sh --refused).
+# Best effort, and never in the way of the verdict: once per run, from the
+# hook's own shell only (a refusal in a subshell ends the subshell, not the
+# call), with the ERR trap off, and for at most 10 seconds (the log hook
+# waits at most 5 for its lock); what the log hook says (a line written
+# unsigned, a lock not taken) follows the reason on standard error. Not
+# recorded: a refusal before the call could be read (no jq, no tool name),
+# and the R407 for the project's settings, under which the log hook signs
+# nothing.
+refusal_recorded=0
+record_refusal() {
+  local code="${1%% *}" class="$capability" pid watch
+  trap - ERR
+  set +e
+  [ "$refusal_recorded" = 0 ] && [ "${BASH_SUBSHELL:-0}" = 0 ] || return 0
+  refusal_recorded=1
+  [ -n "${tool_name:-}" ] && [ "$refusal_unlogged" = 0 ] || return 0
+  case "$code" in
+    F501 | F502 | F504 | R407) ;;
+    *) return 0 ;;
+  esac
+  # git stash create put to a person is the checkpoint capability.
+  [ "$class" != checkpoint-ask ] || class=checkpoint
+  class="${class%% *}"
+  if [ ! -f "$refusal_log_hook" ]; then
+    echo "The refusal is not in the audit log: there is no log hook at ${refusal_log_hook}." >&2
+    return 0
+  fi
+  (exec "${BASH:-bash}" -p "$refusal_log_hook" --refused "$code" "$class" <<< "$payload" > /dev/null) &
+  pid=$!
+  (
+    trap 'kill "${sleeper:-}" 2> /dev/null; exit 0' TERM
+    sleep 10 &
+    sleeper=$!
+    wait "$sleeper"
+    kill -KILL "$pid" 2> /dev/null
+  ) > /dev/null 2>&1 &
+  watch=$!
+  wait "$pid"
+  kill -TERM "$watch" 2> /dev/null
+  wait "$watch"
+  return 0
 }
 trap 'block "R407 SAFETY_CHECK_FAILED: the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR
 
@@ -342,6 +410,7 @@ named="${named:0:400}"
 named="${named//$'\n'/ }"
 named="${named//[^A-Za-z0-9_.\/() ]/?}"
 if [ -n "$named" ]; then
+  refusal_unlogged=1
   block "R407 SAFETY_CHECK_FAILED: the project's settings files set variables in env that are not Claude Code's own (the layer's settings, or ones that change what a hook or a command runs: BASH_ENV, SHELLOPTS, PATH, HOME, LD_PRELOAD, GIT_CONFIG_*, ...), or cannot be read: ${named% }. Claude Code applies a project's env, which is repository content, over yours, to every hook and command it runs, so the call is blocked. Remove them from .claude/settings.json and .claude/settings.local.json, and set them in ~/.claude/settings.json, in managed settings or in the environment Claude Code starts in."
 fi
 
@@ -1775,6 +1844,7 @@ def acs_held($secret):
 # there).
 for entry in "${PERSIST_TOOLS[@]}"; do
   if [ "$tool_name" = "$entry" ]; then
+    capability=persist
     unread="R407 SAFETY_CHECK_FAILED: cannot read the data $tool_name would store, so the call is blocked."
     SECRET_HELD=""
     if git_dir_at "$project_dir" && git_dir_is_made "$GIT_DIR_FOUND" \

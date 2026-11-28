@@ -1627,6 +1627,20 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
+- <a id="upgrade-audit-refusals"></a>Plugin audit log, refusals and restore points (Standard 1.2.0
+  §5.18.8, §6.4): each call the pre-tool-use hook refuses (F501, F502,
+  F504, R407) is now a line of `.claude/audit.log`, a `rejected` action
+  record with its `code`, the tool, the call id and the capability the
+  call had been classified as, appended by the log hook to the same chain
+  (it waits at most 5 seconds for the lock then). A reader of the log
+  meets the status `rejected`, and the members `capability` and `code`,
+  which no earlier line held. The line of a call that used a checkpoint
+  marker names `capability: "mutate"` and, under `details`, the marker's
+  `checkpoint_id` and `commit`, so the log says how to undo each gated
+  call; `hooks/README.md` documents the used marker's file name,
+  `<checkpoint id>.<call id>.<6 characters>`. Not recorded: a refusal
+  made before the call could be read, and the R407 for the project's
+  settings, under which the log hook signs nothing.
 - <a id="upgrade-audit-head"></a>Plugin audit log, its end: the chain shows a changed or removed entry by
   the link of the entry after it, but not the removal of the last entries
   or of the whole log, which the hook's comment claimed it did. The hook now

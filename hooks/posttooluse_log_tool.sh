@@ -12,23 +12,44 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # for every tool (see hooks.json) and passes the tool call as JSON on stdin:
 # {"hook_event_name": ..., "tool_name": ..., "tool_use_id": ...,
 # "tool_input": ...}. PostToolUse fires after a call that succeeded and
-# PostToolUseFailure after one that failed. A call that a PreToolUse hook or a
-# permission rule refused did not run and is not logged.
+# PostToolUseFailure after one that failed. The pre-tool-use hook
+# (pretooluse_require_checkpoint.sh) runs it with --refused CODE [CAPABILITY]
+# for a call it refused (F501, F502, F504, R407; STANDARD 1.2.0 §5.18.8):
+# the line is that refusal's record, in the same chain. A call that another
+# PreToolUse hook, a permission rule or a person refused reaches no hook of
+# this plugin's after its PreToolUse, and is not logged; nor is a call the
+# pre-tool-use hook refused before it could read the call (no jq, a payload
+# that is not a tool call) or because the project's settings set the
+# layer's variables (R407: this hook signs nothing then, below).
 #
 # Each line is a single-line JSON action record, in this order:
 #   - action_id: the call's tool_use_id, or <timestamp>-<pid>-<8 hex digits>
 #   - timestamp: ISO 8601 (UTC)
 #   - actor: "agent"
 #   - intent: "<tool> call", the tool's name as tool shows it
-#   - status: "executed" (PostToolUse) or "failed" (PostToolUseFailure)
+#   - status: "executed" (PostToolUse), "failed" (PostToolUseFailure) or
+#     "rejected" (a refusal of the pre-tool-use hook, --refused)
 #   - tool: the tool's name, as plain_name shows it (below: the name when it
 #     is plain and holds no credential the secret scan recognises, else
 #     [REDACTED])
+#   - capability: the capability the pre-tool-use hook classified the call
+#     as, where it is known: "mutate" for a call that used a checkpoint
+#     marker (every call that takes one is a gated mutate), and, on a
+#     refusal, the class the hook had given the call when it refused it
+#     (none when it refused before classifying)
 #   - call_id: the call's tool_use_id, when the input names one
-#   - details: {"event": the hook event, "skill": the skill name (on a Skill
-#     call only; the model chooses it, so plain_name shows it too),
-#     "input_sha256": SHA-256 of the tool input, taken over its compact JSON
-#     with sorted keys (jq -cS .tool_input), or "unavailable"}
+#   - code: on a refusal, its code (F501, F502, F504 or R407)
+#   - details: {"event": the hook event ("PreToolUse" on a refusal),
+#     "skill": the skill name (on a Skill call only; the model chooses it,
+#     so plain_name shows it too), "input_sha256": SHA-256 of the tool
+#     input, taken over its compact JSON with sorted keys (jq -cS
+#     .tool_input), or "unavailable", and, for a call that used a
+#     checkpoint marker, "checkpoint_id" and "commit": the marker's
+#     checkpoint id and the commit it records, from the marker the
+#     pre-tool-use hook filed for this call under .claude/checkpoints/used/
+#     (hooks/README.md, The used marker): `git stash apply <commit>`
+#     restores the tracked state the checkpoint saved; "HEAD" says the
+#     tree was clean then, so the commit HEAD named at that time holds it.}
 #   - recorded_by: the layer and the configuration that decided the call
 #     (STANDARD 1.2.0 §5.18.8): {name: "agent-capability-standard plugin
 #     hooks", version: the plugin.json version (or "unknown"), config_sha256:
@@ -190,6 +211,22 @@ fail() {
   exit 1
 }
 
+# A refusal of the pre-tool-use hook (--refused CODE [CAPABILITY]): the code
+# is one of the four that hook refuses with, and the capability a word of
+# lowercase letters and hyphens, or none. The payload is the call the hook
+# refused, as Claude Code passed it to that hook.
+refused_code=""
+refused_capability=""
+if [ "${1:-}" = "--refused" ]; then
+  case "${2:-}" in
+    F501 | F502 | F504 | R407) refused_code="$2" ;;
+    *) fail "--refused takes F501, F502, F504 or R407" ;;
+  esac
+  if [[ "${3:-}" =~ ^[a-z][a-z-]{0,31}$ ]]; then
+    refused_capability="$3"
+  fi
+fi
+
 # Without jq the tool call cannot be read, so nothing is logged
 if ! type -P jq &> /dev/null; then
   fail "jq is not installed"
@@ -259,6 +296,10 @@ event=$(printf '%s' "$input" | jq -r '.hook_event_name | strings' 2>/dev/null ||
 event="${event:-PostToolUse}"
 status="executed"
 [[ "$event" == "PostToolUseFailure" ]] && status="failed"
+if [ -n "$refused_code" ]; then
+  event="PreToolUse"
+  status="rejected"
+fi
 call_id=$(printf '%s' "$input" | jq -r '.tool_use_id | strings' 2>/dev/null || echo "")
 
 # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
@@ -599,7 +640,7 @@ fi
 plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || echo .)}"
 plugin_version=$(jq -r '.version | strings' "${plugin_root}/.claude-plugin/plugin.json" 2>/dev/null || true)
 plugin_version="${plugin_version:-unknown}"
-config_sha256=$(sha256_hex < "${plugin_root}/hooks/hooks.json" 2>/dev/null || true)
+config_sha256=$({ sha256_hex < "${plugin_root}/hooks/hooks.json"; } 2>/dev/null || true)
 [[ "$config_sha256" =~ ^[0-9a-f]{64}$ ]] || config_sha256="unavailable"
 approval_setting="ask"
 [ "${ACS_HOOK_APPROVAL:-ask}" = "off" ] && approval_setting="off"
@@ -649,6 +690,40 @@ if command -v git &> /dev/null; then
       fi
       ;;
   esac
+fi
+
+# The checkpoint the call used (STANDARD 1.2.0 §5.18.6), so the log alone
+# says what changed, under which capability, and how to undo it. The
+# pre-tool-use hook files the marker a gated call takes under
+# .claude/checkpoints/used/ as <checkpoint id>.<call id>.<6 characters>,
+# each id with every character outside A-Za-z0-9._- made `_` and cut to 120
+# characters (used_name below; hooks/README.md, The used marker). The
+# marker is the one whose name is exactly that for its own checkpoint_id
+# and this call's id (a pattern alone could match another call's, since an
+# id may hold a dot); a link, a file that is not regular or JSON, or values
+# of another form are passed over, and then the line carries no checkpoint.
+# A call with no tool_use_id, or a refused one, has none to look for.
+checkpoint_id=""
+checkpoint_commit=""
+capability="$refused_capability"
+used_name() {
+  printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | cut -c1-120
+}
+if [ -n "$call_id" ] && [ -z "$refused_code" ] && [ -d "$log_dir/checkpoints/used" ] && [ ! -L "$log_dir/checkpoints/used" ]; then
+  used_call=$(used_name "$call_id") || used_call=""
+  for used in "$log_dir/checkpoints/used/"*".${used_call}."??????; do
+    [ -n "$used_call" ] && [ -f "$used" ] && [ ! -L "$used" ] || continue
+    used_line=$(head -c 4096 "$used" 2>/dev/null) || continue
+    used_id=$(printf '%s' "$used_line" | jq -r 'if type == "object" then (.checkpoint_id | strings) else empty end' 2>/dev/null) || used_id=""
+    used_commit=$(printf '%s' "$used_line" | jq -r 'if type == "object" then (.commit | strings) else empty end' 2>/dev/null) || used_commit=""
+    if [[ "$used_id" =~ ^[A-Za-z0-9._-]{1,128}$ ]] && [[ "$used_commit" =~ ^([0-9a-f]{40}|[0-9a-f]{64}|HEAD)$ ]] \
+      && [ "${used##*/}" = "$(used_name "$used_id").${used_call}.${used##*.}" ]; then
+      checkpoint_id="$used_id"
+      checkpoint_commit="$used_commit"
+      capability="mutate"
+      break
+    fi
+  done
 fi
 
 # SEC-006: Reject symlinked audit log to prevent log redirection attacks
@@ -826,6 +901,10 @@ _do_append() {
     --arg event "$event" \
     --arg skill "$skill" \
     --arg input_sha256 "$input_sha256" \
+    --arg capability "$capability" \
+    --arg code "$refused_code" \
+    --arg checkpoint_id "$checkpoint_id" \
+    --arg commit "$checkpoint_commit" \
     --arg version "$plugin_version" \
     --arg config_sha256 "$config_sha256" \
     --arg approval "$approval_setting" \
@@ -833,10 +912,14 @@ _do_append() {
     --arg prev_hmac "$prev_hmac" \
     '{action_id: $action_id, timestamp: $ts, actor: "agent",
       intent: ($tool + " call"), status: $status, tool: $tool}
+     + (if $capability == "" then {} else {capability: $capability} end)
      + (if $call_id == "" then {} else {call_id: $call_id} end)
+     + (if $code == "" then {} else {code: $code} end)
      + {details: ({event: $event}
                   + (if $skill == "" then {} else {skill: $skill} end)
-                  + {input_sha256: $input_sha256}),
+                  + {input_sha256: $input_sha256}
+                  + (if $checkpoint_id == "" then {}
+                     else {checkpoint_id: $checkpoint_id, commit: $commit} end)),
         recorded_by: {name: "agent-capability-standard plugin hooks",
                       version: $version, config_sha256: $config_sha256,
                       settings: {approval: $approval, checkpoint_max_age_s: $max_age}},
@@ -958,6 +1041,11 @@ _do_append() {
 lock_wait="${AUDIT_LOCK_WAIT:-40}"
 [[ "$lock_wait" =~ ^[0-9]{1,2}$ ]] || lock_wait=40
 (( 10#$lock_wait <= 55 )) || lock_wait=55
+# A refusal is recorded within the pre-tool-use hook's own time limit (30
+# s), so its wait is at most 5 s.
+if [ -n "$refused_code" ] && (( 10#$lock_wait > 5 )); then
+  lock_wait=5
+fi
 
 # One attempt at flock(2) on descriptor 9. Returns 0 when taken, 1 when
 # another run holds it, 2 when it cannot be taken here.
