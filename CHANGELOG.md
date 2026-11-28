@@ -571,6 +571,22 @@ here and marked so.
   quoted `Authorization:` header line's colon are read whole (40 KB of them
   with no closing quote took 67 s in Python). Redaction is broader: a word
   after `Cookie:` in prose is replaced to the end of its line.
+- Python SDK and TypeScript package, where a token starts and signed URLs
+  (§6.7). Redaction is broader: a prefix-shaped token (AWS key id, GitHub,
+  Slack, `sk-`, Stripe, Google, GitLab, npm, Vault and SendGrid tokens,
+  JWTs) is replaced wherever the character before it is not an ASCII letter
+  or digit, after `_` too, so an MCP tool named `mcp__srv__ghp_...` is
+  recorded as `mcp__srv__[REDACTED]` in the adapter's call records, audit
+  records and diagnostics and in the binding's trace (it was kept); and a
+  signed URL's signature (`X-Amz-Signature`, `X-Goog-Signature`, `sig`,
+  `Signature` as a query parameter, percent-encoded or JSON-escaped) is
+  replaced, so an `IdempotencyLog` file, an evidence store and a trace
+  written now keep none. The refusal rule (`holds_credential`,
+  `holdsCredential`) refuses `persist` and `audit` data holding a signed
+  URL's signature (F504), and reads `sk-` only where a token starts, so
+  text such as `feature/task-12345-update-readme-file` is no longer
+  refused; the longer prefixes are refused as before, glued after a letter
+  or digit too. The plugin's shell scan is unchanged.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
@@ -798,8 +814,9 @@ here and marked so.
   rewritten to match: it lists an anchor's redacted `ref` when it listed the
   anchor's own, and when two anchors are one after redaction it lists
   neither unless it listed both (fail closed). A signed URL's signature
-  (`sig=`, `X-Amz-Signature=`) is not a default pattern: add a pattern
-  (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) where a host cites them.
+  (the `X-Amz-Signature`, `X-Goog-Signature`, `sig` or `Signature` query
+  parameter) is a default pattern; a host that cites URLs signed another
+  way adds a pattern (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`).
 
 **Across components (validator, executor, Python SDK, binding).**
 

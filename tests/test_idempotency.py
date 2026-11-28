@@ -126,9 +126,11 @@ def test_the_output_in_the_file_is_redacted(tmp_path: Path) -> None:
     and evidence_seen rewritten to match, and every other secret in the
     output replaced (§6.7). A replay answers with what it kept."""
     path = tmp_path / "keys.jsonl"
+    signature = "0123456789abcdef" * 4
     signed = (
         "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential="
         "AKIAIOSFODNN7EXAMPLE%2F20261123%2Fus-east-1%2Fs3%2Faws4_request"
+        "&X-Amz-Signature=" + signature
     )
     userinfo = "https://bot:Sup3rS3cretPassw0rd@status.example.com/msg/1"
     response = {
@@ -151,6 +153,7 @@ def test_the_output_in_the_file_is_redacted(tmp_path: Path) -> None:
         b"AKIAIOSFODNN7EXAMPLE",
         b"Sup3rS3cretPassw0rd",
         b"abcdefghijklmnopqrstuvwxyz0123456789",
+        signature.encode(),
     ):
         assert secret not in blob, secret
     effect = Effect()
@@ -160,7 +163,8 @@ def test_the_output_in_the_file_is_redacted(tmp_path: Path) -> None:
     # The whole credential is replaced: `credential` is a credential name
     # (security round 5, batch 6), not the access key id alone.
     assert [a["ref"] for a in anchors] == [
-        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential=[REDACTED]",
+        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential=[REDACTED]"
+        "&X-Amz-Signature=[REDACTED]",
         "https://bot:[REDACTED]@status.example.com/msg/1",
         "file:report.txt",
     ]
