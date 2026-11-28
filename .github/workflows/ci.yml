@@ -71,7 +71,7 @@ jobs:
         run: |
           for catalog in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do
             echo "== $catalog"
-            python tools/validate_workflows.py --catalog "$catalog" --strict
+            python tools/validate_workflows.py --catalog "$catalog" --with-catalog schemas/workflow_catalog.yaml --strict
           done
 
       - name: Validate domain profiles

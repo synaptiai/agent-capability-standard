@@ -1,6 +1,7 @@
 // Workflows from schemas/workflow_catalog.yaml (core) and
-// schemas/workflows/*.yaml (domain). examples/ is never read: it repeats a
-// core workflow id.
+// schemas/workflows/*.yaml (domain). examples/ is never read: its catalogs
+// are examples of catalogs that invoke the core one, not workflows the site
+// documents.
 import { parse } from 'yaml';
 import { effectiveFlags, type EffectiveFlags } from '../lib/flags';
 import { readRepoFile, trackedUnder } from '../lib/repo';
@@ -161,7 +162,8 @@ function buildSteps(wfId: string, rawSteps: unknown, ontology: Ontology): Step[]
   });
 }
 
-/** Parse one catalog file. Top-level `x-` keys are vendor data, not workflows (§5.1). */
+/** Parse one catalog file. The top-level `catalog` key is the catalog's manifest
+ * (§5.1.1) and `x-` keys are vendor data (§5.1); neither is a workflow. */
 /** What a workflow id may be: lowercase letters, digits and underscores. */
 
 export function parseCatalog(source: string, text: string, catalog: 'core' | 'domain', ontology: Ontology): Workflow[] {
@@ -170,7 +172,7 @@ export function parseCatalog(source: string, text: string, catalog: 'core' | 'do
   const standardVersion = standardVersionOf(text);
   const out: Workflow[] = [];
   for (const [id, w] of Object.entries(doc)) {
-    if (id.startsWith('x-')) continue;
+    if (id === 'catalog' || id.startsWith('x-')) continue;
     if (!isObj(w)) throw new Error(`workflows: ${source}: ${id} is not a mapping`);
     if (typeof w.goal !== 'string') throw new Error(`workflows: ${id}.goal is missing`);
     if (w.risk !== 'low' && w.risk !== 'medium' && w.risk !== 'high') {

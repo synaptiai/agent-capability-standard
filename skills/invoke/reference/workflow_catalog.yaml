@@ -1,4 +1,4 @@
-# Standard version: 1.1.0
+# Standard version: 1.2.0
 # Vendored copy of schemas/workflow_catalog.yaml, schema paths rewritten to
 # the co-located copies. DO NOT EDIT — regenerate with:
 # python tools/sync_skill_schemas.py
@@ -40,6 +40,30 @@
 # New workflow patterns (Issue #9):
 #   monitor-and-replan: Detect world changes and trigger replanning when needed
 #   clarify-intent: Resolve ambiguous user requests through clarification
+#
+# The manifest (STANDARD v1.2 §5.1.1) names this catalog acs.reference, so
+# another catalog can invoke its workflows by qualified id, for example
+# acs.reference/world_model_build, when it is validated or run with this
+# catalog in its catalog set.
+
+catalog:
+  id: acs.reference
+  version: 1.0.0
+  ontology: "2.2"
+  description: The reference workflows of the Agent Capability Standard.
+  exports:
+  - monitor_and_replan
+  - clarify_intent
+  - debug_code_change
+  - world_model_build
+  - capability_gap_analysis
+  - digital_twin_sync_loop
+  - digital_twin_bootstrap
+  - rag_pipeline
+  - security_assessment
+  - multi_agent_orchestration
+  - data_quality_pipeline
+  - model_deployment
 
 monitor_and_replan:
   goal: Detect world changes that invalidate the current plan and trigger replanning when needed.
@@ -474,6 +498,10 @@ debug_code_change:
     - when: ${verify_out} == null || ${verify_out.passed} == true
       action: skip
       message: No fix was applied, or the fix passed verification. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
   - capability: audit
     purpose: Record what changed and why, and whether it was rolled back.
     risk: medium
@@ -1200,6 +1228,10 @@ digital_twin_sync_loop:
     - when: ${mutate_out} == null || ${verify_out.passed} == true
       action: skip
       message: No mutation was applied, or the twin passed verification. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
   - capability: audit
     purpose: Record provenance, tool usage, diffs, decision rationale, and any rollback.
     risk: medium
@@ -1641,12 +1673,13 @@ multi_agent_orchestration:
   description: |
     Multi-agent orchestration workflow inspired by OASF Category 10 (Agent Orchestration).
     Decomposes a complex task into subtasks, creates an execution plan with
-    dependencies, delegates subtasks to appropriate agents, coordinates shared
-    state, validates results, merges outputs, and records orchestration decisions.
+    dependencies, delegates the planned subtasks to the subtask-worker agent,
+    coordinates shared state with it, validates results, merges outputs, and
+    records orchestration decisions.
   success:
   - Task decomposed into manageable subtasks
-  - Subtasks delegated to appropriate agents
-  - Shared state coordinated across agents
+  - Subtasks delegated to the subtask worker
+  - Shared state coordinated with the subtask worker
   - Results validated and integrated
   - Orchestration decisions audited
   steps:
@@ -1675,7 +1708,7 @@ multi_agent_orchestration:
       constraints: "${decompose_out.structure: object}"
     failure_modes: []
   - capability: delegate
-    purpose: Assign subtasks to appropriate agents based on capabilities.
+    purpose: Delegate the planned subtasks to the subtask worker agent.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1685,14 +1718,14 @@ multi_agent_orchestration:
     store_as: delegate_out
     input_bindings:
       task: "${plan_out.dependencies: object}"
-      agent: "${task.agent_pool[0]: string}"
+      agent: subtask-worker
     failure_modes:
-    - condition: No suitable agent available for subtask
+    - condition: The subtask worker did not accept the subtasks
       when: ${delegate_out.accepted} == false
       action: request_more_context
-      recovery: Queue subtask or request manual agent assignment.
+      recovery: Queue the subtasks until the subtask worker accepts them, or ask a person to complete them.
   - capability: synchronize
-    purpose: Coordinate shared state across delegated agents.
+    purpose: Coordinate shared state with the subtask worker.
     risk: medium
     mutation: false
     requires_checkpoint: false
@@ -1703,7 +1736,8 @@ multi_agent_orchestration:
       backoff: exponential
     store_as: synchronize_out
     input_bindings:
-      agents: "${task.agent_pool: array<string>}"
+      agents:
+      - subtask-worker
       state: "${delegate_out: object}"
     failure_modes:
     - condition: State synchronization timeout
@@ -1730,9 +1764,9 @@ multi_agent_orchestration:
     - condition: Subtask result fails validation
       when: ${verify_out.passed} == false
       action: request_more_context
-      recovery: The failed results are not merged, and the audit step does not run (the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure); the run ends R402 (failure mode fired), and the subtasks can be returned to their agents with the verdict's details before the workflow is run again.
+      recovery: The failed results are not merged, and the audit step does not run (the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure); the run ends R402 (failure mode fired), and the subtasks can be returned to the subtask worker with the verdict's details before the workflow is run again.
   - capability: integrate
-    purpose: Merge results from multiple agents into unified output.
+    purpose: Merge the delegated results with the synchronized state into a unified output.
     risk: low
     mutation: false
     requires_checkpoint: false
@@ -1772,13 +1806,11 @@ multi_agent_orchestration:
     task:
       type: object
       required: true
-      description: The complex task to orchestrate across multiple agents
+      description: The complex task to orchestrate through the subtask worker agent
       properties:
         goal:
           type: string
         subtask_hints:
-          type: array
-        agent_pool:
           type: array
 
 data_quality_pipeline:
@@ -2070,6 +2102,10 @@ model_deployment:
     - when: ${verify_deploy_out.passed} == true
       action: skip
       message: Deployment verified successfully. No rollback needed.
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
     failure_modes: []
   - capability: audit
     purpose: Record deployment event with full provenance, including any rollback.

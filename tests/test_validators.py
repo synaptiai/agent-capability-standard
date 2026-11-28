@@ -208,22 +208,64 @@ def test_patch_application_handles_two_transforms_for_one_step() -> None:
 # ─── Profile Validator ───
 
 
-def test_example_catalog_matches_the_reference_catalog() -> None:
-    """examples/digital_twin_sync_loop copies its workflows verbatim from the
-    reference catalog; an edit to one must be made to both."""
+EXAMPLE_CATALOG = ROOT / "examples" / "digital_twin_sync_loop.workflow_catalog.yaml"
+REFERENCE_CATALOG = ROOT / "schemas" / "workflow_catalog.yaml"
+
+
+def test_example_catalog_invokes_the_reference_catalog(tmp_path: Path) -> None:
+    """examples/digital_twin_sync_loop reaches the reference digital twin
+    workflows by qualified invoke (STANDARD v1.2 §5.1.1) and copies none of
+    them: it validates under --strict with the reference catalog in its
+    catalog set, and each of its invokes resolves there."""
     import yaml
 
-    example = yaml.safe_load(
-        (ROOT / "examples" / "digital_twin_sync_loop.workflow_catalog.yaml").read_text()
+    example = yaml.safe_load(EXAMPLE_CATALOG.read_text())
+    reference = yaml.safe_load(REFERENCE_CATALOG.read_text())
+    assert reference["catalog"]["id"] == "acs.reference"
+    assert set(example) & (set(reference) - {"catalog"}) == set()
+    targets = sorted(
+        {
+            step["workflow_id"]
+            for name, workflow in example.items()
+            if name != "catalog"
+            for step in workflow["steps"]
+            if step["capability"] == "invoke"
+        }
     )
-    reference = yaml.safe_load((ROOT / "schemas" / "workflow_catalog.yaml").read_text())
-    assert set(example) == {
-        "world_model_build",
-        "digital_twin_sync_loop",
-        "digital_twin_bootstrap",
-    }
-    for name, workflow in example.items():
-        assert workflow == reference[name], name
+    assert targets == [
+        "acs.reference/digital_twin_sync_loop",
+        "acs.reference/world_model_build",
+    ]
+    out = ["--suggestions-out", str(tmp_path / "suggestions.json")]
+    in_set = ["--with-catalog", str(REFERENCE_CATALOG)]
+
+    result = run_validator(
+        "validate_workflows.py",
+        ["--catalog", str(EXAMPLE_CATALOG), *in_set, "--strict", *out],
+    )
+    assert result.returncode == 0, f"Failed: {result.stdout}\n{result.stderr}"
+    assert "W607" not in result.stdout
+
+    # Alone, the reference catalog is not in the set: each invoke is W607.
+    alone = run_validator(
+        "validate_workflows.py", ["--catalog", str(EXAMPLE_CATALOG), "--strict", *out]
+    )
+    assert alone.returncode != 0
+    assert alone.stdout.count("W607") == 3, alone.stdout
+
+    # In the set, a name the reference catalog does not have is V107: the
+    # qualified ids are resolved there, not passed over.
+    broken = tmp_path / "broken.workflow_catalog.yaml"
+    broken.write_text(
+        EXAMPLE_CATALOG.read_text().replace(
+            "acs.reference/world_model_build", "acs.reference/no_such_workflow"
+        )
+    )
+    missing = run_validator(
+        "validate_workflows.py", ["--catalog", str(broken), *in_set, "--strict", *out]
+    )
+    assert missing.returncode != 0
+    assert "V107" in missing.stdout, missing.stdout
 
 
 def fixture_set(fixtures: Path, meta: dict[str, Any]) -> dict[str, Any]:

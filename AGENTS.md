@@ -26,7 +26,7 @@ pip install -e ".[dev]" -c constraints.txt   # builds the Rust core; needs rustc
 
 ```bash
 python tools/validate_workflows.py --strict
-for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --strict; done
+for c in schemas/workflows/*.yaml examples/*.workflow_catalog.yaml; do python tools/validate_workflows.py --catalog "$c" --with-catalog schemas/workflow_catalog.yaml --strict; done
 python tools/validate_profiles.py
 python tools/validate_skill_refs.py
 python tools/validate_ontology.py

@@ -128,7 +128,8 @@ describe('workflows', () => {
     catalogs.domain.forEach((src, i) => {
       expect(w.domain.filter((x) => x.source === src).map((x) => x.id)).toEqual(domainIdsByFile[i]);
     });
-    // examples/digital_twin_sync_loop.workflow_catalog.yaml repeats this id.
+    // examples/digital_twin_sync_loop.workflow_catalog.yaml invokes this
+    // workflow by its qualified id; the site reads only the core catalog's.
     expect(w.byId.get('digital_twin_sync_loop')!.source).toBe('schemas/workflow_catalog.yaml');
     expect(w.all.some((x) => x.source.startsWith('examples/'))).toBe(false);
   });
