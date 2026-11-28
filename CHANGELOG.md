@@ -571,6 +571,22 @@ here and marked so.
   quoted `Authorization:` header line's colon are read whole (40 KB of them
   with no closing quote took 67 s in Python). Redaction is broader: a word
   after `Cookie:` in prose is replaced to the end of its line.
+- Python SDK and TypeScript package, where a token starts and signed URLs
+  (§6.7). Redaction is broader: a prefix-shaped token (AWS key id, GitHub,
+  Slack, `sk-`, Stripe, Google, GitLab, npm, Vault and SendGrid tokens,
+  JWTs) is replaced wherever the character before it is not an ASCII letter
+  or digit, after `_` too, so an MCP tool named `mcp__srv__ghp_...` is
+  recorded as `mcp__srv__[REDACTED]` in the adapter's call records, audit
+  records and diagnostics and in the binding's trace (it was kept); and a
+  signed URL's signature (`X-Amz-Signature`, `X-Goog-Signature`, `sig`,
+  `Signature` as a query parameter, percent-encoded or JSON-escaped) is
+  replaced, so an `IdempotencyLog` file, an evidence store and a trace
+  written now keep none. The refusal rule (`holds_credential`,
+  `holdsCredential`) refuses `persist` and `audit` data holding a signed
+  URL's signature (F504), and reads `sk-` only where a token starts, so
+  text such as `feature/task-12345-update-readme-file` is no longer
+  refused; the longer prefixes are refused as before, glued after a letter
+  or digit too. The plugin's shell scan is unchanged.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
@@ -798,8 +814,9 @@ here and marked so.
   rewritten to match: it lists an anchor's redacted `ref` when it listed the
   anchor's own, and when two anchors are one after redaction it lists
   neither unless it listed both (fail closed). A signed URL's signature
-  (`sig=`, `X-Amz-Signature=`) is not a default pattern: add a pattern
-  (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) where a host cites them.
+  (the `X-Amz-Signature`, `X-Goog-Signature`, `sig` or `Signature` query
+  parameter) is a default pattern; a host that cites URLs signed another
+  way adds a pattern (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`).
 
 **Across components (validator, executor, Python SDK, binding).**
 
@@ -1757,7 +1774,19 @@ here and marked so.
   those policies forbid is now refused (F504) and an output they refuse
   fails (F505, F504). Another call of the tool made while the invocation is
   pending (a parallel call, an endpoint's), which the binding cannot tell
-  from it, is held to them too.
+  from it, is held to them too. Security round 6: the profiles given to a
+  composite and to the composites enclosing it (and the layer's) also raise
+  the flags and person requirement of every nested call, plain or grounded,
+  at any depth, for what it performs and for what its own nested calls
+  perform, whether or not it takes the invocation's token. A raised
+  approval is covered only by the composite's decisions that still meet it
+  when the nested call runs, so a nested call made after the composite's
+  approval lapsed is refused (F502), and a raised checkpoint only when the
+  composite's call used one (F501 otherwise). A nested composite that takes
+  no token asks its own approval (a person's where the profiles require
+  one) and uses its own checkpoint, and those then cover its nested calls.
+  The trace entries of a call that only the enclosing profiles require a
+  person for carry `person_required`, its R407 entries included.
 - Standard Agents binding, composites and plain tools (Standard 1.2.0
   §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
   `defineTool` runs only under a name the new `registerTools` (in
@@ -1834,6 +1863,25 @@ here and marked so.
   approver decides on, which the approvals endpoint still shows); and so is
   every result a composite's state returns that is not a success, a nested
   plain tool's own error included, and a control tool's own error result.
+  Security round 6: an error a control tool's code throws is now returned
+  as an error result, redacted the same way, instead of reaching the
+  runtime as thrown; the control tool's entry is still `executed`.
+- TypeScript package and Standard Agents binding: `checkBindings` and the
+  lint read tool names as own members only (security round 6), so a tool
+  offered or tied to a host action under a name a plain object holds on
+  its prototype (`constructor`, `toString`, `hasOwnProperty`, `__proto__`)
+  whose record did not load is reported W617 or F506, and `groundedTool`
+  refuses a composite listing it with V107, where the check threw; a
+  binding record whose `tool` is `__proto__` is returned among the
+  bindings.
+- Standard Agents binding, audit hook (Standard 1.2.0 §6.4): an entry
+  written by a nested call, or by a call made while a composite's
+  invocation of the tool is pending, waits for a tool call id only while
+  the composite's own entry waits (security round 6). In a runtime that
+  fires no `tool_call_done` for `state.invokeTool`, the hook of the model's
+  own later call of the same tool now links its own entry, not the nested
+  one. This relies on the calls of a step running one after another, with
+  each hook before the next call.
 
 **Interoperability data.**
 
@@ -2250,6 +2298,11 @@ here and marked so.
   is checked against its examples, and names every white space and control
   character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
   so it means the same in every regular expression dialect.
+- Entity merge and split checks (§7.3 for Standard 1.3.0, as the Draft
+  RFC-0012 proposes it): `grounded_agency.entities.check_merge`,
+  `check_split` and `class_index`, held to the proposed vectors
+  `tests/conformance/entities/merge.json`. No reference layer merges or
+  splits entities, so nothing calls them yet.
 - Cited versions (§11.6): `grounded_agency.versions.check_cited` and
   `CitedVersionError`; the OASF adapter refuses a mapping that cites
   another ontology major or an unsupported Standard.
@@ -2527,8 +2580,17 @@ here and marked so.
   `tools/verify_audit_log.py --witness` also takes a directory and checks
   every `.head` file in it, naming the witness each failure rests on
   (`spec/SECURITY.md` §5.5).
+- `docs/guides/ADOPTION.md`: one staged adoption path for Standard 1.2.
+  Each stage names its component, the level or class that component can
+  claim, and a check to run; the guide also gives a starting point for each
+  domain profile. The FAQ, GROUNDED_AGENCY D.3 and the WHITEPAPER's
+  adoption recommendation point at it, and their L2/L3 team milestones are
+  removed.
 
 ### Changed
+- `spec/SECURITY.md` §1.4 and §2.2.2: the identity merge constraints of
+  Standard §7.3 are a requirement on hosts that merge or split entities;
+  the reference layers perform no merge and do not enforce them.
 - Plugin hooks: the pre-tool-use hook relaxes a Bash call (a read-only
   command, `git stash create`, a restore of a recorded checkpoint) only
   under Claude Code's strict sandbox, which it verifies for the call from
@@ -2686,6 +2748,8 @@ here and marked so.
   accepted more than `expires_ms` after the request, and one stored later
   counts for nothing; a rejection is still accepted until the request is used
   or expires.
+- README: the Python package is not on PyPI. Install it from a clone of the
+  repository, which needs Python >= 3.14 and Rust >= 1.88.
 
 ## [v2.0.0] — 2026-10-29
 

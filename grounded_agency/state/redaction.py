@@ -68,7 +68,16 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys, JWTs, and
   service tokens by their prefix: Stripe's ``sk_live_`` and ``rk_live_``
   (and ``_test_``), Google's ``AIza``, GitLab's ``glpat-``, npm's ``npm_``,
-  Vault's ``hvs.``, SendGrid's ``SG.``, and a Slack webhook's path;
+  Vault's ``hvs.``, SendGrid's ``SG.``, and a Slack webhook's path; each
+  of these tokens starts where the character before it is not an ASCII
+  letter or digit, so a token after ``_`` (``mcp__srv__ghp_...``, an MCP
+  tool's name) is replaced and the prefix kept, and one glued after a
+  letter or digit (``xghp_...``) is not;
+- a signed URL's signature: the value, of 16 or more characters, of an
+  ``X-Amz-Signature`` (S3 SigV4), ``X-Goog-Signature`` (Cloud Storage),
+  ``sig`` (Azure SAS) or ``Signature`` (S3 SigV2, CloudFront) query
+  parameter, after ``?`` or ``&`` (as themselves, percent-encoded or as
+  their JSON escapes), so prose such as ``signature=`` is kept;
 - a header or credential given as a name/value pair or a ``[name, value]``
   tuple in JSON or code text (``"name": "Authorization", "value": "Basic
   ..."``, ``('Cookie', 'sid=...')``), its quotes escaped or not: its value,
@@ -117,7 +126,10 @@ project knowledge (``token: rotate monthly``) would cost much.
 credential-shaped values: a registered value (in a string, a member name
 or a number's JSON text), the key and token formats above (PEM and OpenPGP
 private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer token of 20
-or more characters), the password of a URL's userinfo unless it is a
+or more characters; the longer prefixes anywhere, glued after a letter or
+digit too, and ``sk-`` only where a token starts, since its two letters end
+words such as ``task`` and ``risk``), a signed URL's signature as above,
+the password of a URL's userinfo unless it is a
 placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``, ``****``),
 an ``Authorization`` or ``Proxy-Authorization`` header's value of 8 or more
 token characters mixing letters and digits, with no scheme or after any
@@ -136,8 +148,9 @@ a text with the JSON escapes other encoders write for the characters it
 reads decoded (:data:`_ESCAPED`: a quote's, ``&``'s, ``<``'s, ``>``'s,
 ``=``'s and ``+``'s ``\\u00XX``, and ``\\/``), so its rules read that text
 as they read Python's JSON.
-The plugin's ``hooks/secret_scan.sh`` applies the same rule to text, and
-``tests/conformance/secrets/credentials.json`` pins it for the three. In
+The plugin's ``hooks/secret_scan.sh`` applies the same rule to text,
+except that it reads ``sk-`` anywhere and reads no signed URL's signature,
+and ``tests/conformance/secrets/credentials.json`` pins it for the three. In
 JSON data, which is not prose, it also recognises what redaction does in a
 secret member (above), unless the string is a placeholder: data holding a
 secret the host recognises is refused (§6.7), so ``{"password": "correct
@@ -362,9 +375,25 @@ def _quoted_forms(
     )
 
 
-# Where a token starts: a word boundary (`\b` before a word character), or
-# after a quote's JSON escape.
-_WORD = _after("A-Za-z0-9_")
+# Where a prefix-shaped token starts: after a character that is not an ASCII
+# letter or digit (so after `_`, `-`, `.`, `/`, `:` or a quote: a token in
+# an MCP tool's name, `mcp__srv__ghp_...`, is read), or after a quote's JSON
+# escape. A token glued after a letter or digit (`xghp_...`) is not read
+# here; the refusal rule (_CREDENTIAL_SHAPES) still refuses it.
+_WORD = _after("A-Za-z0-9")
+# A signed URL's signature: the value of an `X-Amz-Signature` (S3 SigV4),
+# `X-Goog-Signature` (Cloud Storage), `sig` (Azure SAS) or `Signature` (S3
+# SigV2, CloudFront) query parameter, read only after `?` or `&` (as
+# themselves, percent-encoded or as their JSON escapes), so prose such as
+# `signature=` is not read. The value is 16 or more characters, a `/` in
+# it written as itself or as its JSON escape `\/`; it stops at `&` and `?`
+# in any of those forms, so no run is read again from each of its
+# positions.
+_SIGNED_URL_PARAMETER = (
+    r"(?:[?&]|%3F|%26|\\u00(?:3F|26))"
+    r"(?:x-amz-signature|x-goog-signature|sig|signature)(?:=|%3D|\\u003D)"
+)
+_SIGNATURE_VALUE = r"(?:[A-Za-z0-9._~+/=-]|\\/|%(?!26|3F)[0-9A-F]{2}){16,}"
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     # PEM private key blocks and OpenPGP private key blocks (`PRIVATE KEY
@@ -489,8 +518,11 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"{_CREDENTIAL_OPTION}(?P<secret>{_value_char()}{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
-    # AWS access key ids.
-    re.compile(rf"{_WORD}(?P<secret>(?:AKIA|ASIA)[A-Z0-9]{{16}})\b", re.ASCII),
+    # AWS access key ids, which end where no ASCII letter or digit follows
+    # (`_` may follow, as in `mcp__<key id>__<tool>`).
+    re.compile(
+        rf"{_WORD}(?P<secret>(?:AKIA|ASIA)[A-Z0-9]{{16}})(?![A-Za-z0-9])", re.ASCII
+    ),
     # GitHub tokens.
     re.compile(
         rf"{_WORD}(?P<secret>gh[pousr]_[A-Za-z0-9]{{36,}}|github_pat_[A-Za-z0-9_]{{22,}})",
@@ -509,6 +541,11 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,})",
         re.ASCII,
     ),
+    # A signed URL's signature.
+    re.compile(
+        rf"{_SIGNED_URL_PARAMETER}(?P<secret>{_SIGNATURE_VALUE})",
+        re.ASCII | re.IGNORECASE,
+    ),
     # ... and a Slack webhook's path.
     re.compile(
         r"hooks\.slack\.com/services/(?P<secret>T[A-Za-z0-9]+/B[A-Za-z0-9]+/"
@@ -516,11 +553,12 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.ASCII,
     ),
     # JWTs: three base64url parts, the first a JSON object's encoding,
-    # starting at a word boundary. Read from the start of a run of base64url
-    # characters to its first `eyJ` at a word boundary (the run's start or
-    # after `-`), so a run is read once, not again from each `eyJ` in it.
+    # starting where a prefix-shaped token starts (_WORD). Read from the
+    # start of a run of base64url characters to its first `eyJ` at a token
+    # start (the run's start or after `_` or `-`), so a run is read once,
+    # not again from each `eyJ` in it.
     re.compile(
-        rf"{_after('A-Za-z0-9_-')}(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?"
+        rf"{_after('A-Za-z0-9_-')}(?:(?!eyJ)(?:[A-Za-z0-9]|[_-](?!eyJ))*[_-])?"
         r"(?P<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
         re.ASCII,
     ),
@@ -531,14 +569,18 @@ in proportion to its length: no run of characters is read again from each of
 its positions (tests/test_redaction.py times them on 1 MB)."""
 
 # Credential shapes a refusal relies on (holds_credential): the formats of
-# keys and tokens, no prose. hooks/secret_scan.sh holds the same ones.
+# keys and tokens, no prose. hooks/secret_scan.sh holds the same ones, but
+# for `sk-`, which it reads anywhere, and signed URLs, which it does not read.
 _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----", re.ASCII),
     re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}", re.ASCII),
     re.compile(r"gh[pousr]_[A-Za-z0-9]{36}", re.ASCII),
     re.compile(r"github_pat_[A-Za-z0-9_]{22,}", re.ASCII),
     re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}", re.ASCII),
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}", re.ASCII),
+    # `sk-` only where a token starts (not after an ASCII letter or digit):
+    # its two letters end common words (`task-...`, `risk-...`, `disk-...`).
+    # The longer prefixes above and below are read anywhere.
+    re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}", re.ASCII),
     re.compile(rf"[Bb]earer{_WS}+[A-Za-z0-9._~+/=-]{{20,}}", re.ASCII),
     # Read from the start of a run to its first `eyJ` (whose first part is
     # the longest), so a run is read once.
@@ -556,6 +598,8 @@ _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
         r"|hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]{16,}",
         re.ASCII,
     ),
+    # A signed URL's signature.
+    re.compile(rf"{_SIGNED_URL_PARAMETER}{_SIGNATURE_VALUE}", re.ASCII | re.IGNORECASE),
 )
 # A quoted value with no whitespace, 8 or more characters (its quotes
 # escaped or not), after an assignment or a credential option.

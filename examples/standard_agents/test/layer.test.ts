@@ -321,7 +321,15 @@ describe("a grounded tool's secrets reach every entry (security round 1, batch 8
 // security round 4, batch 5).
 describe('a tool name that holds a secret (security round 4, batch 5)', () => {
   const REGISTERED = 'hk_live_9f8e7d6c5b4a39281706';
-  const PATTERNED = ['ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789', 'AKIAIOSFODNN7EXAMPLE'];
+  const PATTERNED = [
+    'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789',
+    'AKIAIOSFODNN7EXAMPLE',
+    // Unregistered tokens glued after `_`, as in an MCP tool's name: a token
+    // starts after any character that is not an ASCII letter or digit.
+    'mcp__srv__ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789',
+    'mcp__srv__AKIAIOSFODNN7EXAMPLE',
+    'mcp__AKIAIOSFODNN7EXAMPLE__list',
+  ];
   const call = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
   const stored = (t: MemoryThread) => [...t.values.values()].join('\n');
 

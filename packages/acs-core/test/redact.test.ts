@@ -206,6 +206,30 @@ describe('reading a long text (security round 1, batch 5)', () => {
     'a:\\/\\/b:',
     'token\\u003d',
     '\\/',
+    // Prefix-shaped tokens start after `_` and `-` as well (not after an
+    // ASCII letter or digit), and a JWT's run is read to its first `eyJ`
+    // after `_` or `-`; a signed URL's signature is read after `?` or `&`
+    // in any of their forms, and its value stops at each.
+    '_eyJ',
+    'a_eyJ',
+    '_eyJ-',
+    'eyJ_',
+    '_ghp_',
+    '_github_pat_',
+    '_sk-',
+    '-sk-a',
+    '_xoxb-',
+    '_AKIA',
+    '_glpat-',
+    '_SG.a',
+    '&sig=',
+    '?sig=a',
+    '&sig=a%3F',
+    '?Signature=a%26',
+    '?Signature=\\/',
+    '&X-Amz-Signature=',
+    '%3FX-Goog-Signature%3D',
+    '\\u0026sig\\u003da',
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);
