@@ -36,7 +36,7 @@ fi
 marker="${claude_dir}/checkpoint.ok"
 ended_dir="${claude_dir}/checkpoints/ended"
 if [ -f "$marker" ] && [ ! -L "$marker" ]; then
-  mkdir -p "$ended_dir" 2>/dev/null || true
+  (umask 077 && mkdir -p "$ended_dir") 2>/dev/null || true
   if ended=$(mktemp "${ended_dir}/turn-ended.XXXXXX" 2>/dev/null) && mv -f "$marker" "$ended" 2>/dev/null; then
     exit 0
   fi
