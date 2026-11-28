@@ -1923,7 +1923,7 @@ class TestPersistCommandHook:
             return edit, write
 
         # BSD grep (macOS) reads about ten times slower than GNU grep, and a
-        # busy runner took over 30 s for the 32 000 lines there
+        # busy runner took over 30 s for the 64 000 lines there
         limit = 30 if GNU_GREP else 300
 
         def seconds_of(call: dict[str, Any]) -> float:
