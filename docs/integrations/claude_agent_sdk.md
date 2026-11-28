@@ -488,7 +488,7 @@ A hook's reason and a permission result's message are text, and they are the onl
 | Rate limit | `deny` | `F504 CONSTRAINT_VIOLATED:` | Yes |
 | A failure of the layer itself, a gated call with no `tool_use_id`, an MCP tool reached without a decision | `deny` or the tool's error | `R407 SAFETY_CHECK_FAILED:` | Partial: a failed rate check and an MCP tool with `require_layer` still refuse |
 
-`strict_mode=False` is outside class SL. The configuration refuses it with `ValueError` unless `acknowledge_unenforced_checks=True` is passed too, and the adapter logs a warning when it starts in that mode.
+`strict_mode=False` is outside class SL. The configuration refuses it with `ValueError` unless `acknowledge_unenforced_checks=True` is passed too, and the adapter logs a warning when it starts in that mode. Set on a built adapter's `config` without the acknowledgement, it is not in force: every check stays enforced.
 
 ## Approval
 
@@ -1098,12 +1098,11 @@ If the reason says the tool `has no capability mapping`, the tool is unbound and
 The call's mapping requires approval. If every such call is denied with `no one can give it`, the options passed to `wrap_options()`, `grounded_query()` or `GroundedClient` have no `can_use_tool` callback.
 
 ```python
-# Solution 1: Pass a callback that decides (see Quick Start)
+# Pass a callback that decides (see Quick Start)
 options = ClaudeAgentOptions(can_use_tool=decide)
-
-# Solution 2: Switch the approval rule off
-adapter = GroundedAgentAdapter(GroundedAgentConfig(approval="off"))
 ```
+
+`approval="off"` leaves every approval to Claude Code's permission rules and is outside class SL ([Approval](#approval)).
 
 ### A Registered Tool Is Stricter Than Declared
 

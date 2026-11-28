@@ -391,7 +391,7 @@ class GroundedAgentConfig:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `ontology_path` | `str` | Auto-detected | Path to `capability_ontology.yaml`. Uses a three-level fallback resolution strategy (see below). |
-| `strict_mode` | `bool` | `True` | When `True`, mutations without a valid checkpoint are blocked with `PermissionResultDeny`. When `False`, a warning is logged but the operation proceeds. |
+| `strict_mode` | `bool` | `True` | When `True`, mutations without a valid checkpoint are blocked with `PermissionResultDeny`. When `False`, a warning is logged but the operation proceeds; `False` needs `acknowledge_unenforced_checks=True` (outside class SL). |
 | `audit_log_path` | `str` | `".claude/audit.log"` | File path for audit log entries. The directory is created automatically by the audit hook. |
 | `checkpoint_dir` | `str` | `".checkpoints"` | Directory for storing checkpoint state files. |
 | `expiry_minutes` | `int` | `30` | Default time-to-live for checkpoints in minutes. After expiry, a checkpoint is no longer valid and a new one must be created before mutations. |
@@ -419,7 +419,6 @@ The resolved path is cached at module level (`_DEFAULT_ONTOLOGY_PATH`) so subseq
 ```python
 config = GroundedAgentConfig(
     ontology_path="/absolute/path/to/capability_ontology.yaml",
-    strict_mode=False,
     expiry_minutes=60,
 )
 adapter = GroundedAgentAdapter(config)

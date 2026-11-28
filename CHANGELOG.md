@@ -117,9 +117,11 @@ that works with v2.0.0, each linked to its entry under Upgrading.
 - <a id="upgrade-strict-mode"></a>Python SDK, `GroundedAgentConfig` (Changed): `strict_mode=False` raises
   `ValueError` unless `acknowledge_unenforced_checks=True` is passed with
   it, also through `dataclasses.replace` and when the adapter is built from
-  a configuration changed after it was made. The mode lets a call run
-  without the checkpoint, prerequisite and internal checks it fails, which
-  is outside class SL; the adapter logs a warning when it starts in it.
+  a configuration changed after it was made. Set on a built adapter
+  without the acknowledgement, it is not in force: the checks stay
+  enforced. The mode lets a call run without the checkpoint, prerequisite
+  and internal checks it fails, which is outside class SL; the adapter logs
+  a warning when it starts in it.
 - Python SDK, the Bash classifier (security round 5): a command the
   read-only list would let pass, `git stash create` and a recorded restore
   take the worst case where the program the shell finds for the first word
@@ -2842,8 +2844,9 @@ that works with v2.0.0, each linked to its entry under Upgrading.
   calls reach the permission callback (the SDK warned that it was shadowed).
 - `GroundedAgentConfig(strict_mode=False)`, outside class SL, raises
   `ValueError` unless `acknowledge_unenforced_checks=True` is passed with
-  it, and the adapter logs a warning when it starts in that mode. The SDK
-  guide no longer suggests it for F501.
+  it, and the adapter logs a warning when it starts in that mode; set on a
+  built adapter without the acknowledgement, it is not in force. The SDK
+  guide no longer suggests it for F501, nor `approval="off"` for F502.
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
 - Direct dependencies are at their latest releases. Python: the dev ranges are
