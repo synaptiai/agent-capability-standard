@@ -99,10 +99,11 @@ function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
  * - A tool whose capability `requires` another, or needs a checkpoint, when
  *   the prompt offers no tool of that capability, is V102 (error): the model
  *   could never get the call accepted. A host that takes checkpoints itself
- *   (`hostTakesCheckpoints`), or an offered tool whose binding names a
- *   `classifier`, counts as performing it. A shell-like tool performs only
- *   its worst case where no operating-system boundary is declared for it
- *   (§5.18.2); the binding covers none, and this lint cannot tell one.
+ *   (`hostTakesCheckpoints`) counts as performing `checkpoint`. A tool whose
+ *   binding names a `classifier` performs only its own capability: this
+ *   binding applies no classifier and gives such a tool its worst case, as
+ *   §5.18.2 states for a shell-like tool with no declared operating-system
+ *   boundary, so it is passed to the check as such a tool.
  *
  * A tool defined here is checked with the flags it computed, those its
  * domain profiles and the layer's raise included (§5.21.3), which its
@@ -114,11 +115,14 @@ export function lintPromptTools(
   options: { hostTakesCheckpoints?: boolean } = {},
 ): LintDiagnostic[] {
   const { records, offered, raised } = recordsOf(tools);
+  // No classifier is applied: every offered tool performs only its worst case.
+  const shellTools = Object.fromEntries(Object.keys(offered).map((name) => [name, 'none' as const]));
   const { diagnostics } = checkBindings(records, {
     offered,
     raised,
     hostActions: [],
     hostTakesCheckpoints: options.hostTakesCheckpoints ?? false,
+    shellTools,
   });
   return diagnostics
     .filter((d): d is BindingDiagnostic & { code: 'V102' | 'W617' | 'V111' } => ['V102', 'W617', 'V111'].includes(d.code))

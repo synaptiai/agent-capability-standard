@@ -889,7 +889,7 @@ offers:
 |---|---|
 | W617 UNBOUND_TOOL (warning) | A tool has no `ai.synapti/acs` annotation. Its calls are the strictest case |
 | V111 TOOL_NAME_MISMATCH (error) | A tool states another name than the one the prompt offers it under. An approver would be shown, and the trace would record, another tool's name |
-| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability. A shell-like tool performs only its worst case where no operating-system boundary is declared for it (§5.18.2, §5.18.3); the binding covers none and the lint cannot tell one, so give no shell-like tool a `classifier` |
+| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`. The binding applies no classifier, so an offered tool whose binding names a `classifier` performs only its own capability, its worst case, as a shell-like tool with no declared operating-system boundary does (§5.18.2, §5.18.3); `checkBindings` takes such tools as `shellTools` |
 | F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval, those the applied profiles require included |
 
 A tool defined with `groundedTool` is checked with the flags it computed,
@@ -948,7 +948,7 @@ call's, against its capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 36 binding fixtures in the package's `test/bindings.test.ts`, and the 32
+the 37 binding fixtures in the package's `test/bindings.test.ts`, and the 32
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call

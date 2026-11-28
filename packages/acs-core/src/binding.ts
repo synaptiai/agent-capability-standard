@@ -543,6 +543,14 @@ export interface CheckBindingsOptions {
   hostActions?: readonly { action: string; tool: string }[];
   /** The host takes checkpoints itself, so `checkpoint` counts as performed. */
   hostTakesCheckpoints?: boolean;
+  /**
+   * The layer's shell-like tools, as its conformance statement's
+   * `shell_tools` names them: `none` (no operating-system boundary declared)
+   * or `declared`. A shell-like tool with `none` performs only its worst case
+   * (§5.18.3), so its `classifier` does not count it as able to perform any
+   * capability.
+   */
+  shellTools?: Readonly<Record<string, 'none' | 'declared'>>;
   /** Bindings loaded earlier, which an `invokes` name may resolve to. */
   known?: Record<string, BoundTool>;
   /**
@@ -725,7 +733,8 @@ function checkOffered(
     const tool = bound(name);
     if (!tool || tool.control) continue;
     for (const capability of tool.capabilities) performable.add(capability);
-    if (tool.classifier !== undefined) anyCapability = true;
+    const shell = options.shellTools !== undefined && Object.hasOwn(options.shellTools, name) ? options.shellTools[name] : undefined;
+    if (tool.classifier !== undefined && shell !== 'none') anyCapability = true;
   }
   if (options.hostTakesCheckpoints) performable.add('checkpoint');
 

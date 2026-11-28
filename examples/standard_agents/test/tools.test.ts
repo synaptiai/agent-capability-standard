@@ -171,15 +171,17 @@ describe('failure of the layer', () => {
 describe('the offered-tool checks', () => {
   const tools = { checkpoint_config: checkpointConfig, write_config: writeConfig };
 
-  it('count a host that takes checkpoints, or a classified tool, as performing checkpoint', () => {
+  it('count a host that takes checkpoints as performing checkpoint, and a classified tool only as its own capability', () => {
     const { checkpoint_config: _cp, ...withoutCheckpoint } = tools;
     expect(lintPromptTools('p', withoutCheckpoint).map((d) => d.code)).toEqual(['V102']);
     expect(lintPromptTools('p', withoutCheckpoint, { hostTakesCheckpoints: true })).toEqual([]);
-    // Not a shell-like tool: under §5.18.2 a shell-like tool with no
-    // declared operating-system boundary performs only its worst case, and
-    // the binding covers none (its statement's `shell_tools` is `{}`).
+    // The binding applies no classifier: a classified tool gets its worst
+    // case and takes no checkpoint, whether or not it is shell-like.
     const batch = { annotations: { 'ai.synapti/acs': { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', classifier: 'batch' } } };
-    expect(lintPromptTools('p', { ...withoutCheckpoint, batch })).toEqual([]);
+    expect(lintPromptTools('p', { ...withoutCheckpoint, batch }).map((d) => [d.code, d.location.tool])).toEqual([
+      ['V102', 'write_config'],
+      ['V102', 'batch'],
+    ]);
   });
 
   it('report an unbound tool as W617 and keep KEYS intact', () => {

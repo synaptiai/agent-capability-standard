@@ -187,7 +187,7 @@ In strict mode such a tool is refused until a checkpoint exists, then put to the
 adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve")
 ```
 
-A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
+A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. An offered tool with a `classifier` counts as able to perform any capability, except a shell-like tool whose statement declares no operating-system boundary, which performs only its worst case ([§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools)): pass the statement's `shell_tools` as `shell_tools` (the adapter's names Bash `"declared"` and Monitor, PowerShell, Skill, Agent and Task `"none"`), and give no other shell-like tool a `classifier`. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
 
 ### The Sandbox
 
@@ -1315,7 +1315,8 @@ class ToolCapabilityMapper:
 def load_bindings(records, nodes, requires, ontology_version, known=None
                   ) -> tuple[dict[str, ToolMapping], list[ValidationError]]: ...
 def check_offered(offered: Mapping[str, str | None], mappings, host_actions=(),
-                  *, host_takes_checkpoints: bool = False) -> list[ValidationError]: ...
+                  *, host_takes_checkpoints: bool = False,
+                  shell_tools: Mapping[str, str] | None = None) -> list[ValidationError]: ...
 ```
 
 ### CheckpointTracker
